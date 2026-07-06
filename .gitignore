@@ -1,0 +1,57 @@
+﻿## Ignore Visual Studio Temporary Files, Builds, and Metadata
+## See https://raw.githubusercontent.com/github/gitignore/main/VisualStudio.gitignore
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio 2015/2017/2019/2022 cache/options directory
+.vs/
+
+# Roslyn cache directory
+.txt/
+
+# NuGet Packages
+*.nupkg
+# The packages folder can be ignored because of Package Restore
+**/packages/*
+# except build/, which is used by MSBuild templates.
+!**/packages/build/
+# Uncomment if using NuGet SignTool
+# !**/packages/SignTool/
+# Unused package folders
+globalPackages/
+
+# NUnit/xUnit temporary files
+TestResult.xml
+nunit-agent.log
+nunit-server-log.txt
+NUnit3.Profiler.ini
+
+# App Settings
+src/DocumentRagSystem.WebApi/appsettings.local.json
+src/DocumentRagSystem.Worker/appsettings.local.json
+
+# Local Uploads and Temp Folders
+**/uploads/*
+!**/uploads/.gitkeep
+**/TestData/*.pdf
+!**/TestData/sample.pdf

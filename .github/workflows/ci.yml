@@ -1,0 +1,36 @@
+﻿name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (.NET 10)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore DocumentRagSystem.sln
+
+      - name: Build Solution (Release)
+        run: dotnet build DocumentRagSystem.sln -c Release --no-restore
+
+      - name: Run Unit Tests
+        run: dotnet test tests/UnitTests/DocumentRagSystem.UnitTests.csproj -c Release --no-build
+
+      - name: Run Integration Tests
+        run: dotnet test tests/IntegrationTests/DocumentRagSystem.IntegrationTests.csproj -c Release --no-build
+
+      - name: Run E2E Tests
+        run: dotnet test tests/E2ETests/DocumentRagSystem.E2ETests.csproj -c Release --no-build
