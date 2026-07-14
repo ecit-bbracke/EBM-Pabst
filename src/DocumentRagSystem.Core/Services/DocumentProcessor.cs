@@ -46,8 +46,10 @@ public class DocumentProcessor : IDocumentProcessor
             Directory.CreateDirectory(uploadsDir);
         }
 
-        var uniqueFileName = $"{Guid.NewGuid()}_{fileName}";
+        var safeFileName = Path.GetFileName(fileName);
+        var uniqueFileName = $"{Guid.NewGuid()}_{safeFileName}";
         var filePath = Path.Combine(uploadsDir, uniqueFileName);
+        var documentUrl = $"/uploads/{Uri.EscapeDataString(uniqueFileName)}";
 
         // Copy stream to file
         using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
@@ -58,7 +60,7 @@ public class DocumentProcessor : IDocumentProcessor
         var document = new Document(
             Id: documentId,
             FileName: fileName,
-            FilePath: filePath,
+            FilePath: documentUrl,
             UploadedAt: DateTime.UtcNow,
             Status: DocumentStatus.Processing
         );
@@ -85,8 +87,14 @@ public class DocumentProcessor : IDocumentProcessor
             {
                 foreach (var chunk in chunks)
                 {
+                    var chunkWithDocumentMetadata = chunk with
+                    {
+                        FileName = document.FileName,
+                        FilePath = document.FilePath,
+                        UploadedAt = document.UploadedAt
+                    };
                     var embedding = await _embeddingService.GenerateEmbeddingAsync(chunk.Text);
-                    await _vectorStore.AddChunkAsync(chunk, embedding);
+                    await _vectorStore.AddChunkAsync(chunkWithDocumentMetadata, embedding);
                 }
             }
 

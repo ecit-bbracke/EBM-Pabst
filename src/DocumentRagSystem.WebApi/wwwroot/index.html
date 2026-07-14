@@ -26,6 +26,39 @@
             }
         }
     </script>
+    <style>
+        /* Add structured styles to render HTML lists, bold, and headers beautifully because Tailwind resets them */
+        .html-content h1 { font-size: 1.5rem; font-weight: 700; margin-top: 1rem; margin-bottom: 0.5rem; color: #0f172a; }
+        .html-content h2 { font-size: 1.3rem; font-weight: 600; margin-top: 0.85rem; margin-bottom: 0.5rem; color: #1e293b; }
+        .html-content h3 { font-size: 1.15rem; font-weight: 600; margin-top: 0.75rem; margin-bottom: 0.4rem; color: #334155; }
+        .html-content p { margin-bottom: 0.75rem; }
+        .html-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        .html-content ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        .html-content li { margin-bottom: 0.25rem; }
+        .html-content strong { font-weight: 700; color: #0f172a; }
+        .html-content em { font-style: italic; }
+        .html-content code { background-color: #f1f5f9; padding: 0.125rem 0.25rem; rounded: 0.25rem; font-family: monospace; font-size: 0.875rem; }
+        .html-content table { width: 100%; border-collapse: collapse; margin-top: 1rem; margin-bottom: 1rem; font-size: 0.875rem; }
+        .html-content th { background-color: #f1f5f9; font-weight: 600; border: 1px solid #cbd5e1; padding: 0.5rem 0.75rem; text-align: left; }
+        .html-content td { border: 1px solid #cbd5e1; padding: 0.5rem 0.75rem; }
+        .html-content tr:nth-child(even) { background-color: #f8fafc; }
+        
+        /* Enable horizontal scroll on citations tables to prevent squeeze */
+        .citation-table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.375rem;
+        }
+        .citation-table-wrapper table {
+            min-width: 600px;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+        }
+    </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
@@ -50,25 +83,7 @@
         
         <!-- Venstre side: Indlæste dokumenter og statistikker -->
         <div class="space-y-6 lg:col-span-1">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-lg font-semibold text-slate-900 flex items-center">
-                        <i class="fa-solid fa-file-pdf text-brand-500 mr-2"></i>
-                        Indlæste dokumenter
-                    </h2>
-                    <button onclick="fetchDocuments()" class="text-slate-400 hover:text-brand-500 transition">
-                        <i id="refresh-docs-icon" class="fa-solid fa-arrows-rotate text-sm"></i>
-                    </button>
-                </div>
-                <div class="overflow-hidden">
-                    <div id="documents-list" class="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                        <!-- Indlæser tilstand -->
-                        <div class="text-center py-6 text-slate-400 text-sm">
-                            <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser dokumenter...
-                        </div>
-                    </div>
-                </div>
-            </div>
+            
 
             <div class="bg-brand-50 rounded-xl border border-brand-100 p-6">
                 <h3 class="text-brand-900 font-semibold mb-2 flex items-center">
@@ -124,7 +139,7 @@
                         </h3>
                         <span id="response-time" class="text-xs text-slate-400"></span>
                     </div>
-                    <div id="query-answer" class="text-slate-700 leading-relaxed whitespace-pre-line text-[15px]">
+                    <div id="query-answer" class="text-slate-700 html-content leading-relaxed text-[15px]">
                         <!-- Svar placeholder -->
                     </div>
                 </div>
@@ -156,6 +171,19 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchDocuments();
         });
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function isDocumentUrl(value) {
+            return typeof value === 'string' && (value.startsWith('/uploads/') || value.startsWith('http://') || value.startsWith('https://'));
+        }
 
         // Hent indlæste dokumenter fra API'et
         async function fetchDocuments() {
@@ -197,12 +225,19 @@
 
                         const date = new Date(doc.uploadedAt).toLocaleString();
 
+                        const fileName = escapeHtml(doc.fileName);
+                        const documentLink = isDocumentUrl(doc.filePath)
+                            ? `<a href="${escapeHtml(doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-700 hover:text-brand-800 hover:underline truncate text-sm flex-1" title="${fileName}">
+                                   ${fileName}
+                               </a>`
+                            : `<span class="font-medium text-slate-900 truncate text-sm flex-1" title="${fileName}">
+                                   ${fileName}
+                               </span>`;
+
                         listContainer.innerHTML += `
                             <div class="p-3 bg-slate-50 border border-slate-200/60 rounded-lg hover:border-slate-300 transition duration-150">
                                 <div class="flex justify-between items-start gap-2">
-                                    <span class="font-medium text-slate-900 truncate text-sm flex-1" title="${doc.fileName}">
-                                        ${doc.fileName}
-                                    </span>
+                                    ${documentLink}
                                     <span class="text-[10px] px-2 py-0.5 rounded font-semibold shrink-0 ${statusColor}">
                                         ${statusText}
                                     </span>
@@ -262,7 +297,7 @@
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
 
                 // Opdater svar
-                document.getElementById('query-answer').textContent = data.answer;
+                document.getElementById('query-answer').innerHTML = data.answer;
                 document.getElementById('response-time').textContent = `Genereret på ${duration} sekunder`;
 
                 // Opdater henvisninger
@@ -276,15 +311,31 @@
                         </div>`;
                 } else {
                     data.citations.forEach((cit, index) => {
+                        let displayDoc = cit.documentId;
+                        if (cit.chunkId && cit.chunkId.includes('_chunk_')) {
+                            displayDoc = cit.chunkId.split('_chunk_')[0];
+                        }
+                        const fileName = escapeHtml(cit.filename || displayDoc);
+                        const citationLink = isDocumentUrl(cit.filepath)
+                            ? `<a href="${escapeHtml(cit.filepath)}" target="_blank" rel="noopener noreferrer" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold">
+                                   ${fileName}
+                               </a>`
+                            : `<span class="font-semibold text-slate-700">${fileName}</span>`;
+
                         citationsList.innerHTML += `
-                            <div class="border border-slate-100 rounded-lg p-3 bg-slate-50 hover:bg-slate-100/50 transition">
-                                <div class="flex justify-between items-center mb-1 text-xs text-brand-600 font-semibold">
-                                    <span>#${index + 1}</span>
-                                    
+                            <div class="border border-slate-200 rounded-lg p-4 bg-slate-50/60 hover:bg-slate-100/50 transition">
+                                <div class="flex justify-between items-center mb-2 text-xs text-slate-500 font-medium">
+                                    <span class="text-brand-600 font-bold flex items-center">
+                                        <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${index + 1}
+                                    </span>
+                                    <span class="bg-slate-200/80 text-slate-700 px-2.5 py-0.5 rounded font-semibold text-[10px] tracking-wide">
+                                        Side: ${cit.index + 1} (Dokument-ID: ${displayDoc.substring(0, 8)}...)
+                                    </span>
                                 </div>
-                                <p class="text-slate-600 text-sm leading-relaxed italic bg-white border border-slate-200/40 p-2.5 rounded mt-2">
-                                    "${cit.text}"
-                                </p>
+                                <div class="text-sm text-slate-600 flex items-center gap-2">
+                                    <i class="fa-solid fa-file-pdf text-red-500"></i>
+                                    ${citationLink}
+                                </div>
                             </div>`;
                     });
                 }

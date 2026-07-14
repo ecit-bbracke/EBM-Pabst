@@ -21,5 +21,8 @@ public record DocumentChunk(
     string Id,
     string DocumentId,
     string Text,
-    int Index
+    int Index,
+    string? FileName = null,
+    string? FilePath = null,
+    DateTime? UploadedAt = null
 );

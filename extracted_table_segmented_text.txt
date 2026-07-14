@@ -1,0 +1,285 @@
+K3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+ebm-papst Mulfingen GmbH & Co. KG
+Bachmühle 2 · D-74673 Mulfingen
+Phone +49 7938 81-0
+Fax +49 7938 81-110
+info1@de.ebmpapst.com
+www.ebmpapst.com
+Kommanditselskab · Sæde Mulfingen
+Byret Stuttgart · HRA 590344
+Komplementær Elektrobau Mulfingen GmbH · Sæde Mulfingen
+Byret Stuttgart · HRB 590142
+Nominelle data
+Type K3G560-PC04-01
+Motor M3G150-NA
+Fase 3~
+
+| Nominel spænding | VAC | 400 |
+| --- | --- | --- |
+| Nom. spænd. område | VAC | 380 .. 480 |
+| Frekvens | Hz | 50/60 |
+
+Type af datafastlæggelse mb
+
+| Omdrejningstal | min -1 | 1760 |
+| --- | --- | --- |
+| Effektforbrug | W | 5000 |
+| Strømforbrug | A | 7,7 |
+| Min. omgivende temp. | °C | -25 |
+| Maks. omgivende temp. | °C | 50 |
+
+mb = Maks. belastning · mv = Maks. virkningsgrad · fb = Fritblæsende · ka = Kundens angivelse · ke = Kundeenhed
+Med forbehold for ændringer
+Data iht. forordningen om miljøvenligt design EU 327/2011 (EN 17166)
+Faktisk Stand.indst. 2015
+
+| 01 Samlet virkningsgrad η es | % | 70,2 | 58,9 | 09 Effektforbrug P ed | kW | 5,03 |  |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 02 Installationskategori |  | A |  | 09 Volumenstrøm q v | m³/h | 11760 |  |
+| 03 Effektivitetskategori |  | Statisk |  | 09 Trykøgning p fs | Pa | 1035 |  |
+| 04 Effektivitetsklasse N |  | 73,3 | 62 | 10 Omdrejningstal n | min -1 | 1770 |  |
+| 05 Regulering af omdrejningstal |  | Ja |  | 11 Specifikt forhold * |  | 1,01 |  |
+| Fastlæggelse af data med optimal virkningsgrad. |  |  |  | * Specifikt forhold = 1 + p fs / 100 000 Pa |  |  | LU-173565 |
+
+De viste effektivitetsværdier for at opnå overensstemmelse med om EU-forordningen om krav til miljøvenligt design af elmotordrevne ventilatorer nr. 327/2011 blev opnået med luftføringskomponenter (f.eks. indløbstragte).
+Målene oplyses af ebm-papst på forespørgsel. Hvis der på monteringssiden anvendes andre luftføringsgeometrier, mister vurderingen fra ebm-papst sin gyldighed hhv. overensstemmelsen skal bekræftes på ny.
+Produktet er ikke underlagt gyldighedsområdet for forordningen (EU) 2019/1781 på grund af undtagelsen nævnt i artikel 2, stk. 2, litra a) (motorer, der er fuldt integreret i et produkt).
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 1 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+Teknisk beskrivelse
+Vægt 64,8 kg
+Størrelse 560 mm
+Motorstørrelse 150
+Overflade rotor Sortlakeret
+Elektronikhusets materiale Trykstøbt aluminium
+Rotorens materiale Aluminiumplade
+Bærepladens materiale Pladestål, forzinket
+Bærebeslag-materiale Stål, sortlakeret
+Indløbsdysens materiale Pladestål, forzinket
+Skovlantal 5
+Omdrejningsretning Højre set mod rotor
+Kapslingsklasse IP55
+Isolationsklasse "F"
+Fugtigheds- (F) / miljøklasse (H) H1
+Till. omgivende temp. Motor +80 °C
+maks. (transport/opbevaring)
+Till. omgivende temp. Motor min. -40 °C
+(transport/opbevaring)
+Monteringsposition Se oversigten i produkt tegningen
+Kondensvandshuller Rotorsiden
+Driftstype S1
+Lejer i motor Kugleleje
+Teknisk udstyr -Udgang 10 VDC, maks. 10 mA
+-Udgang 20 VDC, maks. 50 mA
+-Udgang til slave 0-10 V
+-Drifts- og fejlmeddelelse
+-Indgang til sensor 0-10 V og 4-20 mA
+-Ekstern 24 V indgang (parametrering)
+-Ekstern frigivelsesinput
+-Fejlmelderelæ
+-Integreret PID-regulator
+-Effektbegrænsning
+-Overstrømsbeskyttet
+-PFC, passiv
+-RS485 MODBUS-RTU
+-Softstart
+-Styreindgang 0-10 VDC / PWM
+-Kontrol interface med SELV-potentiale sikkert adskilt fra nettet
+-Overtemperaturbeskyttelse elektronik / motor
+-Underspændings- / faseudfaldsregistrering
+EMC støjimmunitet Iht. EN 61000-6-2 (industrimiljø)
+EMC støjemission I henhold til EN 61000-6-3 (boligmiljø), undtagen EN 61000-3-2 for enheder der bruges
+professionelt med en samlet mærkeeffekt, der er større end 1 kW
+Berøringsstrøm iht. IEC 60990 <= 3,5 mA
+(målekredsløb fig. 4, TN-system)
+Elektrisk tilslutning Klemmekasse
+Motorværn Beskyttelse mod polombytning og blokering
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 2 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+Beskyttelses klassificering I; Når der er tilsluttet en beskyttelsesleder hos kunden.
+Disse monteringskomponenter kan have flere lokale beskyttelsesklassificeringer.
+Disse oplysninger henviser til denne komponents grundlæggende dimensionering.
+Den endegyldige kapslingsklasse opnås ved korrekt montering og tilslutning af
+komponenten.
+Overensstemmelse med standard EN 61800-5-1; CE; UKCA
+Godkendelse CSA C22.2 nr.77 + CAN/CSA-E60730-1; EAC; UL 1004-7 + 60730-1
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 3 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+Produkttegning
+1 Monteringsposition: Aksel vandret (bærearme må kun monteres lodret iht. visning!) eller rotor nederst, rotor øverst på forespørgsel
+2 Kabeldiameter min. 4 mm, maks. 10 mm, tilspændingsmoment 4±0,6 Nm
+3 Kabeldiameter min. 9 mm, maks. 16 mm, tilspændingsmoment 6±0,9 Nm
+4 Tilspændingsmoment 3,5±0,5 Nm
+5 Indløbstragt med trykudtagsstuds (k-faktor: 348)
+6 Fastgørelseshuller til FlowGrid
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 4 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+Tilslutningsplan
+
+| Nr. | Tilsl. | Betegnelse | Funktion / tilslutning |
+| --- | --- | --- | --- |
+| KL 1 | 1 | L1 | Nettilslutning, forsyningsspænding, fase, spændingsområde, se typeskilt |
+| KL 1 | 2 | L2 | Nettilslutning, forsyningsspænding, fase, spændingsområde, se typeskilt |
+| KL 1 | 3 | L3 | Nettilslutning, forsyningsspænding, fase, spændingsområde, se typeskilt |
+| PE |  | PE | Jordtilslutning, PE-tilslutning |
+| KL 2 | 1 | NO | Statusrelæ, potentialfri statusmeldekontakt, sluttekontakt ved fejl |
+| KL 2 | 2 | COM | Statusrelæ, potentialfri statusmeldekontakt, skiftekontakt, fælles tilslutning, kontaktstrøm maks. 250 VAC / 2 |
+
+A (AC1) / min. 10 mA
+
+| KL 2 | 3 | NC | Statusrelæ, potentialfri statusmeldekontakt, brydekontakt ved fejl |
+| --- | --- | --- | --- |
+| KL 3 | 1 | RSA | Bustilslutning RS485, RSA, MODBUS RTU; SELV |
+| KL 3 | 2 | RSB | Bustilslutning RS485, RSB, MODBUS RTU; SELV |
+| KL 3 | 3 / 10 | GND | Reference GND for styregrænseflade, SELV |
+| KL 3 | 4 | Ain1 U | Analog indgang 1, nom. værdi: 0-10 V, Ri = 100 kΩ, karakteristik kan parametreres, kan udelukkende |
+
+anvendes som alternativ til indgang Ain1 I; SELV
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 5 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+
+| Nr. | Tilsl. | Betegnelse | Funktion / tilslutning |
+| --- | --- | --- | --- |
+| KL 3 | 5 | + 10 V | Konstant spændingsudgang 10 VDC, +10 V +/-3 %, maks. 10 mA, vedvarende kortslutningsbeskyttet, |
+
+forsyningsspænding til ekst. enheder (f.eks. potentiometer); SELV
+
+| KL 3 | 6 | Ain1 I | Analog indgang 1, nom. værdi: 4-20 mA, Ri = 100 Ω, karakteristik kan parametreres, kan udelukkende |
+| --- | --- | --- | --- |
+
+anvendes som alternativ til indgang Ain1 U; SELV
+
+| KL 3 | 7 | Din1 | Digital indgang 1: Aktivering af elektronikken |
+| --- | --- | --- | --- |
+
+Aktivering: Ben åbent eller tilsluttet spænding 5-50 VDC
+Spærring: Bro til GND eller tilsluttet spænding <1 VDC
+Reset-funktion: Udløsning af en software-reset efter et niveauskift til <1 VDC; SELV
+
+| KL 3 | 8 | Din2 | Digital indgang 2: Omskiftning parametersæt 1/2, efter EEPROM- indstilling kan det gyldige eller anvendte |
+| --- | --- | --- | --- |
+
+parametersæt vælges pr. BUS eller pr. digital indgang DIN2.
+Parameterersæt 1: Ben åbent eller tilsluttet spænding 5-50 VDC
+Parameterersæt 2: Bro til GND eller tilsluttet spænding <1 VDC; SELV
+
+| KL 3 | 9 | Din3 | Digitalindgang 3: Den integrerede regulators funktion, efter EEPROM- indstilling kan den integrerede |
+| --- | --- | --- | --- |
+
+regulators funktion pr. BUS eller pr. digital indgang vælges som normal /invers
+Normal: Ben åbent eller tilsluttet spænding 5-50 VDC
+Invers: Bro til GND eller tilsluttet spænding <1 VDC; SELV
+
+| KL 3 | 11 | Ain2 U | Analog indgang 2, fakt. værdi: 0-10 V, Ri = 100 kΩ, karakteristik kan parametreres, kan udelukkende |
+| --- | --- | --- | --- |
+
+anvendes som alternativ til indgang Ain2 I; SELV
+
+| KL 3 | 12 | + 20 V | Konstant spændingsudgang 20 VDC, +20 V +25/-10 %, maks. 50 mA, kortslutningssikker |
+| --- | --- | --- | --- |
+
+forsyningsspænding til eksterne enheder (f.eks. sensorer); SELV
+Alternativ: +24 VDC-indgang til parametrering uden netspænding
+
+| KL 3 | 13 | Ain2 I | Analog indgang 2, fakt. værdi: 4-20 mA, Ri = 100 Ω, karakteristik kan parametreres, kan udelukkende |
+| --- | --- | --- | --- |
+
+anvendes som alternativ til indgangen Ain2 U; SELV
+
+| KL 3 | 14 | Aout | Analogudgang 0-10 V; maks. 5 mA, udlæsning af den aktuelle motorstyringsværdi; karakteristikken kan |
+| --- | --- | --- | --- |
+
+parametreres; SELV
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 6 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.comK3G560-PC04-01 ECRadialmodul - RadiPac
+Baudkrummet, Enkeltsugende
+
+Med holder
+Karakteristikker: Luftydelse 50 Hz
+a g w
+P i n
+1600
+6
+ρ=1,15kg/m³ ± 2 %
+4 Måling: LU-173565-1
+1200 5 Lufteffekt målt iht. ISO 5801
+installationskategori A. Den nøjagtige
+måleopbygning bedes du forhøre dig om hos
+ebm-papst. Støjniveau på sugeside: LwA iht.
+ISO 13347 / LpA målt med 1 m afstand til
+
+| 4 | 3 | ventilatoraksel. Oplysningerne gælder kun |
+| --- | --- | --- |
+
+med de angivne målebetingelser og kan
+8 ændre sig pga. monteringsforholdene. Ved
+afvigelser fra standardopbygningen skal
+parametrene kontrolleres i indbygget
+800 tilstand.
+
+| 3 | 12 | 7 |
+| --- | --- | --- |
+
+2 11
+16 2
+400 15
+6
+1 10
+14
+
+| s |  |  |  |  | 13 | 9 |  | 5 | 1 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| P f | 0 | 2000 | 4000 | 6000 | 8000 |  | 10000 |  | cfm |
+|  | qv | 5000 |  | 10000 | 15000 |  |  |  | m³/h |
+
+Måleværdier
+
+|  | U | f | n | P ed | I | LpA in | LwA in | LwA out | q V | p fs | q V | p fs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  | V | Hz | min -1 | W | A | dB(A) | dB(A) | dB(A) | m 3 /h | Pa | cfm | in. wg |
+| 1 | 400 | 50 | 1760 | 2788 | 4,36 | 95 | 101 | 101 | 21265 | 0 | 12515 | 0,00 |
+| 2 | 400 | 50 | 1760 | 4251 | 6,52 | 85 | 92 | 94 | 16980 | 500 | 9995 | 2,01 |
+| 3 | 400 | 50 | 1760 | 5000 | 7,70 | 77 | 84 | 89 | 12180 | 1000 | 7170 | 4,01 |
+| 4 | 400 | 50 | 1760 | 4788 | 7,32 | 80 | 87 | 92 | 8165 | 1300 | 4805 | 5,22 |
+| 5 | 400 | 50 | 1575 | 1956 | 3,17 | 90 | 97 | 96 | 18670 | 0 | 10990 | 0,00 |
+| 6 | 400 | 50 | 1510 | 2650 | 4,16 | 80 | 88 | 90 | 14495 | 368 | 8530 | 1,48 |
+| 7 | 400 | 50 | 1480 | 2956 | 4,61 | 73 | 79 | 85 | 10205 | 701 | 6010 | 2,81 |
+| 8 | 400 | 50 | 1490 | 2845 | 4,45 | 75 | 82 | 88 | 6865 | 920 | 4040 | 3,69 |
+| 9 | 400 | 50 | 1365 | 1306 | 2,29 | 85 | 93 | 93 | 16125 | 0 | 9490 | 0,00 |
+| 10 | 400 | 50 | 1325 | 1802 | 2,96 | 78 | 85 | 87 | 12670 | 281 | 7460 | 1,13 |
+| 11 | 400 | 50 | 1305 | 2023 | 3,27 | 70 | 77 | 82 | 8980 | 543 | 5285 | 2,18 |
+| 12 | 400 | 50 | 1310 | 1937 | 3,15 | 72 | 80 | 85 | 6025 | 709 | 3545 | 2,85 |
+| 13 | 400 | 50 | 1145 | 827 | 1,58 | 81 | 89 | 90 | 13465 | 0 | 7925 | 0,00 |
+| 14 | 400 | 50 | 1115 | 1113 | 2,04 | 73 | 80 | 83 | 10640 | 199 | 6260 | 0,80 |
+| 15 | 400 | 50 | 1100 | 1271 | 2,25 | 65 | 72 | 77 | 7585 | 388 | 4465 | 1,56 |
+| 16 | 400 | 50 | 1105 | 1212 | 2,17 | 67 | 74 | 79 | 5085 | 505 | 2990 | 2,03 |
+
+U = Forsyningsspænding · f = Frekvens · n = Omdrejningstal · P ed = Effektforbrug · I = Strømforbrug · LpA in = Lydtryksniveau På sugesiden · LwA in = Lydeffektniveau På sugesiden
+LwA out = Lydeffektniveau På tryksiden · q V = Volumenstrøm · p fs = Trykøgning
+
+Vare-nr. 54422-5-9980 · DAN · Ændring 260717 · Frigivelse 2022-06-23 · Side 7 / 7
+ebm-papst Mulfingen GmbH & Co. KG · Bachmühle 2 · D-74673 Mulfingen · Phone +49 (0) 7938 81-0 · Fax +49 (0) 7938 81-110 · info1@de.ebmpapst.com · www.ebmpapst.com

@@ -23,59 +23,63 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Worker started. Checking for PDFs in data/Generelt...");
+        bool processDataDirectory = false;
 
-        try
+        if (processDataDirectory)
         {
-            var dataDir = ResolveDataDirectory();
-            if (string.IsNullOrEmpty(dataDir) || !Directory.Exists(dataDir))
+            try
             {
-                _logger.LogWarning("PDF data directory not found. Please ensure 'data/Generelt' exists.");
-            }
-            else
-            {
-                _logger.LogInformation("Found PDF data directory at: {DataDir}", dataDir);
-                var pdfFiles = Directory.GetFiles(dataDir, "*", SearchOption.AllDirectories)
-                    .Where(file => file.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                _logger.LogInformation("Found {Count} PDF file(s) to process.", pdfFiles.Length);
-
-                foreach (var pdfFile in pdfFiles)
+                var dataDir = ResolveDataDirectory();
+                if (string.IsNullOrEmpty(dataDir) || !Directory.Exists(dataDir))
                 {
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
+                    _logger.LogWarning("PDF data directory not found. Please ensure 'data/Generelt' exists.");
+                }
+                else
+                {
+                    _logger.LogInformation("Found PDF data directory at: {DataDir}", dataDir);
+                    var pdfFiles = Directory.GetFiles(dataDir, "*", SearchOption.AllDirectories)
+                        .Where(file => file.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    _logger.LogInformation("Found {Count} PDF file(s) to process.", pdfFiles.Length);
 
-                    var fileName = Path.GetFileName(pdfFile);
-                    _logger.LogInformation("Processing PDF: {FileName}", fileName);
+                    foreach (var pdfFile in pdfFiles)
+                    {
+                        if (stoppingToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
 
-                    try
-                    {
-                        using var stream = new FileStream(pdfFile, FileMode.Open, FileAccess.Read, FileShare.Read);
-                        var document = await _documentProcessor.ProcessPdfAsync(stream, fileName);
-                        _logger.LogInformation("Successfully processed and indexed: {FileName}. Status: {Status}", fileName, document.Status);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to process PDF: {FileName}", fileName);
+                        var fileName = Path.GetFileName(pdfFile);
+                        _logger.LogInformation("Processing PDF: {FileName}", fileName);
+
+                        try
+                        {
+                            using var stream = new FileStream(pdfFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+                            var document = await _documentProcessor.ProcessPdfAsync(stream, fileName);
+                            _logger.LogInformation("Successfully processed and indexed: {FileName}. Status: {Status}", fileName, document.Status);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to process PDF: {FileName}", fileName);
+                        }
                     }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "An error occurred during startup PDF processing.");
-        }
-
-        _logger.LogInformation("Startup PDF processing completed. Entering idle loop.");
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            if (_logger.IsEnabled(LogLevel.Information))
+            catch (Exception ex)
             {
-                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+                _logger.LogError(ex, "An error occurred during startup PDF processing.");
             }
-            await Task.Delay(30000, stoppingToken);
+
+            _logger.LogInformation("Startup PDF processing completed. Entering idle loop.");
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+                }
+                await Task.Delay(30000, stoppingToken);
+            }
         }
     }
 

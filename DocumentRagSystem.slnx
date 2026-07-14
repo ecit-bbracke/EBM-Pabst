@@ -1,4 +1,13 @@
 <Solution>
+  <Folder Name="/docs/">
+    <File Path="docs/README.md" />
+    <File Path="docs/operations.md" />
+    <File Path="docs/project-structure.md" />
+    <File Path="docs/Spørgsmål_9293512011_3258_J_2H3PU-011_PDB_EN.md" />
+    <File Path="docs/Spørgsmål_9295420021_6318_2TDH4P_PDB_EN.md" />
+    <File Path="docs/Spørgsmål_9694300352_4114N_2H6PU_PDB_EN.md" />
+    <File Path="Kontrolspørgsmål.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/DocumentRagSystem.Core/DocumentRagSystem.Core.csproj" />
     <Project Path="src/DocumentRagSystem.Infrastructure/DocumentRagSystem.Infrastructure.csproj" />

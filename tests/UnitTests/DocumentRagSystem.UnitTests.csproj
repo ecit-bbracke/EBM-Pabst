@@ -23,6 +23,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DocumentRagSystem.Core\DocumentRagSystem.Core.csproj" />
     <ProjectReference Include="..\..\src\DocumentRagSystem.Infrastructure\DocumentRagSystem.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\DocumentRagSystem.WebApi\DocumentRagSystem.WebApi.csproj" />
+    <ProjectReference Include="..\..\src\DocumentRagSystem.Worker\DocumentRagSystem.Worker.csproj" />
+    <ProjectReference Include="..\IntegrationTests\DocumentRagSystem.IntegrationTests.csproj" />
   </ItemGroup>
 
 </Project>

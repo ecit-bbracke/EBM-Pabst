@@ -101,7 +101,7 @@ public class GeminiLlmService : ILlmService
         sb.AppendLine("- Brug UDELUKKENDE informationen i <answers> til at besvare spørgsmålet i <query>");
         sb.AppendLine("- Ingen præ-ampel");
         sb.AppendLine("### OUTPUT FORMAT");
-        sb.AppendLine("- Besvar i høflig og rådgivende tone, uden for mange detaljer, men stadig fyldestgørende.");
+        sb.AppendLine("- Besvar i høflig og rådgivende tone,  men stadig fyldestgørende.");
 
         foreach (var chunk in contextChunks)
         {

@@ -7,7 +7,7 @@ public record QueryRequest(string Question);
 
 public record QueryResponse(string Answer, IEnumerable<CitationDto> Citations);
 
-public record CitationDto(string ChunkId, string DocumentId, string Text, int Index);
+public record CitationDto(string ChunkId, string DocumentId, string Text, int Index, string filename, string filepath);
 
 public class QueryRequestValidator : AbstractValidator<QueryRequest>
 {

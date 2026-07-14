@@ -14,6 +14,13 @@ The project follows clean architecture principles:
 *   **`DocumentRagSystem.WebApi/`**: Minimal API hosting endpoints for document uploads, metadata inspection, and semantic query endpoints with citations. Includes global exception handling and background queues.
 *   **`DocumentRagSystem.Worker/`**: Background service that runs scheduled tasks (like hourly temp-file cleanups) and automatically ingests all technical PDF documents from `data/Generelt/` on startup.
 *   **`tests/`**: Consists of standard xUnit suites including Unit tests, Integration tests (using Testcontainers for Qdrant), and end-to-end (E2E) integration flows.
+*   **`docs/`**: Project documentation, operational notes, troubleshooting guides, and design notes that are too detailed for this README.
+
+---
+
+## 📚 Documentation
+
+Longer project documentation lives in [`docs/`](docs/README.md). Start there for operational details such as upload storage, document links, and Qdrant metadata.
 
 ---
 

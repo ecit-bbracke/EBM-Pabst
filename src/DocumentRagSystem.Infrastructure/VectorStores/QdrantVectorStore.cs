@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -7,6 +9,7 @@ using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
+using RagDocument = DocumentRagSystem.Core.Models.Document;
 
 namespace DocumentRagSystem.Infrastructure.VectorStores;
 
@@ -145,6 +148,21 @@ public class QdrantVectorStore : IVectorStore
             }
         };
 
+        if (!string.IsNullOrWhiteSpace(chunk.FileName))
+        {
+            point.Payload["file_name"] = chunk.FileName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(chunk.FilePath))
+        {
+            point.Payload["file_path"] = chunk.FilePath;
+        }
+
+        if (chunk.UploadedAt.HasValue)
+        {
+            point.Payload["uploaded_at"] = chunk.UploadedAt.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        }
+
         try
         {
             await _client.UpsertAsync(_collectionName, new[] { point });
@@ -189,10 +207,93 @@ public class QdrantVectorStore : IVectorStore
             var docId = point.Payload.TryGetValue("document_id", out var docVal) ? docVal.StringValue : string.Empty;
             var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
             var index = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : 0;
+            var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
+            var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
+            var uploadedAt = TryGetUploadedAt(point.Payload);
 
-            chunks.Add(new DocumentChunk(chunkId, docId, text, index));
+            chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt));
         }
 
         return chunks;
+    }
+
+    public async Task<IEnumerable<RagDocument>> GetDocumentsAsync(int limit = 1000)
+    {
+        var collections = await _client.ListCollectionsAsync();
+        if (!collections.Contains(_collectionName))
+        {
+            return Array.Empty<RagDocument>();
+        }
+
+        var documents = new Dictionary<string, RagDocument>();
+        PointId? offset = null;
+        var remaining = Math.Max(1, limit);
+
+        do
+        {
+            var pageSize = (uint)Math.Min(256, remaining);
+            var response = await _client.ScrollAsync(
+                collectionName: _collectionName,
+                limit: pageSize,
+                offset: offset,
+                payloadSelector: true,
+                vectorsSelector: false);
+
+            foreach (var point in response.Result)
+            {
+                if (!point.Payload.TryGetValue("document_id", out var documentIdValue) ||
+                    string.IsNullOrWhiteSpace(documentIdValue.StringValue))
+                {
+                    continue;
+                }
+
+                var documentId = documentIdValue.StringValue;
+                var uploadedAt = TryGetUploadedAt(point.Payload) ?? DateTime.MinValue;
+                var document = new RagDocument(
+                    Id: documentId,
+                    FileName: point.Payload.TryGetValue("file_name", out var fileNameValue) &&
+                              !string.IsNullOrWhiteSpace(fileNameValue.StringValue)
+                        ? fileNameValue.StringValue
+                        : documentId,
+                    FilePath: point.Payload.TryGetValue("file_path", out var filePathValue)
+                        ? filePathValue.StringValue
+                        : string.Empty,
+                    UploadedAt: uploadedAt,
+                    Status: DocumentStatus.Processed);
+
+                if (!documents.TryGetValue(documentId, out var existing) ||
+                    document.UploadedAt > existing.UploadedAt ||
+                    string.IsNullOrWhiteSpace(existing.FileName))
+                {
+                    documents[documentId] = document;
+                }
+            }
+
+            remaining -= response.Result.Count;
+            offset = response.NextPageOffset;
+        }
+        while (offset != null && remaining > 0);
+
+        return documents.Values
+            .OrderByDescending(document => document.UploadedAt)
+            .ThenBy(document => document.FileName)
+            .ToList();
+    }
+
+    private static DateTime? TryGetUploadedAt(IDictionary<string, Value> payload)
+    {
+        if (!payload.TryGetValue("uploaded_at", out var uploadedAtValue) ||
+            string.IsNullOrWhiteSpace(uploadedAtValue.StringValue))
+        {
+            return null;
+        }
+
+        return DateTime.TryParse(
+            uploadedAtValue.StringValue,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var uploadedAt)
+            ? uploadedAt
+            : null;
     }
 }
