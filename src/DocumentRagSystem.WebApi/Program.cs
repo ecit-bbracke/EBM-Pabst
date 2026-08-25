@@ -320,14 +320,28 @@ static string ToDocumentUrl(string? filePath, string? fileName, IEnumerable<stri
         return filePath;
     }
 
-    if (filePath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+    // Try finding the existing file on disk. If the stored filePath (with a previous Guid prefix) doesn't exist anymore,
+    // fallback to searching for any file with the same actual raw filename on disk.
+    var currentFileName = Path.GetFileName(Uri.UnescapeDataString(filePath));
+    var resolvedUrl = ToExistingUploadUrl(currentFileName, uploadDirectories);
+    if (!string.IsNullOrWhiteSpace(resolvedUrl))
     {
-        var uploadFileName = Path.GetFileName(Uri.UnescapeDataString(filePath));
-        return ToExistingUploadUrl(uploadFileName, uploadDirectories, filePath);
+        return resolvedUrl;
+    }
+
+    // If that fails, strip any Guid-like prefix (36 chars followed by '_') from the filename and try searching again
+    if (currentFileName.Length > 37 && currentFileName[36] == '_')
+    {
+        var rawName = currentFileName.Substring(37);
+        var fallbackUrlFromRaw = ToExistingUploadUrl(rawName, uploadDirectories);
+        if (!string.IsNullOrWhiteSpace(fallbackUrlFromRaw))
+        {
+            return fallbackUrlFromRaw;
+        }
     }
 
     var pathFileName = Path.GetFileName(filePath);
-    return ToExistingUploadUrl(pathFileName, uploadDirectories);
+    return ToExistingUploadUrl(pathFileName, uploadDirectories, filePath);
 }
 
 static string ToExistingUploadUrl(string? fileName, IEnumerable<string> uploadDirectories, string? fallbackUrl = null)
