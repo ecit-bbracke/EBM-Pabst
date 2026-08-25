@@ -87,6 +87,15 @@ If you want to run the services individually on your machine:
    dotnet run --project src/DocumentRagSystem.Worker/DocumentRagSystem.Worker.csproj
    ```
 
+### Option C: Deploying to Ubuntu Linux Server (Self-Contained Docker)
+For deploying the system to an Ubuntu Linux production or staging server using modern self-contained Docker images:
+1. Refer to the comprehensive [Ubuntu Linux Docker Deployment Guide](docs/deployment.md) for full instructions.
+2. In this deployment mode, the application compiles targeting the native `linux-x64` platform, bundling the entire .NET 10.0 runtime. This enables running inside a minimal `runtime-deps` Docker image without requiring .NET 10.0 to be pre-installed on the host system or inside the container.
+3. Simply move your code to the server, prepare a `.env` file containing your `GEMINI_API_KEY`, and launch the services:
+   ```bash
+   docker compose up --build -d
+   ```
+
 ---
 
 ## 📡 API Endpoints

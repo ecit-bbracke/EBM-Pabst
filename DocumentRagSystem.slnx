@@ -14,6 +14,7 @@
     <File Path="docs/Spørgsmål_9793510182_PDB_EN_V1.2.md" />
     <File Path="docs/Spørgsmål_Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).md" />
     <File Path="Kontrolspørgsmål.md" />
+    <File Path="Prompt_spørgsmåls_tests.txt" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/DocumentRagSystem.Core/DocumentRagSystem.Core.csproj" />

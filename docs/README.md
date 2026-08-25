@@ -6,6 +6,7 @@ This directory is the home for project documentation that is too detailed for th
 
 - [Operations](operations.md): Local service setup notes, upload storage, served document URLs, and troubleshooting.
 - [Project Structure](project-structure.md): Explanation of the solution layout, project responsibilities, and where to put new code.
+- [Self-Contained Docker Deployment](deployment.md): Complete guide to deploying the application on an Ubuntu Linux server with Docker using a self-contained layout.
 
 ## Conventions
 

@@ -10,10 +10,12 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_ENVIRONMENT=Production
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY:-YOUR_GEMINI_API_KEY}
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       - qdrant
 
@@ -23,10 +25,12 @@ services:
       context: .
       dockerfile: src/DocumentRagSystem.Worker/Dockerfile
     environment:
-      - DOTNET_ENVIRONMENT=Development
+      - DOTNET_ENVIRONMENT=Production
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY:-YOUR_GEMINI_API_KEY}
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       - qdrant
 
@@ -40,3 +44,4 @@ services:
 
 volumes:
   qdrant_data:
+  uploads_data:

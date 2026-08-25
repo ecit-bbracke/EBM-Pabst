@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /app
 
 # Copy Solution and Project Files
-COPY DocumentRagSystem.sln ./
+COPY DocumentRagSystem.slnx ./
 COPY src/DocumentRagSystem.Core/DocumentRagSystem.Core.csproj src/DocumentRagSystem.Core/
 COPY src/DocumentRagSystem.Infrastructure/DocumentRagSystem.Infrastructure.csproj src/DocumentRagSystem.Infrastructure/
 COPY src/DocumentRagSystem.WebApi/DocumentRagSystem.WebApi.csproj src/DocumentRagSystem.WebApi/
@@ -23,10 +23,10 @@ RUN dotnet test tests/UnitTests/DocumentRagSystem.UnitTests.csproj -c Release
 
 # Publish WebApi
 WORKDIR /app/src/DocumentRagSystem.WebApi
-RUN dotnet publish -c Release -o /app/publish
+RUN dotnet publish -c Release -r linux-x64 --self-contained true -o /app/publish
 
 # Stage 2: Runtime Image
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
 
@@ -34,4 +34,4 @@ COPY --from=build /app/publish .
 EXPOSE 8080
 EXPOSE 8081
 
-ENTRYPOINT ["dotnet", "DocumentRagSystem.WebApi.dll"]
+ENTRYPOINT ["./DocumentRagSystem.WebApi"]

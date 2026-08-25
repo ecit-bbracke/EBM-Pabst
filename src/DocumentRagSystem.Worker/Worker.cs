@@ -23,7 +23,7 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Worker started. Checking for PDFs in data/Generelt...");
-        bool processDataDirectory = false;
+        bool processDataDirectory = true;
 
         if (processDataDirectory)
         {
