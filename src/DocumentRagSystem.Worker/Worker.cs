@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
+using DocumentRagSystem.Core.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -13,11 +15,13 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IDocumentProcessor _documentProcessor;
+    private readonly IVectorStore _vectorStore;
 
-    public Worker(ILogger<Worker> logger, IDocumentProcessor documentProcessor)
+    public Worker(ILogger<Worker> logger, IDocumentProcessor documentProcessor, IVectorStore vectorStore)
     {
         _logger = logger;
         _documentProcessor = documentProcessor;
+        _vectorStore = vectorStore;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,6 +46,26 @@ public class Worker : BackgroundService
                         .ToArray();
                     _logger.LogInformation("Found {Count} PDF file(s) to process.", pdfFiles.Length);
 
+                    List<Document> existingDocs = new();
+                    try
+                    {
+                        var docs = await _vectorStore.GetDocumentsAsync();
+                        if (docs != null)
+                        {
+                            existingDocs = docs.ToList();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to fetch existing documents from vector store. Will proceed with full indexing.");
+                    }
+
+                    var uploadsDir = Path.Combine(AppContext.BaseDirectory, "uploads");
+                    if (!Directory.Exists(uploadsDir))
+                    {
+                        Directory.CreateDirectory(uploadsDir);
+                    }
+
                     foreach (var pdfFile in pdfFiles)
                     {
                         if (stoppingToken.IsCancellationRequested)
@@ -54,6 +78,24 @@ public class Worker : BackgroundService
 
                         try
                         {
+                            // Check if this file has already been processed and is in the vector store
+                            var existingDoc = existingDocs.FirstOrDefault(d => string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+                            if (existingDoc != null)
+                            {
+                                _logger.LogInformation("PDF '{FileName}' is already indexed in the vector store.", fileName);
+
+                                // Check if the file is missing in the uploads directory
+                                var targetFileName = Path.GetFileName(Uri.UnescapeDataString(existingDoc.FilePath));
+                                var targetPath = Path.Combine(uploadsDir, targetFileName);
+
+                                if (!File.Exists(targetPath))
+                                {
+                                    _logger.LogInformation("Restoring missing file to uploads: {TargetFileName}", targetFileName);
+                                    File.Copy(pdfFile, targetPath, overwrite: true);
+                                }
+                                continue;
+                            }
+
                             using var stream = new FileStream(pdfFile, FileMode.Open, FileAccess.Read, FileShare.Read);
                             var document = await _documentProcessor.ProcessPdfAsync(stream, fileName);
                             _logger.LogInformation("Successfully processed and indexed: {FileName}. Status: {Status}", fileName, document.Status);

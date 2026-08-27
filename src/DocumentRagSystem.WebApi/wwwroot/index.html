@@ -58,14 +58,27 @@
             border-collapse: collapse;
             font-size: 0.75rem;
         }
+
+        /* Hide scrollbars but keep functionality */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+<body class="bg-slate-50 text-slate-800 h-screen w-screen overflow-hidden flex flex-col">
 
-    <!-- Top Navigation Bar -->
-    <header class="bg-brand-900 text-white shadow-md">
+    <!-- Top Navigation Bar (Restored completely to original styling) -->
+    <header class="bg-brand-900 text-white shadow-md flex-shrink-0 z-10">
         <div class="container mx-auto px-6 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-3">
+                <!-- Hamburger menu for mobile drawer toggling -->
+                <button onclick="toggleSidebar()" class="md:hidden text-white hover:text-slate-200 transition p-1 rounded-lg">
+                    <i class="fa-solid fa-bars text-xl"></i>
+                </button>
                 <div class="bg-brand-500 p-2 rounded-lg text-white">
                     <i class="fa-solid fa-brain text-xl"></i>
                 </div>
@@ -82,70 +95,109 @@
         </div>
     </header>
 
-    <!-- Main Workspace Container -->
-    <main class="container mx-auto max-w-4xl px-6 py-8 flex-1 flex flex-col space-y-6">
+    <!-- Main Workspace Area -->
+    <div class="flex-1 flex overflow-hidden relative">
 
-        <div class="bg-brand-50 rounded-xl border border-brand-100 p-6 shadow-sm">
-            <h3 class="text-brand-900 font-semibold mb-2 flex items-center">
-                <i class="fa-solid fa-circle-info mr-2"></i>
-                Hvordan spørger man?
-            </h3>
-            <p class="text-sm text-brand-700 leading-relaxed">
-                Stil spørgsmål om driftsgrænser, tekniske specifikationer eller specifikke funktioner, der er beskrevet i dine uploadede tekniske datablade. Chatten vil hente matchende tekstafsnit, formulere et præcist svar og henvise til kilderne.
-            </p>
-        </div>
+        <!-- Mobile Sidebar Overlay -->
+        <div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/40 z-20 hidden md:hidden"></div>
 
-        <!-- Samtaleloggen (ChatGPT-style) -->
-        <div id="chat-conversation" class="space-y-6 flex-1 min-h-[300px]">
-            <!-- Velkomstbesked -->
-            <div class="flex items-start space-x-3.5 p-4 rounded-xl bg-slate-100/50 border border-slate-200/40">
-                <div class="bg-brand-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
-                    <i class="fa-solid fa-robot text-lg"></i>
-                </div>
-                <div class="space-y-1">
-                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">System</span>
-                    <div class="text-slate-700 text-sm leading-relaxed">
-                        Hej! Jeg er klar til at besvare dine spørgsmål baseret på de uploadede PDF datablade. Hvad vil du gerne vide i dag?
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Henter-skelet (skjult som standard) -->
-        <div id="query-loading" class="hidden bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 space-y-4">
-            <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 rounded-full bg-slate-200 animate-pulse"></div>
-                <div class="h-4 bg-slate-200 rounded animate-pulse w-1/3"></div>
-            </div>
-            <div class="space-y-2">
-                <div class="h-4 bg-slate-200 rounded animate-pulse w-full"></div>
-                <div class="h-4 bg-slate-200 rounded animate-pulse w-5/6"></div>
-                <div class="h-4 bg-slate-200 rounded animate-pulse w-4/5"></div>
-            </div>
-        </div>
-
-        <!-- Input-felt i bunden (ChatGPT-style) -->
-        <div class="bg-white rounded-xl shadow-md border border-slate-200/80 p-4 sticky bottom-4">
-            <form id="query-form" onsubmit="handleQuerySubmit(event)" class="relative flex items-center space-x-3">
-                <input type="text" id="query-input" required placeholder="Stil et spørgsmål, f.eks. Hvad er driftsspændingen for ventilatoren?"
-                    class="w-full pl-4 pr-14 py-3.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm transition placeholder-slate-400 text-slate-900 bg-slate-50/50">
-                <button type="submit" id="submit-btn" class="absolute right-2 top-2 bg-brand-500 hover:bg-brand-600 text-white rounded-lg p-2.5 text-sm font-medium transition shadow-sm flex items-center justify-center">
-                    <i class="fa-solid fa-paper-plane"></i>
+        <!-- ChatGPT-style Left Sidebar (Styled beautifully to match page aesthetics) -->
+        <aside id="sidebar" class="bg-slate-100 text-slate-700 w-80 flex-shrink-0 flex flex-col border-r border-slate-200 transition-all duration-300 z-30 absolute inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0">
+            <!-- Sidebar Title Area -->
+            <div class="p-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Samtalehistorik</span>
+                <button onclick="toggleSidebar()" class="md:hidden text-slate-400 hover:text-slate-700 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
-            </form>
+            </div>
+
+            <!-- "Ny Chat" Button -->
+            <div class="p-3.5">
+                <button onclick="startNewChat()" class="w-full bg-brand-600 hover:bg-brand-500 text-white py-3 px-4 rounded-lg text-sm font-semibold transition shadow flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-plus text-xs"></i>
+                    <span>Ny chat</span>
+                </button>
+            </div>
+
+            <!-- Scrollable Conversation List -->
+            <div class="flex-1 overflow-y-auto px-2 space-y-1 pb-4" id="chat-list-container">
+                <!-- Dynamic Chat History Items Inserted Here -->
+            </div>
+
+            <!-- Sidebar Footer Options -->
+            <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-2">
+                <button onclick="clearAllConversations()" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-red-600 hover:text-red-700 hover:bg-red-50 transition font-medium text-left">
+                    <i class="fa-solid fa-trash-can text-base shrink-0"></i>
+                    <span>Ryd alle samtaler</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Chat Workspace -->
+        <div class="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-slate-50">
+            
+            <!-- Scrollable Chat Log Container -->
+            <div class="flex-1 overflow-y-auto no-scrollbar" id="chat-scroll-container">
+                <div class="max-w-3xl mx-auto px-4 py-8 space-y-6 flex flex-col flex-grow">
+                    
+                    <!-- Info banner -->
+                    <div class="bg-brand-50 rounded-xl border border-brand-100/60 p-5 shadow-sm flex-shrink-0">
+                        <h3 class="text-brand-900 font-semibold mb-1.5 flex items-center text-sm">
+                            <i class="fa-solid fa-circle-info mr-2"></i>
+                            Hvordan spørger man?
+                        </h3>
+                        <p class="text-xs text-brand-700 leading-relaxed">
+                            Stil spørgsmål om driftsgrænser, tekniske specifikationer eller specifikke funktioner, der er beskrevet i dine uploadede tekniske datablade. Chatten vil hente matchende tekstafsnit, formulere et præcist svar og henvise til kilderne.
+                        </p>
+                    </div>
+
+                    <!-- Samtaleloggen -->
+                    <div id="chat-conversation" class="space-y-6">
+                        <!-- Loaded dynamically via JavaScript -->
+                    </div>
+
+                    <!-- Henter-skelet (skjult som standard) -->
+                    <div id="query-loading" class="hidden bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 space-y-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-8 h-8 rounded-full bg-slate-200 animate-pulse"></div>
+                            <div class="h-4 bg-slate-200 rounded animate-pulse w-1/3"></div>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="h-4 bg-slate-200 rounded animate-pulse w-full"></div>
+                            <div class="h-4 bg-slate-200 rounded animate-pulse w-5/6"></div>
+                            <div class="h-4 bg-slate-200 rounded animate-pulse w-4/5"></div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Sticky Bottom Input Form -->
+            <div class="p-4 bg-white border-t border-slate-200/80 flex-shrink-0 shadow-inner">
+            <div class="max-w-3xl mx-auto">
+                <form id="query-form" onsubmit="handleQuerySubmit(event)" class="relative flex items-center space-x-3">
+                    <input type="text" id="query-input" required autocomplete="off" placeholder="Stil et spørgsmål, f.eks. Hvad er driftsspændingen for ventilatoren?"
+                        class="w-full pl-4 pr-14 py-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm transition placeholder-slate-400 text-slate-900 bg-slate-50/50">
+                    <button type="submit" id="submit-btn" class="absolute right-2 top-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl p-3 text-sm font-medium transition shadow-sm flex items-center justify-center">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+                <p class="text-[10px] text-slate-400 text-center mt-2 font-medium">Svarene er baseret på de uploadede pdf datablade og kan indeholde vigtig information.</p>
+            </div>
         </div>
 
-    </main>
-
-    <!-- Footer -->
-    <footer class="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 text-center text-sm">
-        <div class="container mx-auto px-6">
-            <p>Søgning i produkt dokumentation &copy; 2026</p>
-        </div>
-    </footer>
+    </div>
 
     <!-- Client-side javascript -->
     <script>
+        let conversations = [];
+        let currentConversationId = null;
+
+        // Initialize on DOM load
+        document.addEventListener('DOMContentLoaded', () => {
+            initConversations();
+        });
+
         function escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -159,7 +211,209 @@
             return typeof value === 'string' && (value.startsWith('/uploads/') || value.startsWith('http://') || value.startsWith('https://'));
         }
 
-        // Håndter indsendelse af spørgsmål
+        // Toggle Sidebar visibility on mobile
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        // Initialize conversations from local storage
+        function initConversations() {
+            const stored = localStorage.getItem('rag_conversations');
+            if (stored) {
+                try {
+                    conversations = JSON.parse(stored);
+                } catch (e) {
+                    console.error('Kunne ikke hente samtalehistorik:', e);
+                    conversations = [];
+                }
+            }
+
+            if (conversations.length === 0) {
+                startNewChat(false);
+            } else {
+                currentConversationId = conversations[0].id;
+                renderSidebar();
+                loadConversation(currentConversationId);
+            }
+        }
+
+        // Save conversations list to localStorage
+        function saveConversations() {
+            localStorage.setItem('rag_conversations', JSON.stringify(conversations));
+            renderSidebar();
+        }
+
+        // Start a completely new chat session
+        function startNewChat(save = true) {
+            currentConversationId = 'chat_' + Date.now();
+            const newChat = {
+                id: currentConversationId,
+                title: 'Ny chat',
+                messages: [],
+                createdAt: new Date().toISOString()
+            };
+            conversations.unshift(newChat);
+            if (save) {
+                saveConversations();
+            } else {
+                renderSidebar();
+            }
+            loadConversation(currentConversationId);
+
+            // If mobile sidebar was open, close it
+            const sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('-translate-x-full')) {
+                toggleSidebar();
+            }
+        }
+
+        // Select and load a conversation
+        function loadConversation(id) {
+            currentConversationId = id;
+            const chat = conversations.find(c => c.id === id);
+            if (!chat) return;
+
+            // Re-render sidebar to highlight the selected item and avoid class desyncs
+            renderSidebar();
+
+            // Render all historical messages
+            renderConversationHistory(chat);
+
+            // If mobile sidebar is open, slide it away so the user can see the loaded conversation
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+                toggleSidebar();
+            }
+        }
+
+        // Render conversation history messages
+        function renderConversationHistory(chat) {
+            const chatLog = document.getElementById('chat-conversation');
+            chatLog.innerHTML = `
+                <!-- Velkomstbesked -->
+                <div class="flex items-start space-x-3.5 p-4 rounded-xl bg-slate-100/50 border border-slate-200/40">
+                    <div class="bg-brand-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
+                        <i class="fa-solid fa-robot text-lg"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">System</span>
+                        <div class="text-slate-700 text-sm leading-relaxed">
+                            Hej! Jeg er klar til at besvare dine spørgsmål baseret på de uploadede PDF datablade. Hvad vil du gerne vide i dag?
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (chat && chat.messages) {
+                chat.messages.forEach(msg => {
+                    if (msg.role === 'user') {
+                        chatLog.innerHTML += `
+                            <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-brand-50 border border-brand-100/50 shadow-sm">
+                                <div class="bg-brand-700 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
+                                    <i class="fa-solid fa-user text-lg"></i>
+                                </div>
+                                <div class="space-y-1">
+                                    <span class="text-xs font-bold text-brand-600 uppercase tracking-wider">Dig</span>
+                                    <div class="text-slate-800 font-medium text-sm leading-relaxed">
+                                        ${escapeHtml(msg.text)}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    } else if (msg.role === 'assistant') {
+                        chatLog.innerHTML += `
+                            <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-white border border-slate-200/80 shadow-sm">
+                                <div class="bg-amber-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
+                                    <i class="fa-solid fa-sparkles text-lg"></i>
+                                </div>
+                                <div class="space-y-1 flex-1 overflow-x-auto">
+                                    <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
+                                        <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">Svar</span>
+                                        <span class="text-[10px] text-slate-400 font-medium">Genereret på ${msg.duration || '0.00'} sekunder</span>
+                                    </div>
+                                    <div class="text-slate-700 html-content leading-relaxed text-[15px]">
+                                        ${msg.html}
+                                    </div>
+                                    ${msg.citationsHtml || ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+            }
+
+            // Scroll down
+            scrollToBottom();
+        }
+
+        // Scroll chat container to bottom
+        function scrollToBottom(behavior = 'auto') {
+            const container = document.getElementById('chat-scroll-container');
+            container.scrollTo({ top: container.scrollHeight, behavior: behavior });
+        }
+
+        // Render list of chats in sidebar
+        function renderSidebar() {
+            const container = document.getElementById('chat-list-container');
+            container.innerHTML = '';
+
+            conversations.forEach(chat => {
+                const isActive = chat.id === currentConversationId;
+                const activeClasses = isActive ? 'bg-slate-200 text-slate-900 font-semibold' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-900';
+
+                const item = document.createElement('div');
+                item.className = `chat-history-item group flex items-center justify-between px-3 py-3 rounded-lg text-sm font-medium transition cursor-pointer ${activeClasses}`;
+                item.setAttribute('data-id', chat.id);
+                item.onclick = () => loadConversation(chat.id);
+
+                item.innerHTML = `
+                    <div class="flex items-center space-x-3 min-w-0 flex-1">
+                        <i class="fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-sm shrink-0"></i>
+                        <span class="truncate block pr-2">${escapeHtml(chat.title)}</span>
+                    </div>
+                    <button onclick="deleteConversation('${chat.id}', event)" class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-slate-300 text-slate-400 hover:text-red-600 transition shrink-0" title="Slet samtale">
+                        <i class="fa-regular fa-trash-can text-xs"></i>
+                    </button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // Delete a conversation
+        function deleteConversation(id, event) {
+            if (event) event.stopPropagation();
+
+            if (!confirm('Er du sikker på, at du vil slette denne samtale?')) {
+                return;
+            }
+
+            conversations = conversations.filter(c => c.id !== id);
+
+            if (conversations.length === 0) {
+                startNewChat(true);
+            } else {
+                if (currentConversationId === id) {
+                    currentConversationId = conversations[0].id;
+                }
+                saveConversations();
+                loadConversation(currentConversationId);
+            }
+        }
+
+        // Clear all conversations
+        function clearAllConversations() {
+            if (!confirm('Er du sikker på, at du vil slette ALLE samtaler?')) {
+                return;
+            }
+            conversations = [];
+            localStorage.removeItem('rag_conversations');
+            startNewChat(false);
+        }
+
+        // Handle question submissions
         async function handleQuerySubmit(event) {
             event.preventDefault();
             const queryInput = document.getElementById('query-input');
@@ -168,31 +422,32 @@
 
             if (!question) return;
 
-            // Tilføj brugerens spørgsmål til samtalen med det samme
-            const chatLog = document.getElementById('chat-conversation');
-            
-            chatLog.innerHTML += `
-                <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-brand-50 border border-brand-100/50 shadow-sm">
-                    <div class="bg-brand-700 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
-                        <i class="fa-solid fa-user text-lg"></i>
-                    </div>
-                    <div class="space-y-1">
-                        <span class="text-xs font-bold text-brand-600 uppercase tracking-wider">Dig</span>
-                        <div class="text-slate-800 font-medium text-sm leading-relaxed">
-                            ${escapeHtml(question)}
-                        </div>
-                    </div>
-                </div>
-            `;
+            // Get current active chat session
+            const activeChat = conversations.find(c => c.id === currentConversationId);
+            if (!activeChat) return;
 
-            // Vis indlæsning
+            // Add user message to active chat
+            activeChat.messages.push({
+                role: 'user',
+                text: question
+            });
+
+            // Auto rename conversation title if it was named "Ny chat"
+            if (activeChat.title === 'Ny chat') {
+                activeChat.title = question.length > 35 ? question.substring(0, 35) + '...' : question;
+            }
+
+            saveConversations();
+
+            // Re-render conversation log instantly to show user's question
+            renderConversationHistory(activeChat);
+
+            // Display skeletal loading placeholder
             const loadingSkeleton = document.getElementById('query-loading');
             loadingSkeleton.classList.remove('hidden');
             submitBtn.disabled = true;
-            queryInput.value = ''; // ryd input-feltet med det samme
-            
-            // Scroll ned til bunden af chatten
-            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            queryInput.value = ''; // Clear prompt field immediately
+            scrollToBottom('smooth');
 
             const startTime = performance.now();
 
@@ -213,7 +468,7 @@
                 const endTime = performance.now();
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
 
-                // Group citations by document to avoid listing the same document multiple times
+                // Group citations by document to avoid duplicate mentions
                 let citationsHtml = '';
                 if (data.citations && data.citations.length > 0) {
                     const uniqueCitationsMap = new Map();
@@ -224,7 +479,6 @@
                             displayDoc = cit.chunkId.split('_chunk_')[0];
                         }
                         
-                        // Use the base filename without dynamic GUID prefix as the unique key to prevent duplicate listings of the same logical document
                         const key = cit.filename || displayDoc;
 
                         if (!uniqueCitationsMap.has(key)) {
@@ -283,27 +537,18 @@
                        </div>`
                     : '';
 
-                // Tilføj svaret til samtalen
-                chatLog.innerHTML += `
-                    <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-white border border-slate-200/80 shadow-sm">
-                        <div class="bg-amber-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
-                            <i class="fa-solid fa-sparkles text-lg animate-pulse"></i>
-                        </div>
-                        <div class="space-y-1 flex-1 overflow-x-auto">
-                            <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
-                                <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">Svar</span>
-                                <span class="text-[10px] text-slate-400 font-medium">Genereret på ${duration} sekunder</span>
-                            </div>
-                            <div class="text-slate-700 html-content leading-relaxed text-[15px]">
-                                ${data.answer}
-                            </div>
-                            ${citationsContainer}
-                        </div>
-                    </div>
-                `;
+                // Save assistant message to conversation object
+                activeChat.messages.push({
+                    role: 'assistant',
+                    html: data.answer,
+                    citationsHtml: citationsContainer,
+                    duration: duration
+                });
 
-                // Scroll ned til bunden af chatten efter svar er indsat
-                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                saveConversations();
+
+                // Re-render chat to include response
+                renderConversationHistory(activeChat);
 
             } catch (error) {
                 console.error('Fejl under søgning:', error);
