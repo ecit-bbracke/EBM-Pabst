@@ -151,14 +151,57 @@ For deploying the system to an Ubuntu Linux production or staging server using m
 
 ---
 
-## 🧪 Running Tests
+## 🧪 Testing & Evaluation
 
-The solution features a robust testing suite of unit, integration, and end-to-end tests:
+The solution includes an extensive, multi-tiered test suite (80+ automated tests across unit, integration, and E2E suites) as well as an automated benchmark evaluation console app.
 
-```cmd
+### Running Automated Tests
+
+Run the full test suite across all test projects:
+
+```bash
 dotnet test
 ```
 
-*   **Unit Tests**: Validate parsing, chunk sequence indexes, and text normalization bounds.
-*   **Integration Tests**: Execute vector CRUD transactions against Qdrant (automatically spins up a temporary instance using Testcontainers if Docker is present; skips gracefully with logging if absent).
-*   **E2E Tests**: Simulates a client uploading a PDF, waiting for index updates, and executing semantic query pipelines.
+Run a specific test category or project:
+
+```bash
+# Run Unit Tests only
+dotnet test tests/UnitTests/DocumentRagSystem.UnitTests.csproj
+
+# Run Integration Tests only (requires Docker for Qdrant Testcontainers)
+dotnet test tests/IntegrationTests/DocumentRagSystem.IntegrationTests.csproj
+
+# Run End-to-End Tests
+dotnet test tests/E2ETests/DocumentRagSystem.E2ETests.csproj
+```
+
+### Test Suite Architecture
+
+| Test Project | Scope & Coverage | Key Tested Components |
+|---|---|---|
+| **`tests/UnitTests`** | Core business logic, parsing, chunking, and specialized multi-turn orchestrators | • **Intent & Categorization**: `InputGovernor` intent classification (`SPEC_LOOKUP`, `COMPARISON`, `COMPATIBILITY`, `TROUBLESHOOTING`, `CALCULATION`, `DESIGN`, `PROCEDURE`).<br>• **Domain Parsing**: `EbmProductCodeParser` extracting fan diameter, design codes, voltage keys, and generation numbers.<br>• **Multi-Turn State**: `ConversationalQueryRefiner`, `ConversationStateStore`, follow-up context merging, and pronoun resolution.<br>• **Specialized Workflows**: `ComparisonWorkflowExecutor`, `DiagnosticWorkflowExecutor`, and `TechnicalRagOrchestrator`.<br>• **Extraction & Chunking**: `PdfTextExtractor`, `MarkdownTableFixer`, sliding-window `ChunkingService`, and `DocumentProcessor`. |
+| **`tests/IntegrationTests`** | Vector store transactions & persistence | • Vector point insertion, upsert, payload metadata preservation, and semantic similarity search in `QdrantVectorStore` via **Testcontainers** (gracefully skips with logging if Docker daemon is not active). |
+| **`tests/E2ETests`** | Full ASP.NET Core pipeline integration | • End-to-end `WebApplicationFactory` tests executing document upload (`POST /api/documents/upload`), queue worker indexing, and grounded multi-turn semantic query verification (`POST /api/query`). |
+
+---
+
+## 📊 Benchmark Evaluation Tool
+
+The `DocumentRagSystem.Evaluation` tool runs automated regression benchmarks against the running Web API using the curated domain Q&A datasets located in `docs/Spørgsmål_*.md`:
+
+```bash
+dotnet run --project src/DocumentRagSystem.Evaluation/DocumentRagSystem.Evaluation.csproj
+```
+
+* **Automated Ingestion**: Checks if the required PDF datasheets in `data/Generelt/` are already indexed; uploads missing documents automatically.
+* **Batch Query Execution**: Queries all questions per document across difficulty levels (`easy`, `medium`, `hard`) and technical topics.
+* **PDF Quality Report**: Generates `test.pdf` featuring cover metadata, question summaries, ground-truth expected answers, and actual RAG generated responses side-by-side.
+
+CLI Options:
+```text
+  -a, --api-base <url>    Base URL of Web API (default: https://localhost:7251)
+  -d, --data-dir <path>   PDF folder path (default: data/Generelt)
+  --docs-dir <path>       Evaluation dataset folder (default: docs)
+  -o, --output <file>     Output report path (default: test.pdf)
+```
