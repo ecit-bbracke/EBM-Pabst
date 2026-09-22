@@ -32,12 +32,19 @@ builder.Services.AddOpenApi();
 // Register Core & Infrastructure Services
 var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
 var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "text-embedding-004";
-var geminiLlmModel = builder.Configuration["Gemini:LlmModel"] ?? "gemini-1.5-flash";
+var geminiLlmModel = builder.Configuration["Gemini:LlmModel"] ?? "gemini-3.6-flash";
+var geminiFastLlmModel = builder.Configuration["Gemini:FastLlmModel"] ?? geminiLlmModel;
 
 var qdrantConnString = builder.Configuration["Qdrant:ConnectionString"] ?? "http://localhost:6334";
 var qdrantCollection = builder.Configuration["Qdrant:CollectionName"] ?? "document-chunks";
 var uploadsDirectory = GetUploadsDirectory(builder.Configuration["Uploads:Directory"]);
 var servedUploadDirectories = GetServedUploadDirectories(uploadsDirectory).ToList();
+
+// Register pooled HTTP clients for external AI API calls
+builder.Services.AddHttpClient("GeminiClient", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
 
 // Add Singletons and Scoped Services
 builder.Services.AddSingleton<IDocumentRepository, InMemoryDocumentRepository>();
@@ -46,14 +53,27 @@ builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new Chunk
 
 // Set up Gemini embedding and LLM services
 builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp => 
-    new GeminiEmbeddingService(geminiApiKey, geminiEmbeddingModel));
+    new GeminiEmbeddingService(
+        geminiApiKey, 
+        geminiEmbeddingModel, 
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient"),
+        sp.GetService<ILogger<GeminiEmbeddingService>>()));
 
 builder.Services.AddSingleton<ILlmService, GeminiLlmService>(sp => 
-    new GeminiLlmService(geminiApiKey, geminiLlmModel));
+    new GeminiLlmService(
+        geminiApiKey, 
+        geminiLlmModel, 
+        geminiFastLlmModel, 
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient"),
+        sp.GetService<ILogger<GeminiLlmService>>()));
 
 // Set up Qdrant Vector Store
 builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp => 
-    new QdrantVectorStore(qdrantConnString, qdrantCollection, sp.GetRequiredService<IEmbeddingService>()));
+    new QdrantVectorStore(
+        qdrantConnString, 
+        qdrantCollection, 
+        sp.GetRequiredService<IEmbeddingService>(),
+        sp.GetService<ILogger<QdrantVectorStore>>()));
 
 // Set up overall DocumentProcessor
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
@@ -71,13 +91,48 @@ builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStor
     new FileConversationStateStore(conversationStorageDir));
 
 builder.Services.AddSingleton<IEbmProductCodeParser, EbmProductCodeParser>();
-builder.Services.AddSingleton<IConversationalQueryRefiner, ConversationalQueryRefiner>();
-builder.Services.AddSingleton<IInputGovernor, InputGovernor>();
+builder.Services.AddSingleton<IConversationalQueryRefiner, ConversationalQueryRefiner>(sp =>
+    new ConversationalQueryRefiner(
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<IEbmProductCodeParser>(),
+        sp.GetService<ILogger<ConversationalQueryRefiner>>()));
+
+builder.Services.AddSingleton<IInputGovernor, InputGovernor>(sp =>
+    new InputGovernor(
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<IEbmProductCodeParser>(),
+        sp.GetService<ILogger<InputGovernor>>()));
+
 builder.Services.AddSingleton<IWorkflowRouter, WorkflowRouter>();
-builder.Services.AddSingleton<IEvidenceEvaluator, EvidenceEvaluator>();
-builder.Services.AddSingleton<IAnswerComposer, AnswerComposer>();
-builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>();
-builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>();
+
+builder.Services.AddSingleton<IEvidenceEvaluator, EvidenceEvaluator>(sp =>
+    new EvidenceEvaluator(
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetService<ILogger<EvidenceEvaluator>>()));
+
+builder.Services.AddSingleton<IAnswerComposer, AnswerComposer>(sp =>
+    new AnswerComposer(
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetService<ILogger<AnswerComposer>>()));
+
+builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
+    new OutputGovernor(
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetService<ILogger<OutputGovernor>>()));
+
+builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>(sp =>
+    new TechnicalRagOrchestrator(
+        sp.GetRequiredService<IInputGovernor>(),
+        sp.GetRequiredService<IWorkflowRouter>(),
+        sp.GetRequiredService<IEvidenceEvaluator>(),
+        sp.GetRequiredService<IAnswerComposer>(),
+        sp.GetRequiredService<IOutputGovernor>(),
+        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<IEbmProductCodeParser>(),
+        sp.GetRequiredService<IConversationalQueryRefiner>(),
+        sp.GetRequiredService<IConversationStateStore>(),
+        sp.GetService<IDocumentRepository>(),
+        sp.GetService<ILogger<TechnicalRagOrchestrator>>()));
 
 // Register Queue and Background Hosted Services
 builder.Services.AddSingleton<IDocumentQueue, DocumentQueue>();
@@ -154,6 +209,7 @@ app.MapPost("/api/query", async (
     ILogger<Program> logger
     ) =>
 {
+    var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
     var validationResult = await validator.ValidateAsync(request);
     if (!validationResult.IsValid)
     {
@@ -171,8 +227,6 @@ app.MapPost("/api/query", async (
     var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
     var htmlAnswer = Markdown.ToHtml(answer, pipeline);
     var citations = new List<CitationDto>();
-    var documentsById = (await vectorStore.GetDocumentsAsync())
-        .ToDictionary(document => document.Id, StringComparer.OrdinalIgnoreCase);
 
     foreach (var item in chunks)
     {
@@ -181,9 +235,8 @@ app.MapPost("/api/query", async (
             continue;
         }
 
-        documentsById.TryGetValue(item.DocumentId, out var document);
-        var fileName = FirstNonEmpty(item.FileName, document?.FileName, item.DocumentId);
-        var filePath = FirstNonEmpty(item.FilePath, document?.FilePath);
+        var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
+        var filePath = item.FilePath;
 
         citations.Add(new CitationDto(
             item.Id,
@@ -196,9 +249,100 @@ app.MapPost("/api/query", async (
     }
 
     var effectiveConversationId = trace.ConversationStateAfter?.ConversationId ?? request.ConversationId;
+    requestStopwatch.Stop();
+    logger.LogInformation(
+        "HTTP POST /api/query completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, Citations: {CitationCount}).",
+        requestStopwatch.ElapsedMilliseconds, effectiveConversationId, citations.Count);
+
     return Results.Ok(new QueryResponse(htmlAnswer, citations, effectiveConversationId));
 })
 .WithName("QueryDocuments");
+
+// STREAMING QUERY ENDPOINT (SSE)
+app.MapPost("/api/query/stream", async (
+    QueryRequest request,
+    IValidator<QueryRequest> validator,
+    IVectorStore vectorStore,
+    ITechnicalRagOrchestrator orchestrator,
+    HttpContext httpContext,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken
+    ) =>
+{
+    var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var validationResult = await validator.ValidateAsync(request, cancellationToken);
+    if (!validationResult.IsValid)
+    {
+        return Results.BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
+    }
+
+    logger.LogInformation("Streaming query received: {Question} (ConversationId: {ConversationId})", request.Question, request.ConversationId);
+
+    httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
+    httpContext.Response.Headers.Append("Cache-Control", "no-cache");
+    httpContext.Response.Headers.Append("Connection", "keep-alive");
+
+    var stream = orchestrator.ProcessQueryStreamAsync(
+        request.Question, 
+        vectorStore, 
+        request.ConversationId, 
+        null, 
+        cancellationToken);
+
+    int chunkIndex = 0;
+    await foreach (var evt in stream.WithCancellation(cancellationToken))
+    {
+        if (evt.EventType == "citations")
+        {
+            var citations = new List<CitationDto>();
+            if (evt.Chunks != null)
+            {
+                foreach (var item in evt.Chunks)
+                {
+                    if (item == null || string.IsNullOrWhiteSpace(item.DocumentId))
+                        continue;
+
+                    var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
+                    var filePath = item.FilePath;
+
+                    citations.Add(new CitationDto(
+                        item.Id,
+                        item.DocumentId,
+                        string.Empty,
+                        item.Index,
+                        fileName,
+                        ToDocumentUrl(filePath, fileName, servedUploadDirectories)
+                    ));
+                }
+            }
+
+            var payload = JsonSerializer.Serialize(new { citations, conversationId = evt.ConversationId });
+            await httpContext.Response.WriteAsync($"event: citations\ndata: {payload}\n\n", cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+        else if (evt.EventType == "chunk")
+        {
+            chunkIndex++;
+            var payload = JsonSerializer.Serialize(new { text = evt.Text });
+            await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+        else if (evt.EventType == "done")
+        {
+            requestStopwatch.Stop();
+            logger.LogInformation(
+                "HTTP POST /api/query/stream completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, TotalChunksStreamed: {ChunkCount}).",
+                requestStopwatch.ElapsedMilliseconds, evt.ConversationId, chunkIndex);
+
+            var payload = JsonSerializer.Serialize(new { conversationId = evt.ConversationId, trace = evt.Trace });
+            await httpContext.Response.WriteAsync($"event: done\ndata: {payload}\n\n", cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+    }
+
+    return Results.Empty;
+})
+.WithName("QueryDocumentsStream");
 
 // GET CONVERSATION STATE
 app.MapGet("/api/conversation/{id}", async (string id, IConversationStateStore stateStore) =>

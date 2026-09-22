@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome for smukke ikoner -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked for real-time Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -493,6 +495,10 @@
                             </div>
                         `;
                     } else if (msg.role === 'assistant') {
+                        const durationBadge = (msg.duration !== null && msg.duration !== undefined && msg.duration !== '')
+                            ? `<span class="text-[10px] text-slate-400 font-medium">Genereret på ${escapeHtml(msg.duration)} sekunder</span>`
+                            : '';
+
                         chatLog.innerHTML += `
                             <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-white border border-slate-200/80 shadow-sm">
                                 <div class="bg-amber-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
@@ -501,7 +507,7 @@
                                 <div class="space-y-1 flex-1 overflow-x-auto">
                                     <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
                                         <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">Svar</span>
-                                        <span class="text-[10px] text-slate-400 font-medium">Genereret på ${msg.duration || '0.00'} sekunder</span>
+                                        ${durationBadge}
                                     </div>
                                     <div class="text-slate-700 html-content leading-relaxed text-[15px]">
                                         ${msg.html}
@@ -597,7 +603,87 @@
             startNewChat(false);
         }
 
-        // Handle question submissions
+        function renderMarkdownToHtml(markdownText) {
+            if (!markdownText) return '';
+            if (typeof marked !== 'undefined') {
+                try {
+                    return marked.parse(markdownText);
+                } catch (e) {
+                    // Fallback
+                }
+            }
+            return escapeHtml(markdownText).replace(/\n/g, '<br>');
+        }
+
+        function buildCitationsHtml(citations) {
+            if (!citations || citations.length === 0) return '';
+            const uniqueCitationsMap = new Map();
+
+            citations.forEach((cit) => {
+                let displayDoc = cit.documentId;
+                if (cit.chunkId && cit.chunkId.includes('_chunk_')) {
+                    displayDoc = cit.chunkId.split('_chunk_')[0];
+                }
+                
+                const key = cit.filename || displayDoc;
+
+                if (!uniqueCitationsMap.has(key)) {
+                    uniqueCitationsMap.set(key, {
+                        filename: cit.filename,
+                        filepath: cit.filepath,
+                        documentId: displayDoc,
+                        pages: new Set()
+                    });
+                }
+                
+                if (cit.index !== undefined && cit.index !== null) {
+                    uniqueCitationsMap.get(key).pages.add(cit.index + 1);
+                }
+            });
+
+            let citationsHtml = '';
+            let citationIndex = 1;
+            uniqueCitationsMap.forEach((cit) => {
+                const fileName = escapeHtml(cit.filename || cit.documentId);
+                const citationLink = isDocumentUrl(cit.filepath)
+                    ? `<a href="${escapeHtml(cit.filepath)}" target="_blank" rel="noopener noreferrer" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm">
+                           ${fileName}
+                       </a>`
+                    : `<span class="font-semibold text-slate-700 text-sm">${fileName}</span>`;
+
+                const sortedPages = Array.from(cit.pages).sort((a, b) => a - b);
+                const pagesDisplay = sortedPages.length > 0 
+                    ? `Side: ${sortedPages.join(', ')}`
+                    : 'Side: Ikke angivet';
+
+                citationsHtml += `
+                    <div class="border border-slate-100 rounded-lg p-3.5 bg-slate-50 hover:bg-slate-100/60 transition shadow-sm max-w-lg">
+                        <div class="flex justify-between items-center mb-1.5 text-[11px] text-slate-400 font-medium">
+                            <span class="text-brand-600 font-bold flex items-center">
+                                <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${citationIndex}
+                            </span>
+                            <span class="bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded font-semibold text-[9px] tracking-wide shrink-0">
+                                ${pagesDisplay}
+                            </span>
+                        </div>
+                        <div class="text-sm text-slate-600 flex items-center gap-2">
+                            <i class="fa-solid fa-file-pdf text-red-500 shrink-0"></i>
+                            <div class="truncate">${citationLink}</div>
+                        </div>
+                    </div>`;
+                citationIndex++;
+            });
+
+            return `
+                <div class="border-t border-slate-100 pt-4 mt-4 space-y-3">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                        <i class="fa-solid fa-quote-left text-brand-500 mr-2"></i> Baseret på følgende dokumenter:
+                    </h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${citationsHtml}</div>
+                </div>`;
+        }
+
+        // Handle question submissions with real-time SSE streaming
         async function handleQuerySubmit(event) {
             event.preventDefault();
             const queryInput = document.getElementById('query-input');
@@ -621,22 +707,28 @@
                 activeChat.title = question.length > 35 ? question.substring(0, 35) + '...' : question;
             }
 
-            saveConversations();
+            // Create streaming assistant message entry immediately
+            const assistantMsg = {
+                role: 'assistant',
+                text: '',
+                html: '<span class="inline-block animate-pulse text-brand-500">Tænker og henter kilder...</span>',
+                citationsHtml: '',
+                duration: null
+            };
+            activeChat.messages.push(assistantMsg);
 
-            // Re-render conversation log instantly to show user's question
+            saveConversations();
             renderConversationHistory(activeChat);
 
-            // Display skeletal loading placeholder
-            const loadingSkeleton = document.getElementById('query-loading');
-            loadingSkeleton.classList.remove('hidden');
             submitBtn.disabled = true;
-            queryInput.value = ''; // Clear prompt field immediately
+            queryInput.value = '';
             scrollToBottom('smooth');
 
             const startTime = performance.now();
+            let rawAccumulatedText = '';
 
             try {
-                const response = await fetch('/api/query', {
+                const response = await fetch('/api/query/stream', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -647,109 +739,114 @@
                     })
                 });
 
-                if (!response.ok) {
-                    throw new Error(await response.text() || 'Kunne ikke fuldføre anmodningen');
+                if (!response.ok || !response.body) {
+                    throw new Error(`Streaming fejl: ${response.statusText}`);
                 }
 
-                const data = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop(); // Keep incomplete chunk in buffer
+
+                    for (const block of lines) {
+                        if (!block.trim()) continue;
+
+                        let eventType = 'message';
+                        let dataStr = '';
+
+                        const blockLines = block.split('\n');
+                        for (const line of blockLines) {
+                            if (line.startsWith('event: ')) {
+                                eventType = line.substring(7).trim();
+                            } else if (line.startsWith('data: ')) {
+                                dataStr = line.substring(6).trim();
+                            }
+                        }
+
+                        if (!dataStr) continue;
+
+                        try {
+                            const parsed = JSON.parse(dataStr);
+
+                            if (eventType === 'citations') {
+                                if (parsed.conversationId && parsed.conversationId !== activeChat.id) {
+                                    activeChat.id = parsed.conversationId;
+                                    currentConversationId = parsed.conversationId;
+                                }
+                                if (parsed.citations && parsed.citations.length > 0) {
+                                    assistantMsg.citationsHtml = buildCitationsHtml(parsed.citations);
+                                    renderConversationHistory(activeChat);
+                                }
+                            } else if (eventType === 'chunk') {
+                                if (parsed.text) {
+                                    rawAccumulatedText += parsed.text;
+                                    assistantMsg.text = rawAccumulatedText;
+                                    assistantMsg.html = renderMarkdownToHtml(rawAccumulatedText);
+                                    renderConversationHistory(activeChat);
+                                    scrollToBottom();
+                                }
+                            } else if (eventType === 'done') {
+                                if (parsed.conversationId && parsed.conversationId !== activeChat.id) {
+                                    activeChat.id = parsed.conversationId;
+                                    currentConversationId = parsed.conversationId;
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Fejl ved parsing af SSE event:', err);
+                        }
+                    }
+                }
+
                 const endTime = performance.now();
-                const duration = ((endTime - startTime) / 1000).toFixed(2);
-
-                if (data.conversationId && data.conversationId !== activeChat.id) {
-                    activeChat.id = data.conversationId;
-                    currentConversationId = data.conversationId;
+                assistantMsg.duration = ((endTime - startTime) / 1000).toFixed(2);
+                if (!rawAccumulatedText && !assistantMsg.html.includes('animate-pulse')) {
+                    assistantMsg.html = renderMarkdownToHtml(assistantMsg.text || 'Intet svar modtaget.');
                 }
-
-                // Group citations by document to avoid duplicate mentions
-                let citationsHtml = '';
-                if (data.citations && data.citations.length > 0) {
-                    const uniqueCitationsMap = new Map();
-
-                    data.citations.forEach((cit) => {
-                        let displayDoc = cit.documentId;
-                        if (cit.chunkId && cit.chunkId.includes('_chunk_')) {
-                            displayDoc = cit.chunkId.split('_chunk_')[0];
-                        }
-                        
-                        const key = cit.filename || displayDoc;
-
-                        if (!uniqueCitationsMap.has(key)) {
-                            uniqueCitationsMap.set(key, {
-                                filename: cit.filename,
-                                filepath: cit.filepath,
-                                documentId: displayDoc,
-                                pages: new Set()
-                            });
-                        }
-                        
-                        if (cit.index !== undefined && cit.index !== null) {
-                            uniqueCitationsMap.get(key).pages.add(cit.index + 1);
-                        }
-                    });
-
-                    let citationIndex = 1;
-                    uniqueCitationsMap.forEach((cit, key) => {
-                        const fileName = escapeHtml(cit.filename || cit.documentId);
-                        const citationLink = isDocumentUrl(cit.filepath)
-                            ? `<a href="${escapeHtml(cit.filepath)}" target="_blank" rel="noopener noreferrer" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm">
-                                   ${fileName}
-                               </a>`
-                            : `<span class="font-semibold text-slate-700 text-sm">${fileName}</span>`;
-
-                        const sortedPages = Array.from(cit.pages).sort((a, b) => a - b);
-                        const pagesDisplay = sortedPages.length > 0 
-                            ? `Side: ${sortedPages.join(', ')}`
-                            : 'Side: Ikke angivet';
-
-                        citationsHtml += `
-                            <div class="border border-slate-100 rounded-lg p-3.5 bg-slate-50 hover:bg-slate-100/60 transition shadow-sm max-w-lg">
-                                <div class="flex justify-between items-center mb-1.5 text-[11px] text-slate-400 font-medium">
-                                    <span class="text-brand-600 font-bold flex items-center">
-                                        <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${citationIndex}
-                                    </span>
-                                    <span class="bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded font-semibold text-[9px] tracking-wide shrink-0">
-                                        ${pagesDisplay}
-                                    </span>
-                                </div>
-                                <div class="text-sm text-slate-600 flex items-center gap-2">
-                                    <i class="fa-solid fa-file-pdf text-red-500 shrink-0"></i>
-                                    <div class="truncate">${citationLink}</div>
-                                </div>
-                            </div>`;
-                        citationIndex++;
-                    });
-                }
-
-                const citationsContainer = citationsHtml 
-                    ? `<div class="border-t border-slate-100 pt-4 mt-4 space-y-3">
-                           <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
-                               <i class="fa-solid fa-quote-left text-brand-500 mr-2"></i> Baseret på følgende dokumenter:
-                           </h4>
-                           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${citationsHtml}</div>
-                       </div>`
-                    : '';
-
-                // Save assistant message to conversation object
-                activeChat.messages.push({
-                    role: 'assistant',
-                    html: data.answer,
-                    citationsHtml: citationsContainer,
-                    duration: duration
-                });
-
+                
                 saveConversations();
-
-                // Re-render chat to include response
                 renderConversationHistory(activeChat);
-
-                // Refresh active conversation state/constraints chips
                 await fetchActiveState(activeChat.id);
 
-            } catch (error) {
-                console.error('Fejl under søgning:', error);
-                alert(`Fejl: ${error.message}`);
+            } catch (streamError) {
+                console.warn('Streaming fejlede, falder tilbage til standard endpoint:', streamError);
+                try {
+                    const fallbackResponse = await fetch('/api/query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question: question, conversationId: activeChat.id })
+                    });
+
+                    if (!fallbackResponse.ok) {
+                        throw new Error(await fallbackResponse.text() || 'Kunne ikke fuldføre anmodningen');
+                    }
+
+                    const data = await fallbackResponse.json();
+                    const endTime = performance.now();
+                    assistantMsg.duration = ((endTime - startTime) / 1000).toFixed(2);
+                    assistantMsg.html = data.answer;
+                    assistantMsg.citationsHtml = buildCitationsHtml(data.citations);
+
+                    if (data.conversationId && data.conversationId !== activeChat.id) {
+                        activeChat.id = data.conversationId;
+                        currentConversationId = data.conversationId;
+                    }
+
+                    saveConversations();
+                    renderConversationHistory(activeChat);
+                    await fetchActiveState(activeChat.id);
+                } catch (fallbackError) {
+                    console.error('Både streaming og fallback fejlede:', fallbackError);
+                    assistantMsg.html = `<span class="text-red-600 font-semibold">Fejl: ${escapeHtml(fallbackError.message)}</span>`;
+                    renderConversationHistory(activeChat);
+                }
             } finally {
-                loadingSkeleton.classList.add('hidden');
                 submitBtn.disabled = false;
             }
         }

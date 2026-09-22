@@ -26,11 +26,19 @@ builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new Chunk
 
 // Set up Gemini embedding service
 builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp => 
-    new GeminiEmbeddingService(geminiApiKey, geminiEmbeddingModel));
+    new GeminiEmbeddingService(
+        geminiApiKey, 
+        geminiEmbeddingModel,
+        null,
+        sp.GetService<Microsoft.Extensions.Logging.ILogger<GeminiEmbeddingService>>()));
 
 // Set up Qdrant Vector Store
 builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp => 
-    new QdrantVectorStore(qdrantConnString, qdrantCollection, sp.GetRequiredService<IEmbeddingService>()));
+    new QdrantVectorStore(
+        qdrantConnString, 
+        qdrantCollection, 
+        sp.GetRequiredService<IEmbeddingService>(),
+        sp.GetService<Microsoft.Extensions.Logging.ILogger<QdrantVectorStore>>()));
 
 // Set up overall DocumentProcessor
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
