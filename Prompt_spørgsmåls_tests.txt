@@ -1,3 +1,0 @@
-in the docs folder there are 10 files whose name start with "Spørgsmål". They contain questions and answers in a json structure.
-for each document call the web api which is running locally with the question and record the response.
-Create a pdf file called test.pdf and create a section in the pdf for every document and in each section list each question from that document combined with the answer from the document and the response from the web api
