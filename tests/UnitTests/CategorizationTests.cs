@@ -19,6 +19,8 @@ public class CategorizationTests
     [InlineData("Why does the device show a blinking red light and error code 4?", "TROUBLESHOOTING")]
     [InlineData("Calculate the total electrical load for three fans at 230V and 1.5A.", "CALCULATION")]
     [InlineData("Design a multi-fan ventilation system for a 100sqm room.", "DESIGN")]
+    [InlineData("What ventilators are there?", "OVERVIEW")]
+    [InlineData("Hvilke ventilatorer findes der?", "OVERVIEW")]
     [InlineData("Hello, can you help me with something general?", "CLARIFICATION")]
     public async Task InputGovernor_ShouldCorrectlyMapDifferentUserQuestionsToExpectedIntents(string question, string expectedIntent)
     {
@@ -200,6 +202,8 @@ public class CategorizationTests
     [InlineData("CALCULATION", WorkflowType.Calculation)]
     [InlineData("DESIGN", WorkflowType.Design)]
     [InlineData("CLARIFICATION", WorkflowType.Clarification)]
+    [InlineData("OVERVIEW", WorkflowType.Overview)]
+    [InlineData("CATALOG", WorkflowType.Overview)]
     [InlineData("UNKNOWN_INTENT_FALLBACK", WorkflowType.SimpleRag)]
     public void WorkflowRouter_ShouldDeterministicallyRouteIntentsToCorrectWorkflows(string intent, WorkflowType expectedWorkflow)
     {
@@ -220,5 +224,35 @@ public class CategorizationTests
 
         // Assert
         Assert.Equal(expectedWorkflow, result);
+    }
+
+    [Theory]
+    [InlineData("hvilken ventilator kan jeg erstatte en A3G910-AO83-90 med", "COMPATIBILITY", "A3G910AO8390")]
+    [InlineData("What can replace S4E315-BS20-35?", "COMPATIBILITY", "S4E315BS2035")]
+    [InlineData("Sammenlign A6E450AP0201 og A6E450AP0202", "COMPARISON", "A6E450AP0201")]
+    [InlineData("What ventilators are there in the system?", "OVERVIEW", null)]
+    [InlineData("Hvilke ventilatorer findes der?", "OVERVIEW", null)]
+    public async Task InputGovernor_ShouldShortCircuitDeterministicQueries_WithoutLlmCalls(
+        string question, string expectedIntent, string? expectedProductCode)
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+        var governor = new InputGovernor(mockLlm.Object, parser);
+
+        // Act
+        var result = await governor.GovernInputAsync(question);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(expectedIntent, result.Intent);
+        Assert.Equal(1.0, result.Confidence);
+        if (expectedProductCode != null)
+        {
+            Assert.Contains(result.ParsedEbmProducts, p => p.CleanCode == expectedProductCode);
+        }
+
+        // Verify LLM was NOT invoked (0 LLM round-trips)
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), true), Times.Never);
     }
 }

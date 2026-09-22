@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 
@@ -12,11 +14,16 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
 {
     private readonly ILlmService _llmService;
     private readonly IEbmProductCodeParser _ebmParser;
+    private readonly ILogger<ConversationalQueryRefiner>? _logger;
 
-    public ConversationalQueryRefiner(ILlmService llmService, IEbmProductCodeParser? ebmParser = null)
+    public ConversationalQueryRefiner(
+        ILlmService llmService, 
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<ConversationalQueryRefiner>? logger = null)
     {
         _llmService = llmService ?? throw new ArgumentNullException(nameof(llmService));
         _ebmParser = ebmParser ?? new EbmProductCodeParser();
+        _logger = logger;
     }
 
     public async Task<QueryRefinementResult> RefineQueryAsync(
@@ -27,6 +34,7 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
         if (string.IsNullOrWhiteSpace(userMessage))
             throw new ArgumentNullException(nameof(userMessage));
 
+        var stopwatch = Stopwatch.StartNew();
         var extractedProducts = _ebmParser.ExtractProductsFromText(userMessage);
 
         // If no prior conversation state or no active context, return clean single-turn refinement
@@ -43,6 +51,11 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
                 p.FanFamily == FanFamilyType.Axial ? "axial_fan" : "fan",
                 p.RawCode
             )).ToList();
+
+            stopwatch.Stop();
+            _logger?.LogInformation(
+                "[QueryRefiner] Single-turn query detected (no prior context). Completed in {DurationMs}ms.",
+                stopwatch.ElapsedMilliseconds);
 
             return new QueryRefinementResult(
                 OriginalQuestion: userMessage,
@@ -96,6 +109,8 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
             10. Build:
                - `resolved_question`: The user message with pronouns/references replaced with exact entity names.
                - `effective_question`: A fully self-contained, unambiguous technical question combining active entities, candidate set, and all still-active constraints.
+            11. CRITICAL LANGUAGE RULE:
+               - Keep `resolved_question`, `effective_question`, and `clarification_reason` in the EXACT same language as the user's latest message (e.g. English if English, Danish if Danish, German if German).
 
             Current Conversation State:
             {{serializedState}}
@@ -167,9 +182,14 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
             }
             """;
 
+        _logger?.LogInformation(
+            "[QueryRefiner] Executing query refinement prompt ({PromptLength} chars) for conversation state (Turn: {TurnCount}).\nPrompt:\n{Prompt}",
+            prompt.Length, conversationState?.TurnCount, prompt);
+
         try
         {
             var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: true);
+            stopwatch.Stop();
 
             var cleanedResponse = response.Trim();
             if (cleanedResponse.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
@@ -198,6 +218,9 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
             var result = JsonSerializer.Deserialize<QueryRefinementResult>(cleanedResponse, options);
             if (result != null)
             {
+                _logger?.LogInformation(
+                    "[QueryRefiner] Completed in {DurationMs}ms. Relationship: {Relationship}, EffectiveQuestion: \"{EffectiveQuestion}\", ClarificationRequired: {ClarificationRequired}.",
+                    stopwatch.ElapsedMilliseconds, result.RelationshipToPreviousTurn, result.EffectiveQuestion, result.ClarificationRequired);
                 // Ensure entities contain extracted ebm products if any
                 var activeEntities = result.ActiveEntities ?? new List<ConversationEntity>();
                 foreach (var prod in extractedProducts)
@@ -215,13 +238,28 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
                     }
                 }
 
+                var activeConstraints = result.ActiveConstraints ?? new List<ConversationConstraint>();
+                var constraintsAdded = result.ConstraintsAdded ?? new List<ConversationConstraint>();
+                var constraintsRemoved = result.ConstraintsRemoved ?? new List<ConversationConstraint>();
+                var constraintsReplaced = result.ConstraintsReplaced ?? new List<ConstraintReplacement>();
+                var referencesResolved = result.ReferencesResolved ?? new List<string>();
+                var contextUsed = result.ContextUsed ?? new List<int>();
+
                 // If relationship is NEW_TOPIC or RESET, ensure old constraints/entities don't unintentionally persist
                 if (result.RelationshipToPreviousTurn == TurnRelationship.NewTopic || result.NewTopic)
                 {
                     return result with
                     {
                         OriginalQuestion = userMessage,
+                        ResolvedQuestion = string.IsNullOrWhiteSpace(result.ResolvedQuestion) ? userMessage : result.ResolvedQuestion,
+                        EffectiveQuestion = string.IsNullOrWhiteSpace(result.EffectiveQuestion) ? userMessage : result.EffectiveQuestion,
                         ActiveEntities = activeEntities,
+                        ActiveConstraints = activeConstraints,
+                        ConstraintsAdded = constraintsAdded,
+                        ConstraintsRemoved = constraintsRemoved,
+                        ConstraintsReplaced = constraintsReplaced,
+                        ReferencesResolved = referencesResolved,
+                        ContextUsed = contextUsed,
                         NewTopic = true
                     };
                 }
@@ -231,9 +269,16 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
                     return result with
                     {
                         OriginalQuestion = userMessage,
+                        ResolvedQuestion = string.IsNullOrWhiteSpace(result.ResolvedQuestion) ? userMessage : result.ResolvedQuestion,
+                        EffectiveQuestion = string.IsNullOrWhiteSpace(result.EffectiveQuestion) ? userMessage : result.EffectiveQuestion,
                         ActiveEntities = activeEntities,
-                        ActiveConstraints = result.ConstraintsAdded ?? new List<ConversationConstraint>(),
+                        ActiveConstraints = constraintsAdded,
                         CandidateSet = null,
+                        ConstraintsAdded = constraintsAdded,
+                        ConstraintsRemoved = constraintsRemoved,
+                        ConstraintsReplaced = constraintsReplaced,
+                        ReferencesResolved = referencesResolved,
+                        ContextUsed = contextUsed,
                         NewTopic = false
                     };
                 }
@@ -241,7 +286,15 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
                 return result with
                 {
                     OriginalQuestion = userMessage,
-                    ActiveEntities = activeEntities
+                    ResolvedQuestion = string.IsNullOrWhiteSpace(result.ResolvedQuestion) ? userMessage : result.ResolvedQuestion,
+                    EffectiveQuestion = string.IsNullOrWhiteSpace(result.EffectiveQuestion) ? userMessage : result.EffectiveQuestion,
+                    ActiveEntities = activeEntities,
+                    ActiveConstraints = activeConstraints,
+                    ConstraintsAdded = constraintsAdded,
+                    ConstraintsRemoved = constraintsRemoved,
+                    ConstraintsReplaced = constraintsReplaced,
+                    ReferencesResolved = referencesResolved,
+                    ContextUsed = contextUsed
                 };
             }
         }

@@ -368,4 +368,153 @@ public class SpecializedWorkflowTests
         Assert.False(compatResult.EbmEvaluation.IsDropInReplacement);
         Assert.Contains(compatResult.Checks, c => c.Dimension == "Airflow Direction" && c.Status == "INCOMPATIBLE");
     }
+
+    [Fact]
+    public async Task OverviewWorkflow_ShouldExtractAllModelsFromIndexedDocumentsAndCategorizeThem()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.IsAny<string>(), false))
+            .ReturnsAsync("""
+            ### ebm-papst Ventilator Oversigt
+            
+            Følgende modeller er tilgængelige i systemet:
+            
+            #### 1. Aksialventilatorer (Axial Fans)
+            - **S4E315BS2035**: 4-polet 1-faset AC med beskyttelsesgitter, Ø315 mm (Kilde: Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf)
+            
+            #### 2. Centrifugalventilatorer & RadiPac (Centrifugal Fans)
+            - **K3G560PC0401**: EC RadiPac modul i ramme, Ø560 mm (Kilde: Data_sheet_DA_-_K3G560PC0401_KM260717_.pdf)
+            
+            #### 3. Kompaktblæsere & DC-ventilatorer (Compact Fans)
+            - **4114N/2H6PU** (9694300352): 119x119 mm kompakt DC blæser (Kilde: 9694300352_4114N_2H6PU_PDB_EN.PDF)
+            """);
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf", "/data/k3g.pdf", DateTime.UtcNow),
+                new Document("doc3", "9694300352_4114N_2H6PU_PDB_EN.PDF", "/data/4114.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "S4E315 series axial fan", 0, "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf"),
+                new DocumentChunk("c2", "doc2", "K3G560 series centrifugal fan", 0, "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new OverviewWorkflowExecutor(mockLlm.Object, parser);
+        var governorResult = new InputGovernorResult(
+            Intent: "OVERVIEW",
+            Confidence: 0.95,
+            Entities: new(),
+            RequestedAttributes: new(),
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "What ventilators are there?",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.Contains("S4E315BS2035", draftResponse);
+        Assert.Contains("K3G560PC0401", draftResponse);
+        Assert.Contains("4114N", draftResponse);
+
+        var catalogResult = workflowData as CatalogOverviewResult;
+        Assert.NotNull(catalogResult);
+        Assert.True(catalogResult.TotalModels >= 3);
+        Assert.True(catalogResult.Categories.ContainsKey("Aksialventilatorer (Axial Fans)"));
+        Assert.True(catalogResult.Categories.ContainsKey("Centrifugalventilatorer & RadiPac (Centrifugal Fans)"));
+        Assert.True(catalogResult.Categories.ContainsKey("Kompaktblæsere & DC-ventilatorer (Compact Fans)"));
+
+        // Verify that LLM draft generation was completely eliminated for Overview workflow
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), false), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompatibilityWorkflow_WithSingleProduct_OpenReplacementQuery_ShouldProduceConcreteRecommendations()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.IsAny<string>(), false))
+            .ReturnsAsync("""
+            ### Erstatningsforslag for A3G910-AO83-90
+            
+            A3G910-AO83-90 er en Ø910 mm EC-aksialventilator grundmodel med **Luftretning A** (lige slutciffer 90).
+            
+            #### Anbefalede erstatningsmodeller fra ebm-papst sortimentet:
+            - **S3G910...**: Samme Ø910 mm EC aksialventilator monteret med **beskyttelsesgitter**.
+            - **W3G910...**: Samme Ø910 mm EC aksialventilator monteret i **vægring**.
+            
+            #### Kritiske krav:
+            - **Luftretning**: Erstatningsmodellen SKAL have et **lige slutciffer** (f.eks. ..02, ..04, ..90) for at sikre Luftretning A.
+            """);
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_A3G910AO8390_KM274579_.pdf", "/data/a3g910.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e315.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "A3G910-AO83-90 axial fan specifications 910mm", 0)
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new CompatibilityWorkflowExecutor(mockLlm.Object, parser);
+        var governorResult = new InputGovernorResult(
+            Intent: "COMPATIBILITY",
+            Confidence: 0.98,
+            Entities: new List<EntityInfo>
+            {
+                new EntityInfo("axial_fan", "A3G910-AO83-90")
+            },
+            RequestedAttributes: new List<string> { "airflow_direction", "technology", "diameter" },
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null,
+            ParsedEbmProducts: new List<EbmProductInfo>
+            {
+                parser.Parse("A3G910-AO83-90")
+            }
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "hvilken ventilator kan jeg erstatte en A3G910-AO83-90 med?",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.Contains("S3G910", draftResponse);
+        Assert.Contains("W3G910", draftResponse);
+        Assert.Contains("Luftretning A", draftResponse);
+
+        var compatResult = workflowData as CompatibilityResult;
+        Assert.NotNull(compatResult);
+        Assert.NotNull(compatResult.ReplacementAnalysis);
+        Assert.Equal("A3G910AO8390", compatResult.ReplacementAnalysis.SourceProduct.CleanCode);
+        Assert.Contains(compatResult.ReplacementAnalysis.TheoreticalPatterns, p => p.SuggestedModelOrPrefix.StartsWith("S3G910"));
+        Assert.Contains(compatResult.ReplacementAnalysis.TheoreticalPatterns, p => p.SuggestedModelOrPrefix.StartsWith("W3G910"));
+
+        // Verify that LLM draft generation was completely eliminated (0 LLM round-trips for draft generation)
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), false), Times.Never);
+    }
 }

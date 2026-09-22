@@ -1,6 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 
@@ -16,11 +20,16 @@ public class InputGovernor : IInputGovernor
 {
     private readonly ILlmService _llmService;
     private readonly IEbmProductCodeParser _ebmParser;
+    private readonly ILogger<InputGovernor>? _logger;
 
-    public InputGovernor(ILlmService llmService, IEbmProductCodeParser? ebmParser = null)
+    public InputGovernor(
+        ILlmService llmService, 
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<InputGovernor>? logger = null)
     {
         _llmService = llmService;
         _ebmParser = ebmParser ?? new EbmProductCodeParser();
+        _logger = logger;
     }
 
     public Task<InputGovernorResult> GovernInputAsync(string question)
@@ -37,11 +46,23 @@ public class InputGovernor : IInputGovernor
         if (string.IsNullOrWhiteSpace(effectiveQuestion))
             throw new ArgumentNullException(nameof(effectiveQuestion));
 
+        var stopwatch = Stopwatch.StartNew();
+
         var combinedText = string.IsNullOrWhiteSpace(originalQuestion) || string.Equals(effectiveQuestion, originalQuestion, StringComparison.OrdinalIgnoreCase)
             ? effectiveQuestion
             : $"{effectiveQuestion} {originalQuestion}";
 
         var extractedProducts = _ebmParser.ExtractProductsFromText(combinedText);
+
+        // Fast-path deterministic short-circuit for well-defined domain queries
+        if (TryFastPathDeterministicClassification(combinedText, extractedProducts, conversationContext, out var fastResult))
+        {
+            stopwatch.Stop();
+            _logger?.LogInformation(
+                "[InputGovernor] Fast-path deterministic classification completed in {DurationMs}ms (Intent: {Intent}, Confidence: {Confidence}, Entities: {EntityCount}).",
+                stopwatch.ElapsedMilliseconds, fastResult.Intent, fastResult.Confidence, fastResult.Entities?.Count ?? 0);
+            return fastResult;
+        }
 
         var contextDescription = "";
         if (conversationContext != null)
@@ -86,6 +107,7 @@ public class InputGovernor : IInputGovernor
             - TROUBLESHOOTING: Diagnosing problems, faults, or symptoms.
             - DESIGN: Questions asking to design a setup, system, or configuration.
             - CALCULATION: Asking to calculate some value or parameter.
+            - OVERVIEW: Questions asking to list, inventory, summarize, or discover what fans, models, ventilators, or products exist in the database or catalog (e.g. "What ventilators are there?", "Hvilke ventilatorer findes der?", "List all available fans", "What models do you have?").
             - CLARIFICATION: General queries or queries requiring user input before technical retrieval can proceed.
 
             Return a JSON object conforming exactly to this schema:
@@ -109,9 +131,14 @@ public class InputGovernor : IInputGovernor
             {{effectiveQuestion}}
             """;
 
+        _logger?.LogInformation(
+            "[InputGovernor] Executing intent classification prompt ({PromptLength} chars) for question: \"{Question}\".\nPrompt:\n{Prompt}",
+            prompt.Length, effectiveQuestion, prompt);
+
         try
         {
             var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: true);
+            stopwatch.Stop();
             
             // Clean up possible markdown code block fences if present in LLM output
             var cleanedResponse = response.Trim();
@@ -159,7 +186,19 @@ public class InputGovernor : IInputGovernor
                     }
                 }
 
-                if (extractedProducts.Count >= 2 && (result.Intent == "COMPARISON" || result.Intent == "COMPATIBILITY" || result.Intent == "SPEC_LOOKUP"))
+                var isReplacementQuery = combinedText.Contains("erstat", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("substitut", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("udskift", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("alternativ", StringComparison.OrdinalIgnoreCase);
+
+                var finalIntent = result.Intent;
+                if (isReplacementQuery && extractedProducts.Count >= 1 && (finalIntent == "SPEC_LOOKUP" || finalIntent == "PROCEDURE"))
+                {
+                    finalIntent = "COMPATIBILITY";
+                }
+
+                if (extractedProducts.Count >= 1 && (finalIntent == "COMPARISON" || finalIntent == "COMPATIBILITY"))
                 {
                     if (!requestedAttrs.Contains("airflow_direction"))
                         requestedAttrs.Add("airflow_direction");
@@ -167,8 +206,13 @@ public class InputGovernor : IInputGovernor
                         requestedAttrs.Add("technology");
                 }
 
+                _logger?.LogInformation(
+                    "[InputGovernor] Classification completed in {DurationMs}ms. Intent: {Intent}, Confidence: {Confidence}, Entities: {EntityCount}, ClarificationRequired: {ClarificationRequired}.",
+                    stopwatch.ElapsedMilliseconds, finalIntent, result.Confidence, entities.Count, result.ClarificationRequired);
+
                 return result with 
                 { 
+                    Intent = finalIntent,
                     Entities = entities, 
                     RequestedAttributes = requestedAttrs,
                     ParsedEbmProducts = extractedProducts 
@@ -177,13 +221,42 @@ public class InputGovernor : IInputGovernor
         }
         catch (Exception ex)
         {
+            stopwatch.Stop();
+            _logger?.LogWarning(ex, "[InputGovernor] Error after {DurationMs}ms: {Message}. Falling back to default.", stopwatch.ElapsedMilliseconds, ex.Message);
             Console.WriteLine($"Error in InputGovernor: {ex.Message}. Falling back to default.");
         }
 
         // Safe fallback
+        var isOverviewFallback = extractedProducts.Count == 0 && (
+            combinedText.Contains("what ventilator", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("what fan", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("which ventilator", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("which fan", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke ventilator", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke blæser", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvad findes", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("list all", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("alle ventilator", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("alle modeller", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke modeller", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("what models", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("overview", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("katalog", StringComparison.OrdinalIgnoreCase)
+        );
+
+        var isReplacementFallback = combinedText.Contains("erstat", StringComparison.OrdinalIgnoreCase) ||
+                                     combinedText.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                                     combinedText.Contains("substitut", StringComparison.OrdinalIgnoreCase) ||
+                                     combinedText.Contains("udskift", StringComparison.OrdinalIgnoreCase) ||
+                                     combinedText.Contains("alternativ", StringComparison.OrdinalIgnoreCase);
+
         var fallbackEntities = extractedProducts.Select(p => new EntityInfo(p.FanFamily == FanFamilyType.Axial ? "axial_fan" : "fan", p.RawCode)).ToList();
+        var fallbackIntent = isOverviewFallback 
+            ? "OVERVIEW" 
+            : (isReplacementFallback ? "COMPATIBILITY" : (extractedProducts.Count >= 2 ? "COMPARISON" : "SPEC_LOOKUP"));
+
         return new InputGovernorResult(
-            Intent: extractedProducts.Count >= 2 ? "COMPARISON" : "SPEC_LOOKUP",
+            Intent: fallbackIntent,
             Confidence: 0.5,
             Entities: fallbackEntities,
             RequestedAttributes: new(),
@@ -192,6 +265,128 @@ public class InputGovernor : IInputGovernor
             ClarificationReason: null,
             ParsedEbmProducts: extractedProducts
         );
+    }
+
+    private static bool TryFastPathDeterministicClassification(
+        string combinedText,
+        List<EbmProductInfo> extractedProducts,
+        ConversationContext? conversationContext,
+        out InputGovernorResult result)
+    {
+        result = null!;
+        var text = combinedText.Trim();
+
+        // 1. Overview intent (asking for available ventilators/fans/catalog/inventory)
+        if (extractedProducts.Count == 0 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count == 0))
+        {
+            if (IsOverviewQuery(text))
+            {
+                result = new InputGovernorResult(
+                    Intent: "OVERVIEW",
+                    Confidence: 1.0,
+                    Entities: new List<EntityInfo>(),
+                    RequestedAttributes: new List<string>(),
+                    Constraints: new List<string>(),
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    ParsedEbmProducts: new List<EbmProductInfo>()
+                );
+                return true;
+            }
+        }
+
+        // 2. Compatibility & Replacement intent (when 1 or more EbmProduct codes are present with clear replacement/compatibility keywords)
+        if (extractedProducts.Count >= 1)
+        {
+            var isReplacement = text.Contains("erstat", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("substitut", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("udskift", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("alternativ", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("kompatib", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("compatib", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("passer til", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("work with", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("fungere med", StringComparison.OrdinalIgnoreCase);
+
+            if (isReplacement)
+            {
+                var entities = extractedProducts.Select(p => new EntityInfo(
+                    p.FanFamily == FanFamilyType.Axial ? "axial_fan" : (p.FanFamily == FanFamilyType.Centrifugal ? "centrifugal_fan" : "fan"),
+                    p.RawCode
+                )).ToList();
+
+                var requestedAttrs = new List<string> { "replacement", "airflow_direction", "technology", "diameter" };
+                result = new InputGovernorResult(
+                    Intent: "COMPATIBILITY",
+                    Confidence: 1.0,
+                    Entities: entities,
+                    RequestedAttributes: requestedAttrs,
+                    Constraints: new List<string>(),
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    ParsedEbmProducts: extractedProducts
+                );
+                return true;
+            }
+        }
+
+        // 3. Comparison intent (when 2 or more EbmProduct codes are present with comparison keywords or explicit comparison)
+        if (extractedProducts.Count >= 2)
+        {
+            var isComparison = text.Contains("sammenlign", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains("compare", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains("forskellen", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains("difference", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains(" vs ", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains(" mod ", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains(" kontra ", StringComparison.OrdinalIgnoreCase) ||
+                               text.Contains(" eller ", StringComparison.OrdinalIgnoreCase);
+
+            if (isComparison)
+            {
+                var entities = extractedProducts.Select(p => new EntityInfo(
+                    p.FanFamily == FanFamilyType.Axial ? "axial_fan" : (p.FanFamily == FanFamilyType.Centrifugal ? "centrifugal_fan" : "fan"),
+                    p.RawCode
+                )).ToList();
+
+                var requestedAttrs = new List<string> { "airflow_direction", "technology", "diameter", "voltage" };
+                result = new InputGovernorResult(
+                    Intent: "COMPARISON",
+                    Confidence: 1.0,
+                    Entities: entities,
+                    RequestedAttributes: requestedAttrs,
+                    Constraints: new List<string>(),
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    ParsedEbmProducts: extractedProducts
+                );
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsOverviewQuery(string text)
+    {
+        var lower = text.ToLowerInvariant();
+        return lower.Contains("what ventilator") ||
+               lower.Contains("what fan") ||
+               lower.Contains("which ventilator") ||
+               lower.Contains("which fan") ||
+               lower.Contains("hvilke ventilator") ||
+               lower.Contains("hvilke blæser") ||
+               lower.Contains("hvad findes der") ||
+               lower.Contains("list all") ||
+               lower.Contains("alle ventilator") ||
+               lower.Contains("alle modeller") ||
+               lower.Contains("hvilke modeller") ||
+               lower.Contains("what models") ||
+               lower.Contains("overview") ||
+               lower.Contains("katalog") ||
+               lower.Contains("hvad har vi af ventilatorer") ||
+               lower.Contains("oversigt over ventilatorer");
     }
 }
 
@@ -203,7 +398,8 @@ public enum WorkflowType
     Diagnostic,
     Calculation,
     Design,
-    Clarification
+    Clarification,
+    Overview
 }
 
 public interface IWorkflowRouter
@@ -225,6 +421,8 @@ public class WorkflowRouter : IWorkflowRouter
             "CALCULATION" => WorkflowType.Calculation,
             "DESIGN" => WorkflowType.Design,
             "CLARIFICATION" => WorkflowType.Clarification,
+            "OVERVIEW" => WorkflowType.Overview,
+            "CATALOG" => WorkflowType.Overview,
             _ => WorkflowType.SimpleRag
         };
     }

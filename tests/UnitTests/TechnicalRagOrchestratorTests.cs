@@ -225,4 +225,147 @@ public class TechnicalRagOrchestratorTests
         Assert.Single(result.Issues);
         Assert.Equal("UNSUPPORTED_CLAIM", result.Issues[0].Type);
     }
+
+    [Fact]
+    public async Task TechnicalRagOrchestrator_ShouldExecuteOverviewWorkflow_WhenAskingForAvailableVentilators()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        
+        // Input governor intent classification
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""
+            {
+              "intent": "OVERVIEW",
+              "confidence": 0.98,
+              "entities": [],
+              "requested_attributes": [],
+              "constraints": [],
+              "clarification_required": false,
+              "clarification_reason": null
+            }
+            """);
+
+        // Overview workflow execution completion
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Overview and Catalog")), false))
+            .ReturnsAsync("### Ventilator Oversigt\n- K3G560PC0401 (RadiPac)\n- S4E315BS2035 (Aksial)");
+
+        // Output governor
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""
+            {
+              "approved": true,
+              "issues": [],
+              "action": "APPROVE"
+            }
+            """);
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf", "/data/k3g.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "K3G560 datasheet excerpt", 0, "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf")
+            });
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object
+        );
+
+        // Act
+        var (answer, chunks, trace) = await orchestrator.ProcessQueryAsync("What ventilators are there in the system?", mockVectorStore.Object);
+
+        // Assert
+        Assert.NotNull(answer);
+        Assert.Contains("K3G560PC0401", answer);
+        Assert.Equal("Overview", trace.Workflow);
+        Assert.NotNull(trace.InputGovernor);
+        Assert.Equal("OVERVIEW", trace.InputGovernor.Intent);
+    }
+
+    [Fact]
+    public async Task TechnicalRagOrchestrator_ShouldBypassLlmEvidenceEvaluation_OnDeterministicDomainWorkflows()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+
+        // 1. Input Governor mock for single product replacement query
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""
+            {
+              "intent": "COMPATIBILITY",
+              "confidence": 0.98,
+              "entities": [{"type": "axial_fan", "name": "A3G910-AO83-90"}],
+              "requested_attributes": ["replacement", "airflow_direction", "diameter"],
+              "constraints": [],
+              "clarification_required": false,
+              "clarification_reason": null
+            }
+            """);
+
+        // 2. Answer Composer
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("A3G910-AO83-90 kan erstattes af S3G910 (med gitter) eller W3G910 (i vægring).");
+
+        // 3. Output Governor
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""
+            {
+              "approved": true,
+              "issues": [],
+              "action": "APPROVE"
+            }
+            """);
+
+        var mockEvidenceEvaluator = new Mock<IEvidenceEvaluator>();
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_A3G910AO8390_KM274579_.pdf", "/data/a3g910.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "A3G910-AO83-90 datasheet specs", 0)
+            });
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object, parser),
+            new WorkflowRouter(),
+            mockEvidenceEvaluator.Object,
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            ebmParser: parser
+        );
+
+        // Act
+        var (answer, chunks, trace) = await orchestrator.ProcessQueryAsync("Hvilken ventilator kan jeg erstatte en A3G910-AO83-90 med?", mockVectorStore.Object);
+
+        // Assert
+        Assert.NotNull(answer);
+        Assert.Equal("Compatibility", trace.Workflow);
+
+        // Verify that LLM EvidenceEvaluator was BYPASSED (0 calls made to IEvidenceEvaluator)
+        mockEvidenceEvaluator.Verify(x => x.EvaluateEvidenceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<DocumentChunk>>()), Times.Never);
+
+        // Verify that evidence claims were deterministically decoded from EbmProductCodeParser
+        Assert.NotEmpty(trace.Evidence);
+        Assert.Contains(trace.Evidence, c => c.Claim.Contains("910") && c.Claim.Contains("A3G910"));
+        Assert.Contains(trace.Evidence, c => c.Claim.Contains("Impeller Diameter") || c.Claim.Contains("serieerstatning"));
+    }
 }
