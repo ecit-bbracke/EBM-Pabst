@@ -61,3 +61,10 @@ src/DocumentRagSystem.Worker/appsettings.local.json
 !**/uploads/.gitkeep
 **/TestData/*.pdf
 !**/TestData/sample.pdf
+
+# Publish and Release Bundles
+publish/
+release/
+dist/
+*.tar.gz
+*.zip

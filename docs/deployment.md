@@ -102,9 +102,21 @@ GEMINI_API_KEY=your_actual_gemini_api_key_here
 # Qdrant__CollectionName=production-chunks
 ```
 
+### C. Automated 1-Command Deployment (From Local Machine)
+You can deploy directly from your local development workstation with a single command. The script builds self-contained Linux binaries, packages the archive, uploads it over SCP, extracts it, and restarts the Docker containers:
+
+* **From Windows (PowerShell):**
+  ```powershell
+  .\scripts\deploy-to-remote.ps1 -HostName "185.158.62.152" -Port 5665 -User "ubuntu"
+  ```
+* **From Linux / macOS (Bash):**
+  ```bash
+  ./scripts/deploy-to-remote.sh 185.158.62.152 5665 ubuntu
+  ```
+
 ---
 
-## 5. Building and Launching the Containers
+## 5. Building and Launching the Containers Manually
 
 To build the self-contained executables inside the multi-stage Docker build and launch the container ecosystem, execute:
 

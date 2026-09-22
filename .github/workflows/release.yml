@@ -1,0 +1,76 @@
+﻿name: Release (Linux Server)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-and-release-linux:
+    name: Build & Package Linux x64 Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore DocumentRagSystem.slnx
+
+      - name: Publish Self-Contained WebApi (linux-x64)
+        run: >
+          dotnet publish src/DocumentRagSystem.WebApi/DocumentRagSystem.WebApi.csproj
+          -c Release
+          -r linux-x64
+          --self-contained true
+          -o ./release-payload/webapi
+
+      - name: Publish Self-Contained Worker (linux-x64)
+        run: >
+          dotnet publish src/DocumentRagSystem.Worker/DocumentRagSystem.Worker.csproj
+          -c Release
+          -r linux-x64
+          --self-contained true
+          -o ./release-payload/worker
+
+      - name: Assemble Release Bundle
+        run: |
+          mkdir -p ./release-payload/data
+          cp -r data/Generelt ./release-payload/data/ 2>/dev/null || true
+          cp scripts/release-templates/docker-compose.yml ./release-payload/
+          cp scripts/release-templates/Dockerfile.webapi ./release-payload/
+          cp scripts/release-templates/Dockerfile.worker ./release-payload/
+          cp scripts/release-templates/document-rag-webapi.service ./release-payload/
+          cp scripts/release-templates/document-rag-worker.service ./release-payload/
+          cp .env.example ./release-payload/
+          cp deploy.sh ./release-payload/
+          cp README.md ./release-payload/
+          if [ -d docs ]; then cp -r docs ./release-payload/; fi
+          chmod +x ./release-payload/deploy.sh
+          chmod +x ./release-payload/webapi/DocumentRagSystem.WebApi
+          chmod +x ./release-payload/worker/DocumentRagSystem.Worker
+          tar -czvf document-rag-system-linux-x64.tar.gz -C ./release-payload .
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: document-rag-system-linux-x64
+          path: document-rag-system-linux-x64.tar.gz
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: document-rag-system-linux-x64.tar.gz
+          generate_release_notes: true

@@ -1,0 +1,8 @@
+﻿# Set default behavior to automatically normalize line endings.
+* text=auto
+
+# Ensure shell scripts always keep LF endings in git and on export
+*.sh text eol=lf
+*.service text eol=lf
+Dockerfile* text eol=lf
+.env* text eol=lf

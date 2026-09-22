@@ -1,0 +1,19 @@
+﻿[Unit]
+Description=Document RAG System - Web API Service
+After=network.target qdrant.service
+
+[Service]
+Type=simple
+User=ragapp
+WorkingDirectory=/opt/document-rag-system/webapi
+ExecStart=/opt/document-rag-system/webapi/DocumentRagSystem.WebApi
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=document-rag-webapi
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:8080;https://0.0.0.0:8081
+EnvironmentFile=-/opt/document-rag-system/.env
+
+[Install]
+WantedBy=multi-user.target

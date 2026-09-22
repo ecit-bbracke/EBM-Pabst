@@ -1,0 +1,7 @@
+﻿FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
+WORKDIR /app
+COPY webapi/ .
+RUN chmod +x ./DocumentRagSystem.WebApi
+EXPOSE 8080
+EXPOSE 8081
+ENTRYPOINT ["./DocumentRagSystem.WebApi"]

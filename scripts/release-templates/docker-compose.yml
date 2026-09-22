@@ -1,9 +1,9 @@
 ﻿services:
   webapi:
-    image: document-rag-system-api
+    image: document-rag-system-api:release
     build:
       context: .
-      dockerfile: src/DocumentRagSystem.WebApi/Dockerfile
+      dockerfile: Dockerfile.webapi
     ports:
       - "8080:8080"
       - "8081:8081"
@@ -18,10 +18,10 @@
       - qdrant
 
   worker:
-    image: document-rag-system-worker
+    image: document-rag-system-worker:release
     build:
       context: .
-      dockerfile: src/DocumentRagSystem.Worker/Dockerfile
+      dockerfile: Dockerfile.worker
     environment:
       - DOTNET_ENVIRONMENT=Production
       - Qdrant__ConnectionString=http://qdrant:6334

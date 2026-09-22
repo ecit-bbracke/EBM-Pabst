@@ -1,0 +1,6 @@
+﻿FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
+WORKDIR /app
+COPY worker/ .
+COPY data/ ./data
+RUN chmod +x ./DocumentRagSystem.Worker
+ENTRYPOINT ["./DocumentRagSystem.Worker"]

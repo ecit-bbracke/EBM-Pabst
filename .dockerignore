@@ -1,0 +1,13 @@
+﻿**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/.venv
+**/bin
+**/obj
+**/publish
+**/release
+**/TestResults
+**/*.trx
+**/*.md
+!README.md
