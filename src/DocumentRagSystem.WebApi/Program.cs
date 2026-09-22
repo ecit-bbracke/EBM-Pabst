@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -64,9 +65,24 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
         sp.GetRequiredService<IDocumentRepository>()
     ));
 
-// Register Queue and Background Hosted Service
+// Set up RAG Orchestrator Layer & ebm-papst Domain Services
+var conversationStorageDir = Path.Combine(AppContext.BaseDirectory, ".conversations");
+builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStore>(sp => 
+    new FileConversationStateStore(conversationStorageDir));
+
+builder.Services.AddSingleton<IEbmProductCodeParser, EbmProductCodeParser>();
+builder.Services.AddSingleton<IConversationalQueryRefiner, ConversationalQueryRefiner>();
+builder.Services.AddSingleton<IInputGovernor, InputGovernor>();
+builder.Services.AddSingleton<IWorkflowRouter, WorkflowRouter>();
+builder.Services.AddSingleton<IEvidenceEvaluator, EvidenceEvaluator>();
+builder.Services.AddSingleton<IAnswerComposer, AnswerComposer>();
+builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>();
+builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>();
+
+// Register Queue and Background Hosted Services
 builder.Services.AddSingleton<IDocumentQueue, DocumentQueue>();
 builder.Services.AddHostedService<QueuedHostedService>();
+builder.Services.AddHostedService<ConversationCleanupHostedService>();
 
 // Register Validators
 builder.Services.AddValidatorsFromAssemblyContaining<QueryRequestValidator>();
@@ -134,7 +150,7 @@ app.MapPost("/api/query", async (
     QueryRequest request, 
     IValidator<QueryRequest> validator,
     IVectorStore vectorStore, 
-    ILlmService llmService, 
+    ITechnicalRagOrchestrator orchestrator, 
     ILogger<Program> logger
     ) =>
 {
@@ -144,13 +160,12 @@ app.MapPost("/api/query", async (
         return Results.BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
     }
 
-    logger.LogInformation("Query received: {Question}", request.Question);
+    logger.LogInformation("Query received: {Question} (ConversationId: {ConversationId})", request.Question, request.ConversationId);
 
-    // Perform Semantic Hybrid Search
-    var chunks = await vectorStore.SearchAsync(request.Question);
+    // Process through the Multi-Stage Technical RAG Orchestrator
+    var (answer, chunks, trace) = await orchestrator.ProcessQueryAsync(request.Question, vectorStore, request.ConversationId);
 
-    // Generate Response using LLM with context chunks
-    var answer = await llmService.GenerateResponseAsync(request.Question, chunks);
+    logger.LogInformation("Execution Trace: {TraceJson}", JsonSerializer.Serialize(trace));
 
     // Convert markdown answer to HTML with advanced extensions (for tables, bold, lists, etc.)
     var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -180,9 +195,55 @@ app.MapPost("/api/query", async (
         ));
     }
 
-    return Results.Ok(new QueryResponse(htmlAnswer, citations));
+    var effectiveConversationId = trace.ConversationStateAfter?.ConversationId ?? request.ConversationId;
+    return Results.Ok(new QueryResponse(htmlAnswer, citations, effectiveConversationId));
 })
 .WithName("QueryDocuments");
+
+// GET CONVERSATION STATE
+app.MapGet("/api/conversation/{id}", async (string id, IConversationStateStore stateStore) =>
+{
+    var state = await stateStore.GetStateAsync(id);
+    return state != null ? Results.Ok(state) : Results.NotFound();
+})
+.WithName("GetConversationState");
+
+// CLEAR CONVERSATION STATE
+app.MapDelete("/api/conversation/{id}", async (string id, IConversationStateStore stateStore) =>
+{
+    await stateStore.ClearStateAsync(id);
+    return Results.NoContent();
+})
+.WithName("ClearConversationState");
+
+// REMOVE SPECIFIC CONSTRAINT FROM CONVERSATION
+app.MapDelete("/api/conversation/{id}/constraints/{attribute}", async (string id, string attribute, IConversationStateStore stateStore) =>
+{
+    await stateStore.RemoveConstraintAsync(id, attribute);
+    var updated = await stateStore.GetStateAsync(id);
+    return updated != null ? Results.Ok(updated) : Results.NotFound();
+})
+.WithName("RemoveConversationConstraint");
+
+// RESET CONVERSATION CONSTRAINTS
+app.MapPost("/api/conversation/{id}/reset", async (string id, IConversationStateStore stateStore) =>
+{
+    var state = await stateStore.GetStateAsync(id);
+    if (state != null)
+    {
+        var resetState = state with 
+        { 
+            ActiveConstraints = new List<ConversationConstraint>(),
+            CandidateSet = null,
+            TurnCount = state.TurnCount + 1,
+            TopicVersion = state.TopicVersion + 1
+        };
+        await stateStore.SaveStateAsync(id, resetState);
+        return Results.Ok(resetState);
+    }
+    return Results.NotFound();
+})
+.WithName("ResetConversationConstraints");
 
 // DOCUMENT UPLOAD ENDPOINT
 app.MapPost("/api/documents/upload", async (

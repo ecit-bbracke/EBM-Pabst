@@ -151,6 +151,41 @@
                         </p>
                     </div>
 
+                    <!-- Aktiv Samtaletilstand & Filtre Panel (dynamisk) -->
+                    <div id="active-state-panel" class="hidden bg-white rounded-xl border border-brand-100/80 p-4 shadow-sm transition-all flex flex-col space-y-3 flex-shrink-0">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">
+                                    <i class="fa-solid fa-sliders"></i>
+                                </span>
+                                <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">Aktiv Samtaletilstand &amp; Tekniske Filtre</span>
+                                <span id="active-state-topic" class="text-xs text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded border border-brand-200/60 hidden"></span>
+                            </div>
+                            <button onclick="resetConversationFilters()" class="text-xs font-medium text-slate-500 hover:text-red-600 transition flex items-center space-x-1 px-2 py-1 hover:bg-red-50 rounded-lg" title="Nulstil alle akkumulerede filtre for denne samtale">
+                                <i class="fa-solid fa-rotate-left"></i>
+                                <span>Nulstil filtre</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Entities and Candidates Container -->
+                        <div id="active-entities-container" class="flex flex-wrap items-center gap-1.5 text-xs hidden">
+                            <span class="text-slate-400 font-semibold uppercase text-[10px] mr-1">Enheder:</span>
+                            <div id="active-entities-list" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+
+                        <!-- Candidates Container -->
+                        <div id="active-candidates-container" class="flex flex-wrap items-center gap-1.5 text-xs hidden">
+                            <span class="text-slate-400 font-semibold uppercase text-[10px] mr-1">Kandidatsæt:</span>
+                            <div id="active-candidates-list" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+
+                        <!-- Active Constraints Container -->
+                        <div id="active-constraints-container" class="flex flex-wrap items-center gap-1.5 text-xs hidden">
+                            <span class="text-slate-400 font-semibold uppercase text-[10px] mr-1">Aktive krav:</span>
+                            <div id="active-constraints-list" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+                    </div>
+
                     <!-- Samtaleloggen -->
                     <div id="chat-conversation" class="space-y-6">
                         <!-- Loaded dynamically via JavaScript -->
@@ -282,10 +317,144 @@
             // Render all historical messages
             renderConversationHistory(chat);
 
+            // Fetch and render active conversation state/constraints
+            fetchActiveState(id);
+
             // If mobile sidebar is open, slide it away so the user can see the loaded conversation
             const sidebar = document.getElementById('sidebar');
             if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
                 toggleSidebar();
+            }
+        }
+
+        // Fetch and display active conversation state & constraints
+        async function fetchActiveState(conversationId) {
+            const panel = document.getElementById('active-state-panel');
+            if (!conversationId) {
+                if (panel) panel.classList.add('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/conversation/${encodeURIComponent(conversationId)}`);
+                if (!response.ok) {
+                    if (panel) panel.classList.add('hidden');
+                    return;
+                }
+
+                const state = await response.json();
+                if (!state) {
+                    if (panel) panel.classList.add('hidden');
+                    return;
+                }
+
+                const hasEntities = state.active_entities && state.active_entities.length > 0;
+                const hasConstraints = state.active_constraints && state.active_constraints.length > 0;
+                const hasCandidates = state.candidate_set && state.candidate_set.members && state.candidate_set.members.length > 0;
+
+                if (!hasEntities && !hasConstraints && !hasCandidates) {
+                    if (panel) panel.classList.add('hidden');
+                    return;
+                }
+
+                if (panel) panel.classList.remove('hidden');
+
+                // Topic Badge
+                const topicEl = document.getElementById('active-state-topic');
+                if (topicEl) {
+                    if (state.topic && state.topic !== 'general') {
+                        topicEl.textContent = state.topic;
+                        topicEl.classList.remove('hidden');
+                    } else {
+                        topicEl.classList.add('hidden');
+                    }
+                }
+
+                // Render Entities
+                const entitiesContainer = document.getElementById('active-entities-container');
+                const entitiesList = document.getElementById('active-entities-list');
+                if (entitiesContainer && entitiesList) {
+                    if (hasEntities) {
+                        entitiesContainer.classList.remove('hidden');
+                        entitiesList.innerHTML = state.active_entities.map(e => `
+                            <span class="inline-flex items-center bg-brand-50 text-brand-700 text-xs px-2.5 py-0.5 rounded-full border border-brand-200/80 font-medium">
+                                <i class="fa-solid fa-cube text-[9px] mr-1.5 text-brand-500"></i>
+                                <span>${escapeHtml(e.name)}</span>
+                            </span>
+                        `).join('');
+                    } else {
+                        entitiesContainer.classList.add('hidden');
+                    }
+                }
+
+                // Render Candidate Set
+                const candidatesContainer = document.getElementById('active-candidates-container');
+                const candidatesList = document.getElementById('active-candidates-list');
+                if (candidatesContainer && candidatesList) {
+                    if (hasCandidates) {
+                        candidatesContainer.classList.remove('hidden');
+                        candidatesList.innerHTML = state.candidate_set.members.map(m => `
+                            <span class="inline-flex items-center bg-amber-50 text-amber-800 text-xs px-2.5 py-0.5 rounded-full border border-amber-200 font-medium">
+                                <i class="fa-solid fa-list-check text-[9px] mr-1.5 text-amber-600"></i>
+                                <span>${escapeHtml(m)}</span>
+                            </span>
+                        `).join('');
+                    } else {
+                        candidatesContainer.classList.add('hidden');
+                    }
+                }
+
+                // Render Active Constraints
+                const constraintsContainer = document.getElementById('active-constraints-container');
+                const constraintsList = document.getElementById('active-constraints-list');
+                if (constraintsContainer && constraintsList) {
+                    if (hasConstraints) {
+                        constraintsContainer.classList.remove('hidden');
+                        constraintsList.innerHTML = state.active_constraints.map(c => `
+                            <span class="inline-flex items-center bg-slate-100 text-slate-800 text-xs px-2.5 py-0.5 rounded-full border border-slate-200 font-medium shadow-2xs">
+                                <span><strong>${escapeHtml(c.attribute)}</strong>: ${escapeHtml(c.value)}${c.unit ? ' ' + escapeHtml(c.unit) : ''}</span>
+                                <button onclick="removeConstraint('${escapeHtml(c.attribute)}')" class="ml-1.5 text-slate-400 hover:text-red-600 transition p-0.5" title="Fjern dette krav">
+                                    <i class="fa-solid fa-xmark text-[10px]"></i>
+                                </button>
+                            </span>
+                        `).join('');
+                    } else {
+                        constraintsContainer.classList.add('hidden');
+                    }
+                }
+
+            } catch (e) {
+                console.error('Fejl ved indlæsning af samtaletiltand:', e);
+            }
+        }
+
+        // Remove a specific constraint
+        async function removeConstraint(attribute) {
+            if (!currentConversationId || !attribute) return;
+            try {
+                const response = await fetch(`/api/conversation/${encodeURIComponent(currentConversationId)}/constraints/${encodeURIComponent(attribute)}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    await fetchActiveState(currentConversationId);
+                }
+            } catch (e) {
+                console.error('Fejl ved fjernelse af krav:', e);
+            }
+        }
+
+        // Reset all conversation filters
+        async function resetConversationFilters() {
+            if (!currentConversationId) return;
+            try {
+                const response = await fetch(`/api/conversation/${encodeURIComponent(currentConversationId)}/reset`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    await fetchActiveState(currentConversationId);
+                }
+            } catch (e) {
+                console.error('Fejl ved nulstilling af filtre:', e);
             }
         }
 
@@ -383,11 +552,17 @@
         }
 
         // Delete a conversation
-        function deleteConversation(id, event) {
+        async function deleteConversation(id, event) {
             if (event) event.stopPropagation();
 
             if (!confirm('Er du sikker på, at du vil slette denne samtale?')) {
                 return;
+            }
+
+            try {
+                await fetch(`/api/conversation/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            } catch (e) {
+                console.error('Kunne ikke slette samtale på backend:', e);
             }
 
             conversations = conversations.filter(c => c.id !== id);
@@ -404,10 +579,19 @@
         }
 
         // Clear all conversations
-        function clearAllConversations() {
+        async function clearAllConversations() {
             if (!confirm('Er du sikker på, at du vil slette ALLE samtaler?')) {
                 return;
             }
+
+            for (const chat of conversations) {
+                try {
+                    await fetch(`/api/conversation/${encodeURIComponent(chat.id)}`, { method: 'DELETE' });
+                } catch (e) {
+                    // Ignore individual failures
+                }
+            }
+
             conversations = [];
             localStorage.removeItem('rag_conversations');
             startNewChat(false);
@@ -457,7 +641,10 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ question: question })
+                    body: JSON.stringify({
+                        question: question,
+                        conversationId: activeChat.id
+                    })
                 });
 
                 if (!response.ok) {
@@ -467,6 +654,11 @@
                 const data = await response.json();
                 const endTime = performance.now();
                 const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+                if (data.conversationId && data.conversationId !== activeChat.id) {
+                    activeChat.id = data.conversationId;
+                    currentConversationId = data.conversationId;
+                }
 
                 // Group citations by document to avoid duplicate mentions
                 let citationsHtml = '';
@@ -549,6 +741,9 @@
 
                 // Re-render chat to include response
                 renderConversationHistory(activeChat);
+
+                // Refresh active conversation state/constraints chips
+                await fetchActiveState(activeChat.id);
 
             } catch (error) {
                 console.error('Fejl under søgning:', error);

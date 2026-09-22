@@ -65,9 +65,37 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                 builder.UseSetting("Qdrant:CollectionName", "e2e-test-collection");
             }
 
-            if (!_dockerAvailable)
+            builder.ConfigureServices(services =>
             {
-                builder.ConfigureServices(services =>
+                var mockEmbedding = new Moq.Mock<IEmbeddingService>();
+                mockEmbedding.Setup(x => x.GenerateEmbeddingAsync(Moq.It.IsAny<string>()))
+                    .ReturnsAsync(new float[768]);
+
+                var embeddingDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IEmbeddingService));
+                if (embeddingDescriptor != null) services.Remove(embeddingDescriptor);
+                services.AddSingleton<IEmbeddingService>(mockEmbedding.Object);
+
+                var mockLlm = new Moq.Mock<ILlmService>();
+                mockLlm.Setup(x => x.GenerateCompletionAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<bool>()))
+                    .ReturnsAsync("""
+                    {
+                      "intent": "SPEC_LOOKUP",
+                      "confidence": 0.95,
+                      "entities": [],
+                      "requested_attributes": [],
+                      "constraints": [],
+                      "clarification_required": false,
+                      "clarification_reason": null
+                    }
+                    """);
+                mockLlm.Setup(x => x.GenerateResponseAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<IEnumerable<DocumentChunk>>()))
+                    .ReturnsAsync("This is the main topic response based on uploaded document context.");
+
+                var llmDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ILlmService));
+                if (llmDescriptor != null) services.Remove(llmDescriptor);
+                services.AddSingleton<ILlmService>(mockLlm.Object);
+
+                if (!_dockerAvailable)
                 {
                     // Replace the real QdrantVectorStore with an in-memory mock store
                     var mockStore = new Moq.Mock<IVectorStore>();
@@ -86,8 +114,8 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                         services.Remove(descriptor);
                     }
                     services.AddSingleton<IVectorStore>(mockStore.Object);
-                });
-            }
+                }
+            });
         }).CreateClient();
     }
 
