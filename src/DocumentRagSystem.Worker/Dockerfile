@@ -5,6 +5,7 @@ WORKDIR /app
 # Copy Solution and Project Files
 COPY DocumentRagSystem.slnx ./
 COPY src/DocumentRagSystem.Core/DocumentRagSystem.Core.csproj src/DocumentRagSystem.Core/
+COPY src/DocumentRagSystem.Evaluation/DocumentRagSystem.Evaluation.csproj src/DocumentRagSystem.Evaluation/
 COPY src/DocumentRagSystem.Infrastructure/DocumentRagSystem.Infrastructure.csproj src/DocumentRagSystem.Infrastructure/
 COPY src/DocumentRagSystem.WebApi/DocumentRagSystem.WebApi.csproj src/DocumentRagSystem.WebApi/
 COPY src/DocumentRagSystem.Worker/DocumentRagSystem.Worker.csproj src/DocumentRagSystem.Worker/
