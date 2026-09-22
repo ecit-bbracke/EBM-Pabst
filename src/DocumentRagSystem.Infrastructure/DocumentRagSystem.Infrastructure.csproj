@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
     <PackageReference Include="Qdrant.Client" Version="1.18.1" />
   </ItemGroup>

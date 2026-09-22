@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using Qdrant.Client;
@@ -18,16 +20,23 @@ public class QdrantVectorStore : IVectorStore
     private readonly QdrantClient _client;
     private readonly string _collectionName;
     private readonly IEmbeddingService? _embeddingService;
+    private readonly ILogger<QdrantVectorStore>? _logger;
+    private readonly SemaphoreSlim _initLock = new(1, 1);
     private bool _collectionCreated;
     private int _embeddingSize;
 
-    public QdrantVectorStore(string connectionString, string collectionName, IEmbeddingService? embeddingService = null)
+    public QdrantVectorStore(
+        string connectionString, 
+        string collectionName, 
+        IEmbeddingService? embeddingService = null,
+        ILogger<QdrantVectorStore>? logger = null)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
             throw new ArgumentNullException(nameof(connectionString));
 
         _collectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
         _embeddingService = embeddingService;
+        _logger = logger;
 
         // Parse connectionString to support direct URIs or host/port
         if (Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
@@ -53,8 +62,11 @@ public class QdrantVectorStore : IVectorStore
     {
         if (_collectionCreated) return;
 
+        await _initLock.WaitAsync();
         try
         {
+            if (_collectionCreated) return;
+
             var collections = await _client.ListCollectionsAsync();
             bool exists = false;
             foreach (var col in collections)
@@ -89,6 +101,10 @@ public class QdrantVectorStore : IVectorStore
             // Logging or throwing
             Console.WriteLine($"Error ensuring Qdrant collection: {ex.Message}");
             throw;
+        }
+        finally
+        {
+            _initLock.Release();
         }
     }
 
@@ -180,6 +196,9 @@ public class QdrantVectorStore : IVectorStore
         if (string.IsNullOrWhiteSpace(query))
             return Array.Empty<DocumentChunk>();
 
+        var totalStopwatch = Stopwatch.StartNew();
+        var embeddingStopwatch = Stopwatch.StartNew();
+
         float[] queryEmbedding;
         if (_embeddingService != null)
         {
@@ -190,7 +209,9 @@ public class QdrantVectorStore : IVectorStore
             // If no embedding service, generate a mock or zero vector
             queryEmbedding = new float[_embeddingSize > 0 ? _embeddingSize : 1536];
         }
+        embeddingStopwatch.Stop();
 
+        var qdrantStopwatch = Stopwatch.StartNew();
         await EnsureCollectionExistsAsync(queryEmbedding.Length);
 
         // Perform semantic search
@@ -199,6 +220,8 @@ public class QdrantVectorStore : IVectorStore
             vector: queryEmbedding,
             limit: (uint)limit
         );
+        qdrantStopwatch.Stop();
+        totalStopwatch.Stop();
 
         var chunks = new List<DocumentChunk>();
         foreach (var point in searchResults)
@@ -213,6 +236,10 @@ public class QdrantVectorStore : IVectorStore
 
             chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt));
         }
+
+        _logger?.LogInformation(
+            "[QdrantVectorStore] Search completed in {DurationMs}ms (Embedding: {EmbeddingMs}ms, Qdrant: {SearchMs}ms). Query: \"{Query}\", Results: {ResultCount} chunks.",
+            totalStopwatch.ElapsedMilliseconds, embeddingStopwatch.ElapsedMilliseconds, qdrantStopwatch.ElapsedMilliseconds, query, chunks.Count);
 
         return chunks;
     }
