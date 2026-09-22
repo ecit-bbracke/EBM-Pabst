@@ -13,7 +13,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
-      - Gemini__ApiKey=${GEMINI_API_KEY:-YOUR_GEMINI_API_KEY}
+      - Gemini__ApiKey=${GEMINI_API_KEY}
     volumes:
       - uploads_data:/app/uploads
     depends_on:
@@ -28,7 +28,7 @@ services:
       - DOTNET_ENVIRONMENT=Production
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
-      - Gemini__ApiKey=${GEMINI_API_KEY:-YOUR_GEMINI_API_KEY}
+      - Gemini__ApiKey=${GEMINI_API_KEY}
     volumes:
       - uploads_data:/app/uploads
     depends_on:

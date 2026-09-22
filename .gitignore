@@ -51,6 +51,9 @@ NUnit3.Profiler.ini
 # App Settings
 src/DocumentRagSystem.WebApi/appsettings.local.json
 src/DocumentRagSystem.Worker/appsettings.local.json
+.env
+.env.*
+!.env.example
 
 # Local Uploads and Temp Folders
 **/uploads/*
