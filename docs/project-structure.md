@@ -6,6 +6,7 @@ The solution is organized around a small clean-architecture style split:
 - `DocumentRagSystem.Infrastructure` implements integrations such as PDF extraction, embeddings, LLM calls, repositories, and Qdrant.
 - `DocumentRagSystem.WebApi` exposes the browser UI and HTTP API.
 - `DocumentRagSystem.Worker` runs background ingestion and maintenance tasks.
+- `DocumentRagSystem.Evaluation` runs automated benchmark Q&A evaluations against the API and generates quality PDF reports.
 - `tests` contains unit, integration, and end-to-end test projects.
 
 ## Root
