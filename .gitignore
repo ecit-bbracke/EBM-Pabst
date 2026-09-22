@@ -43,6 +43,7 @@ bld/
 globalPackages/
 
 # NUnit/xUnit temporary files
+[Tt]est[Rr]esult*/
 TestResult.xml
 nunit-agent.log
 nunit-server-log.txt

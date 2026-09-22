@@ -1,5 +1,7 @@
 ﻿# Document RAG (Retrieval-Augmented Generation) System
 
+[![CI Pipeline](https://github.com/ecit-bbracke/EBM-Pabst/actions/workflows/ci.yml/badge.svg)](https://github.com/ecit-bbracke/EBM-Pabst/actions/workflows/ci.yml)
+
 A robust, enterprise-grade Document Retrieval-Augmented Generation (RAG) system built with **.NET 10**, **Qdrant Vector Database**, and **Google Gemini** (for both embeddings and LLM orchestration). 
 
 This system allows you to automatically ingest high-volumes of PDF technical data, generate semantic text embeddings, store them in a vector database, and perform context-aware queries that include verifiable citations.
@@ -183,6 +185,21 @@ dotnet test tests/E2ETests/DocumentRagSystem.E2ETests.csproj
 | **`tests/UnitTests`** | Core business logic, parsing, chunking, and specialized multi-turn orchestrators | • **Intent & Categorization**: `InputGovernor` intent classification (`SPEC_LOOKUP`, `COMPARISON`, `COMPATIBILITY`, `TROUBLESHOOTING`, `CALCULATION`, `DESIGN`, `PROCEDURE`).<br>• **Domain Parsing**: `EbmProductCodeParser` extracting fan diameter, design codes, voltage keys, and generation numbers.<br>• **Multi-Turn State**: `ConversationalQueryRefiner`, `ConversationStateStore`, follow-up context merging, and pronoun resolution.<br>• **Specialized Workflows**: `ComparisonWorkflowExecutor`, `DiagnosticWorkflowExecutor`, and `TechnicalRagOrchestrator`.<br>• **Extraction & Chunking**: `PdfTextExtractor`, `MarkdownTableFixer`, sliding-window `ChunkingService`, and `DocumentProcessor`. |
 | **`tests/IntegrationTests`** | Vector store transactions & persistence | • Vector point insertion, upsert, payload metadata preservation, and semantic similarity search in `QdrantVectorStore` via **Testcontainers** (gracefully skips with logging if Docker daemon is not active). |
 | **`tests/E2ETests`** | Full ASP.NET Core pipeline integration | • End-to-end `WebApplicationFactory` tests executing document upload (`POST /api/documents/upload`), queue worker indexing, and grounded multi-turn semantic query verification (`POST /api/query`). |
+
+---
+
+## Continuous Integration (CI)
+
+GitHub Actions workflow is configured in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to automatically validate every push and pull request:
+
+* **Build & Test**:
+  * Sets up .NET 10 SDK with dependency caching.
+  * Restores dependencies using `DocumentRagSystem.slnx` and builds the solution in Release mode.
+  * Executes Unit, Integration, and E2E test suites with code coverage data collection (`XPlat Code Coverage`).
+  * Publishes test result artifacts (`.trx`) and Cobertura code coverage reports.
+* **Docker Build & Validation**:
+  * Validates Docker Compose configuration (`docker compose config`).
+  * Builds multi-stage Docker images for both `DocumentRagSystem.WebApi` and `DocumentRagSystem.Worker` (self-contained `linux-x64`).
 
 ---
 

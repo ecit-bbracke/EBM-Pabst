@@ -2,9 +2,10 @@
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master, develop, 'release/**' ]
   pull_request:
     branches: [ main, master, develop ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -20,17 +21,89 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet Packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'DocumentRagSystem.slnx') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Restore Dependencies
-        run: dotnet restore DocumentRagSystem.sln
+        run: dotnet restore DocumentRagSystem.slnx
 
       - name: Build Solution (Release)
-        run: dotnet build DocumentRagSystem.sln -c Release --no-restore
+        run: dotnet build DocumentRagSystem.slnx -c Release --no-restore
 
       - name: Run Unit Tests
-        run: dotnet test tests/UnitTests/DocumentRagSystem.UnitTests.csproj -c Release --no-build
+        run: >
+          dotnet test tests/UnitTests/DocumentRagSystem.UnitTests.csproj
+          -c Release
+          --no-build
+          --logger "trx;LogFileName=unit-tests.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults/UnitTests
 
       - name: Run Integration Tests
-        run: dotnet test tests/IntegrationTests/DocumentRagSystem.IntegrationTests.csproj -c Release --no-build
+        run: >
+          dotnet test tests/IntegrationTests/DocumentRagSystem.IntegrationTests.csproj
+          -c Release
+          --no-build
+          --logger "trx;LogFileName=integration-tests.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults/IntegrationTests
 
       - name: Run E2E Tests
-        run: dotnet test tests/E2ETests/DocumentRagSystem.E2ETests.csproj -c Release --no-build
+        run: >
+          dotnet test tests/E2ETests/DocumentRagSystem.E2ETests.csproj
+          -c Release
+          --no-build
+          --logger "trx;LogFileName=e2e-tests.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults/E2ETests
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
+
+      - name: Upload Code Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage
+          path: TestResults/**/coverage.cobertura.xml
+          if-no-files-found: warn
+
+  docker-build:
+    name: Docker Build & Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Compose Configuration
+        run: docker compose config
+
+      - name: Build WebApi Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: src/DocumentRagSystem.WebApi/Dockerfile
+          push: false
+          tags: document-rag-system-api:ci
+
+      - name: Build Worker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: src/DocumentRagSystem.Worker/Dockerfile
+          push: false
+          tags: document-rag-system-worker:ci
