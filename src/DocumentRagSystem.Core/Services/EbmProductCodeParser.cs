@@ -85,20 +85,29 @@ public class EbmProductCodeParser : IEbmProductCodeParser
         if (string.IsNullOrWhiteSpace(text))
             return results;
 
-        var matches = ProductCodeExtractorRegex.Matches(text);
         var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (Match match in matches)
+        void ProcessText(string t)
         {
-            var candidate = match.Value.Trim();
-            var clean = SanitizeCode(candidate);
-            if (seenCodes.Add(clean))
+            var matches = ProductCodeExtractorRegex.Matches(t);
+            foreach (Match match in matches)
             {
-                if (TryParse(candidate, out var info))
+                var candidate = match.Value.Trim();
+                var clean = SanitizeCode(candidate);
+                if (seenCodes.Add(clean))
                 {
-                    results.Add(info);
+                    if (TryParse(candidate, out var info))
+                    {
+                        results.Add(info);
+                    }
                 }
             }
+        }
+
+        ProcessText(text);
+        if (text.Contains('_'))
+        {
+            ProcessText(text.Replace('_', ' '));
         }
 
         return results;
@@ -207,6 +216,175 @@ public class EbmProductCodeParser : IEbmProductCodeParser
             IsDropInReplacement: isDropIn,
             CriticalBlockers: blockers,
             Differences: differences,
+            Summary: summary
+        );
+    }
+
+    public EbmReplacementAnalysis AnalyzeReplacements(EbmProductInfo sourceProduct, IEnumerable<EbmProductInfo>? catalogCandidates = null)
+    {
+        ArgumentNullException.ThrowIfNull(sourceProduct);
+
+        var matched = new List<EbmProductInfo>();
+        var incompatible = new List<EbmComparisonEvaluation>();
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sourceProduct.CleanCode };
+
+        if (catalogCandidates != null)
+        {
+            foreach (var cand in catalogCandidates)
+            {
+                if (!seenCodes.Add(cand.CleanCode))
+                    continue;
+
+                var eval = Compare(sourceProduct, cand);
+                if (eval.IsDropInReplacement)
+                {
+                    matched.Add(cand);
+                }
+                else
+                {
+                    if (cand.FanFamily == sourceProduct.FanFamily || 
+                        (cand.ImpellerDiameterMm.HasValue && sourceProduct.ImpellerDiameterMm.HasValue && Math.Abs(cand.ImpellerDiameterMm.Value - sourceProduct.ImpellerDiameterMm.Value) <= 100))
+                    {
+                        incompatible.Add(eval);
+                    }
+                }
+            }
+        }
+
+        var patterns = new List<EbmReplacementPattern>();
+        var rules = new List<string>();
+
+        var diameterStr = sourceProduct.ImpellerDiameterMm?.ToString() ?? "XXX";
+        var techStr = sourceProduct.Technology == MotorTechnology.EC ? "3G" : (sourceProduct.Poles.HasValue ? $"{sourceProduct.Poles}{(sourceProduct.PhaseDescription?.Contains("3-faset") == true ? "D" : "E")}" : "");
+
+        if (sourceProduct.FanFamily == FanFamilyType.Axial)
+        {
+            rules.Add($"Impellerdiameter: Erstatningsmodellen skal have samme diameter (Ø{diameterStr} mm) for at passe i kappe/vægudskæring.");
+            
+            if (sourceProduct.AirflowDirection == AirflowDirection.A)
+            {
+                rules.Add("KRITISK LUFTRETNING: Erstatningen SKAL have et LIGE ciffer på 12. position (f.eks. 02, 04, 90) for at sikre Luftretning A. Et ulige ciffer vender luftretningen 180° og er inkompatibel!");
+            }
+            else if (sourceProduct.AirflowDirection == AirflowDirection.V)
+            {
+                rules.Add("KRITISK LUFTRETNING: Erstatningen SKAL have et ULIGE ciffer på 12. position (f.eks. 01, 03, 91) for at sikre Luftretning V. Et lige ciffer vender luftretningen 180° og er inkompatibel!");
+            }
+
+            var evenOrOddHint = sourceProduct.AirflowDirection == AirflowDirection.A ? "lige slutciffer (f.eks. ..02 / ..90) for Luftretning A" : "ulige slutciffer (f.eks. ..01 / ..91) for Luftretning V";
+
+            // S-series pattern
+            patterns.Add(new EbmReplacementPattern(
+                PatternType: "Aksial med beskyttelsesgitter (S-serie)",
+                SuggestedModelOrPrefix: $"S{techStr}{diameterStr}...",
+                Description: "S-serien er mekanisk baseret på samme aksialblæser, men leveres færdigmonteret med beskyttelsesgitter (guard grille).",
+                Requirements: new List<string>
+                {
+                    $"Diameter Ø{diameterStr} mm",
+                    $"Motorteknologi {sourceProduct.Technology} ({sourceProduct.MotorDescription})",
+                    $"12. ciffer skal have {evenOrOddHint}"
+                }
+            ));
+
+            // W-series pattern
+            patterns.Add(new EbmReplacementPattern(
+                PatternType: "Aksial i vægring (W-serie)",
+                SuggestedModelOrPrefix: $"W{techStr}{diameterStr}...",
+                Description: "W-serien er mekanisk baseret på samme aksialblæser, men monteret i en aerodynamisk vægring (wall ring) til montage i væg eller pladeværk.",
+                Requirements: new List<string>
+                {
+                    $"Diameter Ø{diameterStr} mm",
+                    $"Motorteknologi {sourceProduct.Technology} ({sourceProduct.MotorDescription})",
+                    $"12. ciffer skal have {evenOrOddHint}"
+                }
+            ));
+
+            // A-series base pattern (if source was S or W)
+            if (sourceProduct.CleanCode.StartsWith("S") || sourceProduct.CleanCode.StartsWith("W"))
+            {
+                patterns.Add(new EbmReplacementPattern(
+                    PatternType: "Aksial grundmodel uden tilbehør (A-serie)",
+                    SuggestedModelOrPrefix: $"A{techStr}{diameterStr}...",
+                    Description: "A-serien er selve grundmotoren og impelleren uden monteret gitter eller vægring (eksisterende gitter/ring kan evt. genbruges).",
+                    Requirements: new List<string>
+                    {
+                        $"Diameter Ø{diameterStr} mm",
+                        $"12. ciffer skal have {evenOrOddHint}"
+                    }
+                ));
+            }
+
+            // Technology Upgrade/Alternative
+            if (sourceProduct.Technology == MotorTechnology.AC)
+            {
+                patterns.Add(new EbmReplacementPattern(
+                    PatternType: "EC Energieffektiv Opgradering (3G-serie)",
+                    SuggestedModelOrPrefix: $"A3G{diameterStr}... / S3G{diameterStr}... / W3G{diameterStr}...",
+                    Description: "Opgradering til nyeste EC-teknologi (3G) med integreret motorelektronik, markant lavere energiforbrug og 0-10V/PWM/Modbus hastighedsstyring.",
+                    Requirements: new List<string>
+                    {
+                        $"Diameter Ø{diameterStr} mm",
+                        "Tilslutning til 1~ 230V eller 3~ 400V forsyning",
+                        "Styresignal (0-10V eller Modbus RTU)"
+                    }
+                ));
+            }
+            else if (sourceProduct.Technology == MotorTechnology.EC)
+            {
+                rules.Add("Motorteknologi: EC-motorer (3G) har integreret elektronik. Erstatning med AC kræver ekstern frekvensomformer og relæstyring.");
+            }
+        }
+        else if (sourceProduct.FanFamily == FanFamilyType.Centrifugal)
+        {
+            rules.Add("Monteringsform: Centrifugalventilatorer findes som frit hjul (R), modul i ramme/RadiPac (K) eller i sneglehus (G/D).");
+
+            if (sourceProduct.CleanCode.StartsWith("K"))
+            {
+                patterns.Add(new EbmReplacementPattern(
+                    PatternType: "Motoriseret centrifugalhjul uden ramme (R-serie)",
+                    SuggestedModelOrPrefix: $"R{techStr}{diameterStr}...",
+                    Description: "Centrifugalhjul (single-inlet) for direkte montage i eksisterende kammer eller konsol.",
+                    Requirements: new List<string> { $"Diameter Ø{diameterStr} mm", $"Samme motorteknologi ({sourceProduct.Technology})" }
+                ));
+
+                patterns.Add(new EbmReplacementPattern(
+                    PatternType: "Ny generation RadiPac EC modul (8300-serien)",
+                    SuggestedModelOrPrefix: "8300-serien",
+                    Description: "ebm-papsts nyeste generation af RadiPac EC centrifugalmoduler (erstatter K3G-serien i nye og eksisterende anlæg).",
+                    Requirements: new List<string> { "Check byggemål og nominel luftmængde/tryk i datablad" }
+                ));
+            }
+            else if (sourceProduct.CleanCode.StartsWith("R"))
+            {
+                patterns.Add(new EbmReplacementPattern(
+                    PatternType: "RadiPac modul i ramme (K-serie)",
+                    SuggestedModelOrPrefix: $"K{techStr}{diameterStr}...",
+                    Description: "Centrifugalhjul monteret i stabil monteringsramme med indløbsdyse.",
+                    Requirements: new List<string> { $"Diameter Ø{diameterStr} mm" }
+                ));
+            }
+        }
+        else if (sourceProduct.FanFamily == FanFamilyType.CompactOrSpecial)
+        {
+            var seriesPrefix = sourceProduct.CleanCode.Length >= 4 ? sourceProduct.CleanCode.Substring(0, 4) : sourceProduct.CleanCode;
+            rules.Add($"Kompaktblæser {seriesPrefix}: Kræver samme dimensioner (f.eks. {sourceProduct.ImpellerDiameterMm} mm), forsyningsspænding (f.eks. 12/24/48 VDC) og lejetype.");
+            patterns.Add(new EbmReplacementPattern(
+                PatternType: $"Kompaktblæser {seriesPrefix}-familien",
+                SuggestedModelOrPrefix: $"{seriesPrefix}...",
+                Description: "Kompakt DC-blæser fra samme familie med matchende spænding og tachoudgang.",
+                Requirements: new List<string> { "Samme spænding (VDC)", "Tilsvarende omdrejningstal (RPM) og lejetype" }
+            ));
+        }
+
+        var summary = matched.Count > 0
+            ? $"Fandt {matched.Count} direkte erstatningskandidat(er) i databasen: {string.Join(", ", matched.Select(m => m.RawCode))}."
+            : $"Der findes p.t. ingen direkte erstatningsmodeller for {sourceProduct.RawCode} i den indlæste dokumentdatabase. Erstatning bør vælges iht. de teoretiske ebm-papst typenøgle-mønstre ({string.Join(", ", patterns.Select(p => p.SuggestedModelOrPrefix))}).";
+
+        return new EbmReplacementAnalysis(
+            SourceProduct: sourceProduct,
+            MatchedDatabaseCandidates: matched,
+            IncompatibleDatabaseCandidates: incompatible,
+            TheoreticalPatterns: patterns,
+            ReplacementRules: rules,
             Summary: summary
         );
     }

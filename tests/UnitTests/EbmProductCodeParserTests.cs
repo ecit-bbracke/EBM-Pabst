@@ -161,4 +161,43 @@ public class EbmProductCodeParserTests
         Assert.Equal(expectedFamily, info.FanFamily);
         Assert.NotNull(info.SeriesFamily);
     }
+
+    [Fact]
+    public void AnalyzeReplacements_ForA3G910_ShouldProduce_S_and_W_Patterns_And_AirflowDirectionA_Rule()
+    {
+        // Arrange
+        var sourceFan = _parser.Parse("A3G910-AO83-90");
+
+        // Act
+        var analysis = _parser.AnalyzeReplacements(sourceFan);
+
+        // Assert
+        Assert.NotNull(analysis);
+        Assert.Equal(FanFamilyType.Axial, analysis.SourceProduct.FanFamily);
+        Assert.Equal(910, analysis.SourceProduct.ImpellerDiameterMm);
+        Assert.Equal(AirflowDirection.A, analysis.SourceProduct.AirflowDirection);
+
+        // Verify theoretical patterns
+        Assert.Contains(analysis.TheoreticalPatterns, p => p.SuggestedModelOrPrefix.StartsWith("S3G910"));
+        Assert.Contains(analysis.TheoreticalPatterns, p => p.SuggestedModelOrPrefix.StartsWith("W3G910"));
+
+        // Verify critical airflow rule
+        Assert.Contains(analysis.ReplacementRules, r => r.Contains("LIGE ciffer") && r.Contains("Luftretning A"));
+    }
+
+    [Fact]
+    public void AnalyzeReplacements_WithMatchingCatalogCandidate_ShouldIdentifyDropInCandidate()
+    {
+        // Arrange
+        var sourceFan = _parser.Parse("A4E350AN0101"); // Airflow V (odd digit 01)
+        var matchingCandidate = _parser.Parse("S4E350AN0101"); // Airflow V with guard grille
+        var differentAirflowCandidate = _parser.Parse("A4E350AN0102"); // Airflow A (even digit 02)
+
+        // Act
+        var analysis = _parser.AnalyzeReplacements(sourceFan, new[] { matchingCandidate, differentAirflowCandidate });
+
+        // Assert
+        Assert.Contains(analysis.MatchedDatabaseCandidates, m => m.CleanCode == matchingCandidate.CleanCode);
+        Assert.Contains(analysis.IncompatibleDatabaseCandidates, i => i.ProductB.CleanCode == differentAirflowCandidate.CleanCode);
+    }
 }

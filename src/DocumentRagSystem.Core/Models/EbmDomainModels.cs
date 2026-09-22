@@ -62,3 +62,19 @@ public record EbmComparisonEvaluation(
     [property: JsonPropertyName("differences")] List<EbmComparisonDifference> Differences,
     [property: JsonPropertyName("summary")] string Summary
 );
+
+public record EbmReplacementPattern(
+    [property: JsonPropertyName("pattern_type")] string PatternType,
+    [property: JsonPropertyName("suggested_model_or_prefix")] string SuggestedModelOrPrefix,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("requirements")] List<string> Requirements
+);
+
+public record EbmReplacementAnalysis(
+    [property: JsonPropertyName("source_product")] EbmProductInfo SourceProduct,
+    [property: JsonPropertyName("matched_database_candidates")] List<EbmProductInfo> MatchedDatabaseCandidates,
+    [property: JsonPropertyName("incompatible_database_candidates")] List<EbmComparisonEvaluation> IncompatibleDatabaseCandidates,
+    [property: JsonPropertyName("theoretical_patterns")] List<EbmReplacementPattern> TheoreticalPatterns,
+    [property: JsonPropertyName("replacement_rules")] List<string> ReplacementRules,
+    [property: JsonPropertyName("summary")] string Summary
+);

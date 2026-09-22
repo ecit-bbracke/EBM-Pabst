@@ -24,4 +24,9 @@ public interface IEbmProductCodeParser
     /// Evaluates technical comparison and replacement viability between two ebm-papst products based on domain rules.
     /// </summary>
     EbmComparisonEvaluation Compare(EbmProductInfo productA, EbmProductInfo productB);
+
+    /// <summary>
+    /// Analyzes viable replacement candidates for a source product from catalog candidates and theoretical ebm-papst series patterns.
+    /// </summary>
+    EbmReplacementAnalysis AnalyzeReplacements(EbmProductInfo sourceProduct, IEnumerable<EbmProductInfo>? catalogCandidates = null);
 }
