@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>dd5e23de-ff7b-4ff3-8ddf-06d7dde5c43b</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DocumentRagSystem.Core\DocumentRagSystem.Core.csproj" />
+    <ProjectReference Include="..\..\src\DocumentRagSystem.Evaluation\DocumentRagSystem.Evaluation.csproj" />
     <ProjectReference Include="..\..\src\DocumentRagSystem.Infrastructure\DocumentRagSystem.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\DocumentRagSystem.WebApi\DocumentRagSystem.WebApi.csproj" />
     <ProjectReference Include="..\..\src\DocumentRagSystem.Worker\DocumentRagSystem.Worker.csproj" />
