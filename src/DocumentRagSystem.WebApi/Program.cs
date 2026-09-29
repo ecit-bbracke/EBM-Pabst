@@ -6,17 +6,21 @@ using System.Text.Json;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Markdig;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Core.Services;
 using DocumentRagSystem.Infrastructure.TextExtractors;
 using DocumentRagSystem.Infrastructure.Embeddings;
+using DocumentRagSystem.Infrastructure.HealthChecks;
 using DocumentRagSystem.Infrastructure.Llm;
 using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.Infrastructure.VectorStores;
@@ -31,7 +35,7 @@ builder.Services.AddOpenApi();
 
 // Register Core & Infrastructure Services
 var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
-var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "text-embedding-004";
+var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "gemini-embedding-001";
 var geminiLlmModel = builder.Configuration["Gemini:LlmModel"] ?? "gemini-3.6-flash";
 var geminiFastLlmModel = builder.Configuration["Gemini:FastLlmModel"] ?? geminiLlmModel;
 
@@ -40,10 +44,58 @@ var qdrantCollection = builder.Configuration["Qdrant:CollectionName"] ?? "docume
 var uploadsDirectory = GetUploadsDirectory(builder.Configuration["Uploads:Directory"]);
 var servedUploadDirectories = GetServedUploadDirectories(uploadsDirectory).ToList();
 
+// Configure LLM Options
+builder.Services.Configure<LlmOptions>(options =>
+{
+    builder.Configuration.GetSection(LlmOptions.SectionName).Bind(options);
+    if (string.IsNullOrWhiteSpace(options.Gemini.ApiKey) && !string.IsNullOrWhiteSpace(geminiApiKey))
+    {
+        options.Gemini.ApiKey = geminiApiKey;
+    }
+    if (string.IsNullOrWhiteSpace(options.Gemini.LlmModel) && !string.IsNullOrWhiteSpace(geminiLlmModel))
+    {
+        options.Gemini.LlmModel = geminiLlmModel;
+    }
+    if (string.IsNullOrWhiteSpace(options.Gemini.FastLlmModel) && !string.IsNullOrWhiteSpace(geminiFastLlmModel))
+    {
+        options.Gemini.FastLlmModel = geminiFastLlmModel;
+    }
+});
+
 // Register pooled HTTP clients for external AI API calls
 builder.Services.AddHttpClient("GeminiClient", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(60);
+});
+
+builder.Services.AddHttpClient("LocalLlmClient", (sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value.Local;
+    if (!string.IsNullOrWhiteSpace(opts.BaseUrl))
+    {
+        var rawUrl = opts.BaseUrl.Trim();
+        if (rawUrl.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            rawUrl = rawUrl.Substring(0, rawUrl.Length - "/v1/chat/completions".Length);
+        }
+        client.BaseAddress = new Uri(rawUrl.TrimEnd('/') + "/");
+    }
+    client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 60);
+});
+
+builder.Services.AddHttpClient("LocalLlmHealthClient", (sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value.Local;
+    if (!string.IsNullOrWhiteSpace(opts.BaseUrl))
+    {
+        var rawUrl = opts.BaseUrl.Trim();
+        if (rawUrl.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            rawUrl = rawUrl.Substring(0, rawUrl.Length - "/v1/chat/completions".Length);
+        }
+        client.BaseAddress = new Uri(rawUrl.TrimEnd('/') + "/");
+    }
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
 
 // Add Singletons and Scoped Services
@@ -51,7 +103,7 @@ builder.Services.AddSingleton<IDocumentRepository, InMemoryDocumentRepository>()
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 
-// Set up Gemini embedding and LLM services
+// Set up Gemini embedding service
 builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp => 
     new GeminiEmbeddingService(
         geminiApiKey, 
@@ -59,12 +111,41 @@ builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp =>
         sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient"),
         sp.GetService<ILogger<GeminiEmbeddingService>>()));
 
+// Register LLM Providers and Resolver
+builder.Services.AddSingleton<GeminiLlmClient>(sp =>
+{
+    var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value;
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient");
+    var logger = sp.GetService<ILogger<GeminiLlmClient>>();
+    return new GeminiLlmClient(opts.Gemini.ApiKey ?? geminiApiKey, opts.Gemini.LlmModel, opts.Gemini.FastLlmModel ?? geminiFastLlmModel, httpClient, logger);
+});
+
+builder.Services.AddSingleton<LocalLlmClient>(sp =>
+{
+    var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value.Local;
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("LocalLlmClient");
+    var logger = sp.GetService<ILogger<LocalLlmClient>>();
+    return new LocalLlmClient(opts, httpClient, logger);
+});
+
+builder.Services.AddSingleton<ILlmClientResolver, LlmClientResolver>(sp =>
+    new LlmClientResolver(
+        sp.GetRequiredService<IOptions<LlmOptions>>(),
+        sp.GetRequiredService<GeminiLlmClient>(),
+        sp.GetRequiredService<LocalLlmClient>(),
+        sp.GetService<ILoggerFactory>(),
+        sp.GetService<ILogger<LlmClientResolver>>()));
+
+builder.Services.AddSingleton<ILlmClient>(sp =>
+{
+    var resolver = sp.GetRequiredService<ILlmClientResolver>();
+    var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value;
+    return resolver.Resolve(opts.DefaultProvider);
+});
+
 builder.Services.AddSingleton<ILlmService, GeminiLlmService>(sp => 
     new GeminiLlmService(
-        geminiApiKey, 
-        geminiLlmModel, 
-        geminiFastLlmModel, 
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient"),
+        sp.GetRequiredService<ILlmClient>(),
         sp.GetService<ILogger<GeminiLlmService>>()));
 
 // Set up Qdrant Vector Store
@@ -93,13 +174,13 @@ builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStor
 builder.Services.AddSingleton<IEbmProductCodeParser, EbmProductCodeParser>();
 builder.Services.AddSingleton<IConversationalQueryRefiner, ConversationalQueryRefiner>(sp =>
     new ConversationalQueryRefiner(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetRequiredService<IEbmProductCodeParser>(),
         sp.GetService<ILogger<ConversationalQueryRefiner>>()));
 
 builder.Services.AddSingleton<IInputGovernor, InputGovernor>(sp =>
     new InputGovernor(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetRequiredService<IEbmProductCodeParser>(),
         sp.GetService<ILogger<InputGovernor>>()));
 
@@ -107,17 +188,17 @@ builder.Services.AddSingleton<IWorkflowRouter, WorkflowRouter>();
 
 builder.Services.AddSingleton<IEvidenceEvaluator, EvidenceEvaluator>(sp =>
     new EvidenceEvaluator(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<EvidenceEvaluator>>()));
 
 builder.Services.AddSingleton<IAnswerComposer, AnswerComposer>(sp =>
     new AnswerComposer(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<AnswerComposer>>()));
 
 builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
     new OutputGovernor(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<OutputGovernor>>()));
 
 builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>(sp =>
@@ -127,12 +208,16 @@ builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrato
         sp.GetRequiredService<IEvidenceEvaluator>(),
         sp.GetRequiredService<IAnswerComposer>(),
         sp.GetRequiredService<IOutputGovernor>(),
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetRequiredService<IEbmProductCodeParser>(),
         sp.GetRequiredService<IConversationalQueryRefiner>(),
         sp.GetRequiredService<IConversationStateStore>(),
         sp.GetService<IDocumentRepository>(),
         sp.GetService<ILogger<TechnicalRagOrchestrator>>()));
+
+// Add Health Checks
+builder.Services.AddHealthChecks()
+    .AddCheck<LocalLlmHealthCheck>("local-llm");
 
 // Register Queue and Background Hosted Services
 builder.Services.AddSingleton<IDocumentQueue, DocumentQueue>();
@@ -199,6 +284,64 @@ app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore
     return Results.Ok(docs);
 })
 .WithName("GetAllDocuments");
+
+// DOCUMENT STATUS ENDPOINTS
+app.MapGet("/api/documents/status", async (
+    [FromQuery] string? fileName,
+    [FromQuery] string? name,
+    [FromQuery] string? file,
+    IDocumentRepository repository,
+    IVectorStore vectorStore) =>
+{
+    var resolvedFileName = FirstNonEmpty(fileName, name, file);
+    if (string.IsNullOrWhiteSpace(resolvedFileName))
+    {
+        return Results.BadRequest(new { error = "The 'fileName' parameter is required." });
+    }
+
+    return await GetDocumentStatusResultAsync(resolvedFileName, repository, vectorStore, servedUploadDirectories);
+})
+.WithName("GetDocumentStatusByQuery")
+.WithSummary("Get document upload status by filename (query parameter)")
+.WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
+.Produces<DocumentStatusResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest);
+
+app.MapGet("/api/documents/status/{*fileName}", async (
+    string fileName,
+    IDocumentRepository repository,
+    IVectorStore vectorStore) =>
+{
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return Results.BadRequest(new { error = "The 'fileName' parameter is required." });
+    }
+
+    return await GetDocumentStatusResultAsync(fileName, repository, vectorStore, servedUploadDirectories);
+})
+.WithName("GetDocumentStatusByPath")
+.WithSummary("Get document upload status by filename (route parameter)")
+.WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
+.Produces<DocumentStatusResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest);
+
+app.MapGet("/api/documents/{fileName}/status", async (
+    string fileName,
+    IDocumentRepository repository,
+    IVectorStore vectorStore) =>
+{
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return Results.BadRequest(new { error = "The 'fileName' parameter is required." });
+    }
+
+    return await GetDocumentStatusResultAsync(fileName, repository, vectorStore, servedUploadDirectories);
+})
+.WithName("GetDocumentStatusByResourcePath")
+.WithSummary("Get document upload status by filename (resource route parameter)")
+.WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
+.Produces<DocumentStatusResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest);
 
 // QUERY ENDPOINT WITH CITATIONS
 app.MapPost("/api/query", async (
@@ -582,6 +725,140 @@ static string ToExistingUploadUrl(string? fileName, IEnumerable<string> uploadDi
     }
 
     return fallbackUrl ?? string.Empty;
+}
+
+static async Task<IResult> GetDocumentStatusResultAsync(
+    string fileName,
+    IDocumentRepository repository,
+    IVectorStore vectorStore,
+    IEnumerable<string> uploadDirectories)
+{
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return Results.BadRequest(new { error = "The 'fileName' parameter cannot be empty." });
+    }
+
+    var cleanName = fileName.Trim();
+    var targetFileName = Path.GetFileName(cleanName);
+    if (string.IsNullOrWhiteSpace(targetFileName))
+    {
+        targetFileName = cleanName;
+    }
+
+    // 1. Fetch documents from repository and vector store
+    var repositoryDocs = await repository.GetAllDocumentsAsync();
+    var vectorDocs = await vectorStore.GetDocumentsAsync();
+
+    var allDocs = repositoryDocs
+        .Concat(vectorDocs)
+        .GroupBy(doc => doc.Id)
+        .Select(group => group
+            .OrderByDescending(doc => doc.UploadedAt)
+            .ThenByDescending(doc => !string.IsNullOrWhiteSpace(doc.FileName))
+            .First())
+        .Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, uploadDirectories) })
+        .ToList();
+
+    // 2. Find matching documents
+    var matches = allDocs.Where(doc =>
+    {
+        if (string.Equals(doc.FileName, cleanName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(doc.FileName))
+        {
+            var docFileNameOnly = Path.GetFileName(doc.FileName);
+            if (string.Equals(docFileNameOnly, targetFileName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var docWithoutExt = Path.GetFileNameWithoutExtension(docFileNameOnly);
+            var targetWithoutExt = Path.GetFileNameWithoutExtension(targetFileName);
+            if (!string.IsNullOrWhiteSpace(targetWithoutExt) &&
+                string.Equals(docWithoutExt, targetWithoutExt, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        if (string.Equals(doc.Id, cleanName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            var docPathFileName = Path.GetFileName(Uri.UnescapeDataString(doc.FilePath));
+            if (string.Equals(docPathFileName, targetFileName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (docPathFileName.EndsWith($"_{targetFileName}", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }).ToList();
+
+    if (matches.Count > 0)
+    {
+        int MatchScore(Document d)
+        {
+            if (string.Equals(d.FileName, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(d.FileName), targetFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+            return 1;
+        }
+
+        int StatusPriority(DocumentStatus status) => status switch
+        {
+            DocumentStatus.Processed => 1,
+            DocumentStatus.Processing => 2,
+            DocumentStatus.Pending => 3,
+            DocumentStatus.Failed => 4,
+            _ => 5
+        };
+
+        var bestMatch = matches
+            .OrderBy(MatchScore)
+            .ThenBy(m => StatusPriority(m.Status))
+            .ThenByDescending(m => m.UploadedAt)
+            .First();
+
+        return Results.Ok(new DocumentStatusResponse(
+            HasBeenUploaded: true,
+            Status: bestMatch.Status.ToString(),
+            DocumentId: bestMatch.Id,
+            FileName: bestMatch.FileName,
+            FilePath: bestMatch.FilePath,
+            UploadedAt: bestMatch.UploadedAt,
+            ErrorMessage: bestMatch.ErrorMessage
+        ));
+    }
+
+    // 3. Fallback: check if the file exists directly in served upload directories
+    var existingUrl = ToExistingUploadUrl(targetFileName, uploadDirectories);
+    if (!string.IsNullOrWhiteSpace(existingUrl))
+    {
+        return Results.Ok(new DocumentStatusResponse(
+            HasBeenUploaded: true,
+            Status: "Uploaded",
+            DocumentId: null,
+            FileName: targetFileName,
+            FilePath: existingUrl,
+            UploadedAt: null,
+            ErrorMessage: null
+        ));
+    }
+
+    // 4. Not uploaded / not found
+    return Results.Ok(new DocumentStatusResponse(
+        HasBeenUploaded: false,
+        Status: "NotUploaded",
+        DocumentId: null,
+        FileName: targetFileName,
+        FilePath: null,
+        UploadedAt: null,
+        ErrorMessage: null
+    ));
 }
 
 // Required to make Program class visible to integration/E2E test project

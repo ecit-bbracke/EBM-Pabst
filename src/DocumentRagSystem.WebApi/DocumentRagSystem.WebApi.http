@@ -1,6 +1,21 @@
 @DocumentRagSystem.WebApi_HostAddress = http://localhost:5196
 
-GET {{DocumentRagSystem.WebApi_HostAddress}}/weatherforecast/
+### Health Check
+GET {{DocumentRagSystem.WebApi_HostAddress}}/health
 Accept: application/json
 
-###
+### Get All Documents
+GET {{DocumentRagSystem.WebApi_HostAddress}}/api/documents
+Accept: application/json
+
+### Check Document Status (Query Parameter)
+GET {{DocumentRagSystem.WebApi_HostAddress}}/api/documents/status?fileName=sample.pdf
+Accept: application/json
+
+### Check Document Status (Route Parameter)
+GET {{DocumentRagSystem.WebApi_HostAddress}}/api/documents/status/sample.pdf
+Accept: application/json
+
+### Check Document Status (Resource Route Parameter)
+GET {{DocumentRagSystem.WebApi_HostAddress}}/api/documents/sample.pdf/status
+Accept: application/json
