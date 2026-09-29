@@ -105,7 +105,8 @@ public record PromptTrace(
     [property: JsonPropertyName("prompt")] string Prompt,
     [property: JsonPropertyName("response")] string? Response,
     [property: JsonPropertyName("duration_ms")] long DurationMs,
-    [property: JsonPropertyName("model")] string? Model = null
+    [property: JsonPropertyName("model")] string? Model = null,
+    [property: JsonPropertyName("llm")] LlmExecutionMetadata? Llm = null
 );
 
 public record StageTiming(

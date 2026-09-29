@@ -21,14 +21,30 @@ public interface IOutputGovernor
 
 public class OutputGovernor : IOutputGovernor
 {
-    private readonly ILlmService _llmService;
+    private readonly ILlmClient _llmClient;
     private readonly ILogger<OutputGovernor>? _logger;
 
-    public OutputGovernor(ILlmService llmService, ILogger<OutputGovernor>? logger = null)
+    public OutputGovernor(ILlmClient llmClient, ILogger<OutputGovernor>? logger = null)
     {
-        _llmService = llmService;
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
         _logger = logger;
     }
+
+    public OutputGovernor(ILlmClientResolver resolver, ILogger<OutputGovernor>? logger = null)
+        : this(resolver?.Resolve(LlmPurpose.OutputGovernor) ?? throw new ArgumentNullException(nameof(resolver)), logger)
+    {
+    }
+
+    public OutputGovernor(ILlmService llmService, ILogger<OutputGovernor>? logger = null)
+        : this(new LlmServiceToClientAdapter(llmService), logger)
+    {
+    }
+
+    private const string SystemInstruction = """
+You are the Output Governor. Verify if the Proposed Answer is factually supported by the Context Documentation:
+- If all claims in the Proposed Answer are supported by the Context or ebm-papst domain rules, return: {"approved": true, "issues": [], "action": "APPROVE"}
+- If any claim in the Proposed Answer contradicts or is not supported by the Context, return: {"approved": false, "issues": [{"type": "UNSUPPORTED_CLAIM", "claim": "...", "severity": "HIGH"}], "action": "REGENERATE"}
+""";
 
     public async Task<OutputGovernorResult> ValidateOutputAsync(
         string question,
@@ -40,78 +56,27 @@ public class OutputGovernor : IOutputGovernor
             throw new ArgumentNullException(nameof(question));
 
         var chunkList = chunks.ToList();
-        var prompt = $$"""
-            You are the Output Governor for a highly specialized Technical RAG Orchestrator for industrial ventilation and motor systems (ebm-papst domain).
-            Your job is to validate the proposed final answer before it is presented to the user.
-
-            Validation Guidelines:
-            1. APPROVE if the answer is grounded in the retrieved context chunks, accurately follows ebm-papst domain rules (e.g., 12th digit airflow direction decoding, EC vs AC technology, diameter, fan types), or honestly explains that certain data was not found in the documents.
-            2. REGENERATE if the answer makes ungrounded technical claims that can be corrected from the context chunks or needs clarification.
-            3. Do NOT reject an answer merely because it acknowledges missing specifications or politely states that a value is absent from the datasheet.
-            4. CRITICAL AIRFLOW CHECK: Did the answer claim two axial fans with different 12th digits (e.g., A6E450AP0201 [Airflow V] and A6E450AP0202 [Airflow A]) are direct drop-in replacements for each other without warning? This is a dangerous false claim and must be rejected with action REGENERATE or FAIL_SAFE.
-            5. Use FAIL_SAFE ONLY when there is an unresolvable critical safety contradiction that cannot be answered safely.
-
-            Return a JSON object conforming to this schema:
-            {
-              "approved": true,
-              "issues": [],
-              "action": "APPROVE"
-            }
-
-            If issues are found, set approved to false, specify the issues, and set action to REGENERATE (or FAIL_SAFE only for severe safety hazards):
-            {
-              "approved": false,
-              "issues": [
-                {
-                  "type": "UNSUPPORTED_CLAIM",
-                  "claim": "The specific technical claim with the issue",
-                  "severity": "HIGH"
-                }
-              ],
-              "action": "REGENERATE"
-            }
-
-            Question: {{question}}
-            Proposed Answer: {{proposedAnswer}}
-
-            Context chunks:
-            {{string.Join("\n\n", chunkList.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"))}}
-            """;
+        var contextText = string.Join("\n\n", chunkList.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"));
+        var userPrompt = $"Context Documentation:\n{contextText}\n\nQuestion: {question}\nProposed Answer: {proposedAnswer}";
 
         var stopwatch = Stopwatch.StartNew();
         _logger?.LogInformation(
             "[OutputGovernor] Executing output validation prompt ({PromptLength} chars).\nPrompt:\n{Prompt}",
-            prompt.Length, prompt);
+            userPrompt.Length, userPrompt);
 
         try
         {
-            var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: true);
+            var req = LlmRequest.FromPrompt(
+                userPrompt, 
+                requireJson: true, 
+                systemInstruction: SystemInstruction, 
+                temperature: 0.0, 
+                maxOutputTokens: 256);
+
+            var structuredRes = await _llmClient.GenerateStructuredAsync<OutputGovernorResult>(req);
             stopwatch.Stop();
 
-            var cleanedResponse = response.Trim();
-            if (cleanedResponse.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(7);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            else if (cleanedResponse.StartsWith("```", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(3);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            cleanedResponse = cleanedResponse.Trim();
-
-            var options = new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            };
-            var result = JsonSerializer.Deserialize<OutputGovernorResult>(cleanedResponse, options);
+            var result = structuredRes.Value;
             if (result != null)
             {
                 var issues = result.Issues ?? new List<OutputGovernorIssue>();
@@ -125,14 +90,14 @@ public class OutputGovernor : IOutputGovernor
         catch (Exception ex)
         {
             stopwatch.Stop();
-            _logger?.LogWarning(ex, "[OutputGovernor] Error after {DurationMs}ms: {Message}. Defaulting to APPROVE.", stopwatch.ElapsedMilliseconds, ex.Message);
+            _logger?.LogWarning(ex, "[OutputGovernor] Error after {DurationMs}ms: {Message}. Falling back to default approved.", stopwatch.ElapsedMilliseconds, ex.Message);
             Console.WriteLine($"Error in OutputGovernor: {ex.Message}");
         }
 
-        // Safe default: approve if we can't parse, or request fail_safe to be safe. Let's default to approve to maintain system availability.
+        // Safe fallback
         return new OutputGovernorResult(
             Approved: true,
-            Issues: new(),
+            Issues: new List<OutputGovernorIssue>(),
             Action: "APPROVE"
         );
     }

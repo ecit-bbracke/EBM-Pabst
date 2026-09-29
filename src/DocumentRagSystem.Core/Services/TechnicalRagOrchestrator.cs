@@ -48,6 +48,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private readonly IEvidenceEvaluator _evidenceEvaluator;
     private readonly IAnswerComposer _answerComposer;
     private readonly IOutputGovernor _outputGovernor;
+    private readonly ILlmClient _llmClient;
     private readonly ILlmService _llmService;
     private readonly IConversationalQueryRefiner _queryRefiner;
     private readonly IConversationStateStore _stateStore;
@@ -65,7 +66,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IEvidenceEvaluator evidenceEvaluator,
         IAnswerComposer answerComposer,
         IOutputGovernor outputGovernor,
-        ILlmService llmService,
+        ILlmClient llmClient,
         IEbmProductCodeParser? ebmParser = null,
         IConversationalQueryRefiner? queryRefiner = null,
         IConversationStateStore? stateStore = null,
@@ -78,24 +79,81 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         _evidenceEvaluator = evidenceEvaluator ?? throw new ArgumentNullException(nameof(evidenceEvaluator));
         _answerComposer = answerComposer ?? throw new ArgumentNullException(nameof(answerComposer));
         _outputGovernor = outputGovernor ?? throw new ArgumentNullException(nameof(outputGovernor));
-        _llmService = llmService ?? throw new ArgumentNullException(nameof(llmService));
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _llmService = new LlmClientToServiceAdapter(llmClient);
         _logger = logger;
 
         var parser = ebmParser ?? new EbmProductCodeParser();
-        _queryRefiner = queryRefiner ?? new ConversationalQueryRefiner(llmService, parser);
+        _queryRefiner = queryRefiner ?? new ConversationalQueryRefiner(llmClient, parser);
         _stateStore = stateStore ?? new InMemoryConversationStateStore();
 
         _executors = new Dictionary<WorkflowType, IWorkflowExecutor>
         {
-            { WorkflowType.SimpleRag, new SimpleWorkflowExecutor(llmService) },
-            { WorkflowType.Comparison, new ComparisonWorkflowExecutor(llmService, parser) },
-            { WorkflowType.Compatibility, new CompatibilityWorkflowExecutor(llmService, parser, documentRepository) },
-            { WorkflowType.Diagnostic, new DiagnosticWorkflowExecutor(llmService) },
-            { WorkflowType.Calculation, new CalculationWorkflowExecutor(llmService) },
-            { WorkflowType.Design, new DesignWorkflowExecutor(llmService) },
-            { WorkflowType.Clarification, new ClarificationWorkflowExecutor(llmService) },
-            { WorkflowType.Overview, new OverviewWorkflowExecutor(llmService, parser, documentRepository) }
+            { WorkflowType.SimpleRag, new SimpleWorkflowExecutor(_llmService) },
+            { WorkflowType.Comparison, new ComparisonWorkflowExecutor(_llmService, parser) },
+            { WorkflowType.Compatibility, new CompatibilityWorkflowExecutor(_llmService, parser, documentRepository) },
+            { WorkflowType.Diagnostic, new DiagnosticWorkflowExecutor(_llmService) },
+            { WorkflowType.Calculation, new CalculationWorkflowExecutor(_llmService) },
+            { WorkflowType.Design, new DesignWorkflowExecutor(_llmService) },
+            { WorkflowType.Clarification, new ClarificationWorkflowExecutor(_llmService) },
+            { WorkflowType.Overview, new OverviewWorkflowExecutor(_llmService, parser, documentRepository) }
         };
+    }
+
+    public TechnicalRagOrchestrator(
+        IInputGovernor inputGovernor,
+        IWorkflowRouter workflowRouter,
+        IEvidenceEvaluator evidenceEvaluator,
+        IAnswerComposer answerComposer,
+        IOutputGovernor outputGovernor,
+        ILlmClientResolver resolver,
+        IEbmProductCodeParser? ebmParser = null,
+        IConversationalQueryRefiner? queryRefiner = null,
+        IConversationStateStore? stateStore = null,
+        IDocumentRepository? documentRepository = null,
+        ILogger<TechnicalRagOrchestrator>? logger = null
+    )
+        : this(
+            inputGovernor,
+            workflowRouter,
+            evidenceEvaluator,
+            answerComposer,
+            outputGovernor,
+            resolver?.Resolve(LlmPurpose.Workflow) ?? throw new ArgumentNullException(nameof(resolver)),
+            ebmParser,
+            queryRefiner,
+            stateStore,
+            documentRepository,
+            logger)
+    {
+    }
+
+    public TechnicalRagOrchestrator(
+        IInputGovernor inputGovernor,
+        IWorkflowRouter workflowRouter,
+        IEvidenceEvaluator evidenceEvaluator,
+        IAnswerComposer answerComposer,
+        IOutputGovernor outputGovernor,
+        ILlmService llmService,
+        IEbmProductCodeParser? ebmParser = null,
+        IConversationalQueryRefiner? queryRefiner = null,
+        IConversationStateStore? stateStore = null,
+        IDocumentRepository? documentRepository = null,
+        ILogger<TechnicalRagOrchestrator>? logger = null
+    )
+        : this(
+            inputGovernor,
+            workflowRouter,
+            evidenceEvaluator,
+            answerComposer,
+            outputGovernor,
+            new LlmServiceToClientAdapter(llmService),
+            ebmParser,
+            queryRefiner,
+            stateStore,
+            documentRepository,
+            logger)
+    {
     }
 
     public Task<(string FinalAnswer, List<DocumentChunk> ContextChunks, ExecutionTrace Trace)> ProcessQueryAsync(
@@ -266,9 +324,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 
                 var tqStopwatch = Stopwatch.StartNew();
                 _logger?.LogInformation("[Orchestrator] Executing targeted retrieval query prompt for missing claim: \"{Claim}\".\nPrompt:\n{Prompt}", targetClaim.Claim, targetedQueryPrompt);
-                var targetedQuery = await _llmService.GenerateCompletionAsync(targetedQueryPrompt);
+                var tqResult = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(targetedQueryPrompt, requireJson: false));
+                var targetedQuery = tqResult.Content;
                 tqStopwatch.Stop();
-                promptTraces.Add(new PromptTrace("IterativeRetrieval", $"TargetedQuery_Iter{iterations}", targetedQueryPrompt, targetedQuery, tqStopwatch.ElapsedMilliseconds));
+                promptTraces.Add(new PromptTrace("IterativeRetrieval", $"TargetedQuery_Iter{iterations}", targetedQueryPrompt, targetedQuery, tqStopwatch.ElapsedMilliseconds, tqResult.Metadata.Model, tqResult.Metadata));
 
                 var searchStopwatch = Stopwatch.StartNew();
                 var additionalChunks = await vectorStore.SearchAsync(targetedQuery);
@@ -343,9 +402,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 var clarifyPrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question asking them to clarify or provide additional details/model numbers.";
                 var clarifyTimer = Stopwatch.StartNew();
                 _logger?.LogInformation("[Orchestrator] Executing OutputGovernor clarification prompt.\nPrompt:\n{Prompt}", clarifyPrompt);
-                finalAnswer = await _llmService.GenerateCompletionAsync(clarifyPrompt, requireJson: false);
+                var clarifyRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(clarifyPrompt, requireJson: false));
+                finalAnswer = clarifyRes.Content;
                 clarifyTimer.Stop();
-                promptTraces.Add(new PromptTrace("OutputGovernor", "RequestClarification", clarifyPrompt, finalAnswer, clarifyTimer.ElapsedMilliseconds));
+                promptTraces.Add(new PromptTrace("OutputGovernor", "RequestClarification", clarifyPrompt, finalAnswer, clarifyTimer.ElapsedMilliseconds, clarifyRes.Metadata.Model, clarifyRes.Metadata));
                 break;
             }
 
@@ -356,9 +416,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 var failSafePrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question explaining that the available search results contain conflicting or insufficient data to provide a safe verified answer, and advise them to contact technical support.";
                 var failSafeTimer = Stopwatch.StartNew();
                 _logger?.LogInformation("[Orchestrator] Executing OutputGovernor fail-safe prompt.\nPrompt:\n{Prompt}", failSafePrompt);
-                finalAnswer = await _llmService.GenerateCompletionAsync(failSafePrompt, requireJson: false);
+                var failSafeRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(failSafePrompt, requireJson: false));
+                finalAnswer = failSafeRes.Content;
                 failSafeTimer.Stop();
-                promptTraces.Add(new PromptTrace("OutputGovernor", "FailSafe", failSafePrompt, finalAnswer, failSafeTimer.ElapsedMilliseconds));
+                promptTraces.Add(new PromptTrace("OutputGovernor", "FailSafe", failSafePrompt, finalAnswer, failSafeTimer.ElapsedMilliseconds, failSafeRes.Metadata.Model, failSafeRes.Metadata));
                 break;
             }
 
@@ -382,10 +443,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
             var regenTimer = Stopwatch.StartNew();
             _logger?.LogInformation("[Orchestrator] Executing regeneration prompt (Attempt {Attempt}).\nPrompt:\n{Prompt}", regenAttempts, regenPrompt);
-            finalAnswer = await _llmService.GenerateCompletionAsync(regenPrompt, requireJson: false);
+            var regenRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(regenPrompt, requireJson: false));
+            finalAnswer = regenRes.Content;
             regenTimer.Stop();
             timings[$"Regeneration_Attempt{regenAttempts}"] = regenTimer.ElapsedMilliseconds;
-            promptTraces.Add(new PromptTrace("OutputGovernor", $"Regeneration_Attempt{regenAttempts}", regenPrompt, finalAnswer, regenTimer.ElapsedMilliseconds));
+            promptTraces.Add(new PromptTrace("OutputGovernor", $"Regeneration_Attempt{regenAttempts}", regenPrompt, finalAnswer, regenTimer.ElapsedMilliseconds, regenRes.Metadata.Model, regenRes.Metadata));
         }
         timings["OutputGovernorTotal"] = stageStopwatch.ElapsedMilliseconds;
         _logger?.LogInformation("[Orchestrator] Output governor and validation loop completed in {DurationMs}ms (Action: {Action}, RegenAttempts: {RegenAttempts}).", timings["OutputGovernorTotal"], govOutputResult?.Action, regenAttempts);

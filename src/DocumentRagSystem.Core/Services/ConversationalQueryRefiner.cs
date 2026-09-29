@@ -12,19 +12,56 @@ namespace DocumentRagSystem.Core.Services;
 
 public class ConversationalQueryRefiner : IConversationalQueryRefiner
 {
-    private readonly ILlmService _llmService;
+    private readonly ILlmClient _llmClient;
     private readonly IEbmProductCodeParser _ebmParser;
     private readonly ILogger<ConversationalQueryRefiner>? _logger;
+
+    public ConversationalQueryRefiner(
+        ILlmClient llmClient, 
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<ConversationalQueryRefiner>? logger = null)
+    {
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _ebmParser = ebmParser ?? new EbmProductCodeParser();
+        _logger = logger;
+    }
+
+    public ConversationalQueryRefiner(
+        ILlmClientResolver resolver,
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<ConversationalQueryRefiner>? logger = null)
+        : this(resolver?.Resolve(LlmPurpose.QueryRefiner) ?? throw new ArgumentNullException(nameof(resolver)), ebmParser, logger)
+    {
+    }
 
     public ConversationalQueryRefiner(
         ILlmService llmService, 
         IEbmProductCodeParser? ebmParser = null,
         ILogger<ConversationalQueryRefiner>? logger = null)
+        : this(new LlmServiceToClientAdapter(llmService), ebmParser, logger)
     {
-        _llmService = llmService ?? throw new ArgumentNullException(nameof(llmService));
-        _ebmParser = ebmParser ?? new EbmProductCodeParser();
-        _logger = logger;
     }
+
+    private const string SystemInstruction = """
+You are the Conversational Query Refiner. Resolve pronouns and maintain active constraints across turns.
+Output MINIMAL compact JSON. Omit empty arrays and null fields.
+Schema:
+{
+  "relationship_to_previous_turn": "CONTINUES | REFINES | MODIFIES | NEW_TOPIC | RESET",
+  "resolved_question": "...",
+  "effective_question": "...",
+  "active_entities": [{"type": "fan", "name": "..."}],
+  "active_constraints": [{"attribute": "...", "operator": "equals", "value": "..."}],
+  "new_topic": false
+}
+Rules:
+1. CONTINUES: same topic, no constraint changes.
+2. REFINES: narrows scope / adds constraint.
+3. MODIFIES: replaces old constraint with new one.
+4. NEW_TOPIC: new subject.
+5. RESET: start over.
+6. Keep effective_question in the exact same language as latest user message.
+""";
 
     public async Task<QueryRefinementResult> RefineQueryAsync(
         string userMessage,
@@ -78,144 +115,29 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
 
         var serializedState = JsonSerializer.Serialize(conversationState, new JsonSerializerOptions
         {
-            WriteIndented = true,
+            WriteIndented = false,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         });
 
-        var prompt = $$"""
-            You are the Conversational Query Refiner for a technical RAG system.
-            Your job is to determine what the latest user message means in the context of the active conversation.
-            You must NOT answer the technical question, do calculations, invent facts, or choose downstream execution workflows.
-            Your sole job is query refinement and structured conversation state resolution.
-
-            Core Principles:
-            1. Preserve explicit user requirements.
-            2. Carry forward previous constraints only when still relevant.
-            3. Do NOT carry constraints across topic changes.
-            4. Resolve references ("it", "that", "those", "them", "the first one", "the other one", "that controller", "those devices", "the remaining model", etc.) only when sufficiently clear.
-            5. If an important reference is ambiguous (e.g. multiple plausible candidate entities and unclear which one is referred to), request clarification.
-            6. Distinguish between:
-               - CONTINUES: Refers to the same technical topic without materially changing constraints.
-               - REFINES: Adds another requirement or narrows the current scope/candidate set.
-               - MODIFIES: Changes (replaces) or removes an existing constraint (e.g., "What if we use 48 V instead?", "Ignore the IP67 requirement").
-               - NEW_TOPIC: Changes to a different technical subject. Previous unrelated constraints must NOT leak into the new topic.
-               - RESET: Explicitly asks to discard previous filtering/context (e.g., "Start over. Which controllers support PROFINET?").
-            7. Constraint Replacement vs Addition:
-               - If user specifies an alternative value for an existing constraint (e.g. "What about 48 V instead?" when supply voltage was 24 V), REPLACE the old constraint. Do NOT keep both unless the user asks for alternatives.
-            8. Constraint Removal:
-               - If user asks to ignore or remove a constraint (e.g. "Ignore IP67"), REMOVE it from active constraints.
-            9. Candidate Sets:
-               - Maintain and narrow candidate sets across turns.
-            10. Build:
-               - `resolved_question`: The user message with pronouns/references replaced with exact entity names.
-               - `effective_question`: A fully self-contained, unambiguous technical question combining active entities, candidate set, and all still-active constraints.
-            11. CRITICAL LANGUAGE RULE:
-               - Keep `resolved_question`, `effective_question`, and `clarification_reason` in the EXACT same language as the user's latest message (e.g. English if English, Danish if Danish, German if German).
-
-            Current Conversation State:
-            {{serializedState}}
-
-            Latest User Message:
-            {{userMessage}}
-
-            Return a JSON object conforming strictly to this schema:
-            {
-              "original_question": "Exact latest user message",
-              "relationship_to_previous_turn": "CONTINUES | REFINES | MODIFIES | NEW_TOPIC | RESET",
-              "resolved_question": "Question with references resolved",
-              "effective_question": "Self-contained effective technical question with all active constraints and entities",
-              "active_entities": [
-                {
-                  "type": "controller | fan | sensor | device | etc",
-                  "name": "Entity name",
-                  "role": "candidate | target | reference",
-                  "entity_id": null
-                }
-              ],
-              "active_constraints": [
-                {
-                  "attribute": "attribute_name (e.g. supply_voltage, protocol, ingress_protection, diameter)",
-                  "operator": "supports | equals | equals_or_exceeds | <= | >=",
-                  "value": "constraint value (e.g. Modbus TCP, 24 VDC, IP67)",
-                  "unit": "VDC | mm | null",
-                  "source_turn": 1,
-                  "status": "USER_CONSTRAINT"
-                }
-              ],
-              "candidate_set": ["List of candidate entity names currently in scope"],
-              "constraints_added": [
-                {
-                  "attribute": "...",
-                  "operator": "...",
-                  "value": "...",
-                  "unit": null,
-                  "source_turn": 1,
-                  "status": "USER_CONSTRAINT"
-                }
-              ],
-              "constraints_removed": [
-                {
-                  "attribute": "...",
-                  "operator": "...",
-                  "value": "..."
-                }
-              ],
-              "constraints_replaced": [
-                {
-                  "old_attribute": "supply_voltage",
-                  "old_value": "24 VDC",
-                  "new_constraint": {
-                    "attribute": "supply_voltage",
-                    "operator": "supports",
-                    "value": "48 VDC",
-                    "unit": "VDC",
-                    "source_turn": 2,
-                    "status": "USER_CONSTRAINT"
-                  }
-                }
-              ],
-              "references_resolved": ["that -> Controller C", "those -> Controller A, Controller B"],
-              "context_used": [1, 2],
-              "clarification_required": false,
-              "clarification_reason": null,
-              "new_topic": false
-            }
-            """;
+        var userPrompt = $"Conversation State: {serializedState}\nLatest User Message: {userMessage}";
 
         _logger?.LogInformation(
             "[QueryRefiner] Executing query refinement prompt ({PromptLength} chars) for conversation state (Turn: {TurnCount}).\nPrompt:\n{Prompt}",
-            prompt.Length, conversationState?.TurnCount, prompt);
+            userPrompt.Length, conversationState?.TurnCount, userPrompt);
 
         try
         {
-            var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: true);
+            var req = LlmRequest.FromPrompt(
+                userPrompt, 
+                requireJson: true, 
+                systemInstruction: SystemInstruction, 
+                temperature: 0.0, 
+                maxOutputTokens: 160);
+
+            var structuredRes = await _llmClient.GenerateStructuredAsync<QueryRefinementResult>(req);
             stopwatch.Stop();
 
-            var cleanedResponse = response.Trim();
-            if (cleanedResponse.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(7);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            else if (cleanedResponse.StartsWith("```", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(3);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            cleanedResponse = cleanedResponse.Trim();
-
-            var options = new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            };
-
-            var result = JsonSerializer.Deserialize<QueryRefinementResult>(cleanedResponse, options);
+            var result = structuredRes.Value;
             if (result != null)
             {
                 _logger?.LogInformation(

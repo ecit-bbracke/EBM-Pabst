@@ -18,24 +18,65 @@ public interface IInputGovernor
 
 public class InputGovernor : IInputGovernor
 {
-    private readonly ILlmService _llmService;
+    private readonly ILlmClient _llmClient;
     private readonly IEbmProductCodeParser _ebmParser;
     private readonly ILogger<InputGovernor>? _logger;
+
+    public InputGovernor(
+        ILlmClient llmClient, 
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<InputGovernor>? logger = null)
+    {
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _ebmParser = ebmParser ?? new EbmProductCodeParser();
+        _logger = logger;
+    }
+
+    public InputGovernor(
+        ILlmClientResolver resolver,
+        IEbmProductCodeParser? ebmParser = null,
+        ILogger<InputGovernor>? logger = null)
+        : this(resolver?.Resolve(LlmPurpose.InputGovernor) ?? throw new ArgumentNullException(nameof(resolver)), ebmParser, logger)
+    {
+    }
 
     public InputGovernor(
         ILlmService llmService, 
         IEbmProductCodeParser? ebmParser = null,
         ILogger<InputGovernor>? logger = null)
+        : this(new LlmServiceToClientAdapter(llmService), ebmParser, logger)
     {
-        _llmService = llmService;
-        _ebmParser = ebmParser ?? new EbmProductCodeParser();
-        _logger = logger;
     }
 
     public Task<InputGovernorResult> GovernInputAsync(string question)
     {
         return GovernInputAsync(question, question, null);
     }
+
+    private const string SystemInstruction = """
+You are the Input Governor for an industrial ventilation & drive system (ebm-papst domain).
+Classify the user's technical question into ONE intent:
+- SPEC_LOOKUP (specs/attributes of a single fan/model)
+- PROCEDURE (steps to install/configure/run)
+- COMPARISON (comparing 2+ models/products)
+- COMPATIBILITY (interchangeability/replacements/matching rules)
+- TROUBLESHOOTING (faults/errors/symptoms)
+- DESIGN (system design/setup)
+- CALCULATION (formulas/math)
+- OVERVIEW (catalog/inventory/list of models)
+- CLARIFICATION (needs clarification)
+
+Output JSON:
+{
+  "intent": "INTENT",
+  "confidence": 0.95,
+  "entities": [{"type": "fan/controller/sensor/etc", "name": "exact name"}],
+  "requested_attributes": ["voltage", "airflow_direction", "diameter"],
+  "constraints": [],
+  "clarification_required": false,
+  "clarification_reason": null
+}
+""";
 
     public async Task<InputGovernorResult> GovernInputAsync(
         string effectiveQuestion,
@@ -82,89 +123,29 @@ public class InputGovernor : IInputGovernor
             }
             if (contextParts.Count > 0)
             {
-                contextDescription = $"\n\nConversational Context:\n{string.Join("\n", contextParts)}";
+                contextDescription = $"Conversational Context:\n{string.Join("\n", contextParts)}\n";
             }
         }
 
-        var prompt = $$"""
-            You are the Input Governor for a highly specialized Technical RAG Orchestrator for ventilation and industrial drive systems (ebm-papst domain).
-            Your sole job is to classify the user's effective technical query and extract entities and constraints.
-            Do NOT attempt to answer the user's technical question. Only perform the analysis.
-
-            Domain Knowledge:
-            - 12-character ebm-papst product numbers (e.g. A6E450AP0201, K3G560PC0401, S4E350AN0130):
-              - 1st char: A (axial base), S (axial with guard grille), W (axial in wall ring); R (centrifugal 1-inlet impeller), K (centrifugal in bracket/RadiPac), G (centrifugal in scroll), D (centrifugal dual-inlet in scroll).
-              - 2nd-3rd chars: 3G (EC motor technology), or AC poles+phase (e.g. 6E = 6-pole 1-phase AC, 4D = 4-pole 3-phase AC).
-              - 4th-6th chars: Impeller diameter in mm (e.g. 450 = Ø450 mm).
-              - 12th char (Axial fans): Even digit (0, 2, 4, 6, 8) = Airflow direction A; Odd digit (1, 3, 5, 7, 9) = Airflow direction V.
-            - Other product numbering: 8300 series (replaces K3G), 4114/6314/3258 compact fans, and 10-digit part numbers (e.g. 9694300352, 9295420021).
-
-            You must categorize the query into one of the following intents:
-            - SPEC_LOOKUP: Retrieve single specifications or technical attributes of a single product/model.
-            - PROCEDURE: Steps on how to perform an action or run/install/configure a device.
-            - COMPARISON: Compare multiple entities, models, or product numbers.
-            - COMPATIBILITY: Evaluate if multiple devices/models work together, can replace each other, or fit technical constraints.
-            - TROUBLESHOOTING: Diagnosing problems, faults, or symptoms.
-            - DESIGN: Questions asking to design a setup, system, or configuration.
-            - CALCULATION: Asking to calculate some value or parameter.
-            - OVERVIEW: Questions asking to list, inventory, summarize, or discover what fans, models, ventilators, or products exist in the database or catalog (e.g. "What ventilators are there?", "Hvilke ventilatorer findes der?", "List all available fans", "What models do you have?").
-            - CLARIFICATION: General queries or queries requiring user input before technical retrieval can proceed.
-
-            Return a JSON object conforming exactly to this schema:
-            {
-              "intent": "INTENT",
-              "confidence": 0.95,
-              "entities": [
-                {
-                  "type": "fan/controller/sensor/device/etc",
-                  "name": "exact name of entity"
-                }
-              ],
-              "requested_attributes": ["list of requested technical attributes, e.g. voltage, airflow_direction, diameter, technology"],
-              "constraints": ["list of explicit technical constraints mentioned"],
-              "clarification_required": false,
-              "clarification_reason": null
-            }
-            {{contextDescription}}
-
-            Effective Technical Question:
-            {{effectiveQuestion}}
-            """;
+        var userPrompt = $"{contextDescription}Effective Technical Question: {effectiveQuestion}".Trim();
 
         _logger?.LogInformation(
             "[InputGovernor] Executing intent classification prompt ({PromptLength} chars) for question: \"{Question}\".\nPrompt:\n{Prompt}",
-            prompt.Length, effectiveQuestion, prompt);
+            userPrompt.Length, effectiveQuestion, userPrompt);
 
         try
         {
-            var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: true);
+            var req = LlmRequest.FromPrompt(
+                userPrompt, 
+                requireJson: true, 
+                systemInstruction: SystemInstruction, 
+                temperature: 0.0, 
+                maxOutputTokens: 256);
+
+            var structuredRes = await _llmClient.GenerateStructuredAsync<InputGovernorResult>(req);
             stopwatch.Stop();
             
-            // Clean up possible markdown code block fences if present in LLM output
-            var cleanedResponse = response.Trim();
-            if (cleanedResponse.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(7);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            else if (cleanedResponse.StartsWith("```", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedResponse = cleanedResponse.Substring(3);
-                if (cleanedResponse.EndsWith("```"))
-                {
-                    cleanedResponse = cleanedResponse.Substring(0, cleanedResponse.Length - 3);
-                }
-            }
-            cleanedResponse = cleanedResponse.Trim();
-
-            var options = new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            };
-            var result = JsonSerializer.Deserialize<InputGovernorResult>(cleanedResponse, options);
+            var result = structuredRes.Value;
             if (result != null)
             {
                 // Enrich result with deterministically parsed ebm products

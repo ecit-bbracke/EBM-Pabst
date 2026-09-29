@@ -22,11 +22,11 @@ public class GeminiEmbeddingService : IEmbeddingService
 
     public GeminiEmbeddingService(
         string? apiKey, 
-        string model = "text-embedding-004", 
+        string model = "gemini-embedding-001", 
         HttpClient? httpClient = null,
         ILogger<GeminiEmbeddingService>? logger = null)
     {
-        _model = string.IsNullOrWhiteSpace(model) ? "text-embedding-004" : model;
+        _model = string.IsNullOrWhiteSpace(model) ? "gemini-embedding-001" : model;
         _logger = logger;
         
         if (!string.IsNullOrWhiteSpace(apiKey) && apiKey != "YOUR_GEMINI_API_KEY")

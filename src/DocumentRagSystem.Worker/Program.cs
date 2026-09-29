@@ -14,7 +14,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 // Register Core & Infrastructure Services
 var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
-var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "text-embedding-004";
+var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "gemini-embedding-001";
 
 var qdrantConnString = builder.Configuration["Qdrant:ConnectionString"] ?? "http://localhost:6334";
 var qdrantCollection = builder.Configuration["Qdrant:CollectionName"] ?? "document-chunks";

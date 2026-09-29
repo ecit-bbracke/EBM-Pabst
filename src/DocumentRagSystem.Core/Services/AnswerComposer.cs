@@ -40,13 +40,23 @@ public interface IAnswerComposer
 
 public class AnswerComposer : IAnswerComposer
 {
-    private readonly ILlmService _llmService;
+    private readonly ILlmClient _llmClient;
     private readonly ILogger<AnswerComposer>? _logger;
 
-    public AnswerComposer(ILlmService llmService, ILogger<AnswerComposer>? logger = null)
+    public AnswerComposer(ILlmClient llmClient, ILogger<AnswerComposer>? logger = null)
     {
-        _llmService = llmService;
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
         _logger = logger;
+    }
+
+    public AnswerComposer(ILlmClientResolver resolver, ILogger<AnswerComposer>? logger = null)
+        : this(resolver?.Resolve(LlmPurpose.AnswerComposer) ?? throw new ArgumentNullException(nameof(resolver)), logger)
+    {
+    }
+
+    public AnswerComposer(ILlmService llmService, ILogger<AnswerComposer>? logger = null)
+        : this(new LlmServiceToClientAdapter(llmService), logger)
+    {
     }
 
     public async Task<string> ComposeAnswerAsync(
@@ -68,14 +78,15 @@ public class AnswerComposer : IAnswerComposer
             "[AnswerComposer] Executing answer composition prompt ({PromptLength} chars) for intent {Intent}.\nPrompt:\n{Prompt}",
             prompt.Length, governorResult.Intent, prompt);
 
-        var response = await _llmService.GenerateCompletionAsync(prompt, requireJson: false);
+        var request = LlmRequest.FromPrompt(prompt, requireJson: false);
+        var result = await _llmClient.GenerateTextAsync(request);
         stopwatch.Stop();
 
         _logger?.LogInformation(
             "[AnswerComposer] Answer composed in {DurationMs}ms (Length: {AnswerLength} chars).",
-            stopwatch.ElapsedMilliseconds, response.Length);
+            stopwatch.ElapsedMilliseconds, result.Content.Length);
 
-        return response;
+        return result.Content;
     }
 
     public IAsyncEnumerable<string> StreamAnswerAsync(
@@ -96,7 +107,8 @@ public class AnswerComposer : IAnswerComposer
             "[AnswerComposer] Starting streaming answer composition prompt ({PromptLength} chars) for intent {Intent}.\nPrompt:\n{Prompt}",
             prompt.Length, governorResult.Intent, prompt);
 
-        return _llmService.StreamCompletionAsync(prompt, cancellationToken);
+        var request = LlmRequest.FromPrompt(prompt, requireJson: false);
+        return _llmClient.StreamTextAsync(request, cancellationToken);
     }
 
     private string BuildPrompt(
