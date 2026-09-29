@@ -11,6 +11,9 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Infrastructure.Configuration;
+using DocumentRagSystem.Infrastructure.Llm;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -23,6 +26,8 @@ public static class Program
     private static string _dataDir = "data/Generelt";
     private static string _docsDir = "docs";
     private static string _outputPdf = "test.pdf";
+    private static bool _compareProviders = false;
+    private static bool _compareAnswers = false;
 
     public static async Task<int> Main(string[] args)
     {
@@ -45,6 +50,14 @@ public static class Program
             {
                 _outputPdf = args[++i];
             }
+            else if (args[i] == "--compare-providers" || args[i] == "--side-by-side")
+            {
+                _compareProviders = true;
+            }
+            else if (args[i] == "--compare-answers" || args[i] == "--answers" || args[i] == "--side-by-side-answers")
+            {
+                _compareAnswers = true;
+            }
             else if (args[i] == "--help" || args[i] == "-h")
             {
                 PrintHelp();
@@ -60,6 +73,57 @@ public static class Program
         Console.WriteLine($"Docs Dir     : {_docsDir}");
         Console.WriteLine($"Output PDF   : {_outputPdf}");
         Console.WriteLine();
+
+        if (_compareProviders || _compareAnswers)
+        {
+            Console.WriteLine("Running Side-by-Side LLM Provider Evaluation (Gemini vs Local)...");
+            var config = AppConfigurationHelper.BuildConfiguration();
+            var apiKey = AppConfigurationHelper.GetGeminiApiKey(config);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("NOTE: GEMINI_API_KEY is not set in User Secrets or environment. Gemini provider is running in local in-memory mock mode (~0ms latency).");
+                Console.WriteLine("Set GEMINI_API_KEY=<your-key> or use 'dotnet user-secrets set Gemini:ApiKey <key>' to benchmark live Google cloud inference.\n");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"Gemini API Key: Resolved ({AppConfigurationHelper.MaskApiKey(apiKey)}) from User Secrets / Configuration.\n");
+                Console.ResetColor();
+            }
+
+            var localUrl = config["Llm:Local:BaseUrl"] ?? Environment.GetEnvironmentVariable("LOCAL_LLM_URL") ?? "http://localhost:8080";
+            var localModel = config["Llm:Local:Model"] ?? Environment.GetEnvironmentVariable("LOCAL_LLM_MODEL") ?? "Qwen/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M";
+
+            var options = new LlmOptions
+            {
+                EvaluationMode = true,
+                DefaultProvider = "Gemini",
+                Gemini = new GeminiOptions { ApiKey = apiKey, LlmModel = "gemini-3.6-flash" },
+                Local = new LocalLlmOptions { BaseUrl = localUrl, Model = localModel }
+            };
+            var evalHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            var gemini = new GeminiLlmClient(apiKey, options.Gemini.LlmModel, httpClient: evalHttpClient);
+            var local = new LocalLlmClient(options.Local, evalHttpClient);
+            var resolver = new LlmClientResolver(options, gemini, local);
+
+            if (_compareProviders)
+            {
+                var sideBySide = new ProviderSideBySideEvaluator(resolver);
+                var report = await sideBySide.RunAsync(new[] { "Gemini", "Local" });
+                Console.WriteLine(report.GenerateMarkdownTable());
+            }
+
+            if (_compareAnswers)
+            {
+                var answerRunner = new SideBySideAnswerComparisonRunner(resolver);
+                var pairs = await answerRunner.RunComparisonAsync(new[] { "Gemini", "Local" });
+                PrintAnswerComparison(pairs);
+            }
+
+            return 0;
+        }
 
         // Configure QuestPDF Community license
         QuestPDF.Settings.License = LicenseType.Community;
@@ -246,16 +310,62 @@ public static class Program
         }
     }
 
+    private static void PrintAnswerComparison(List<PromptComparisonPair> pairs)
+    {
+        Console.WriteLine("\n================================================================================");
+        Console.WriteLine("          SIDE-BY-SIDE PROMPT & GENERATED ANSWER COMPARISON                     ");
+        Console.WriteLine("================================================================================\n");
+
+        int index = 1;
+        foreach (var pair in pairs)
+        {
+            Console.WriteLine($"### Prompt {index++}: {pair.Prompt.Title} [{pair.Prompt.Category}]");
+            Console.WriteLine($"**User Prompt:**");
+            Console.WriteLine($"\"{pair.Prompt.Prompt}\"\n");
+
+            if (!string.IsNullOrWhiteSpace(pair.Prompt.SystemInstruction))
+            {
+                Console.WriteLine($"**System Instruction:** {pair.Prompt.SystemInstruction}\n");
+            }
+
+            Console.WriteLine("| Metric | Gemini (`gemini-3.6-flash`) | Local (`Qwen2.5-1.5B`) |");
+            Console.WriteLine("| :--- | :---: | :---: |");
+
+            var geminiAns = pair.Answers.GetValueOrDefault("Gemini");
+            var localAns = pair.Answers.GetValueOrDefault("Local");
+
+            var geminiLatency = geminiAns != null ? $"{geminiAns.DurationMs} ms" : "N/A";
+            var localLatency = localAns != null ? $"{localAns.DurationMs} ms" : "N/A";
+
+            var geminiTokens = geminiAns != null ? $"In: {geminiAns.InputTokens ?? 0}, Out: {geminiAns.OutputTokens ?? 0}" : "N/A";
+            var localTokens = localAns != null ? $"In: {localAns.InputTokens ?? 0}, Out: {localAns.OutputTokens ?? 0}" : "N/A";
+
+            Console.WriteLine($"| **Latency** | {geminiLatency} | {localLatency} |");
+            Console.WriteLine($"| **Tokens** | {geminiTokens} | {localTokens} |\n");
+
+            Console.WriteLine("#### Generated Answers Comparison:\n");
+            Console.WriteLine("```markdown");
+            Console.WriteLine("--- [GEMINI RESPONSE] ---");
+            Console.WriteLine(geminiAns?.Answer?.Trim() ?? "(no response)");
+            Console.WriteLine("\n--- [LOCAL RESPONSE] ---");
+            Console.WriteLine(localAns?.Answer?.Trim() ?? "(no response)");
+            Console.WriteLine("```\n");
+            Console.WriteLine("--------------------------------------------------------------------------------\n");
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("Usage: dotnet run --project src/DocumentRagSystem.Evaluation [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  -a, --api-base <url>    Base URL of the Web API (default: https://localhost:7251)");
-        Console.WriteLine("  -d, --data-dir <path>   Path to the PDF data directory (default: data/Generelt)");
-        Console.WriteLine("  --docs-dir <path>       Path to the Spørgsmål markdown files (default: docs)");
-        Console.WriteLine("  -o, --output <file>     Output path for the generated PDF report (default: test.pdf)");
-        Console.WriteLine("  -h, --help              Show this help message");
+        Console.WriteLine("  --api, -a <url>          Base URL of running DocumentRagSystem.WebApi (default: https://localhost:7251)");
+        Console.WriteLine("  --data, -d <path>        Path to directory containing source PDFs (default: data/Generelt)");
+        Console.WriteLine("  --docs <path>            Path to directory containing Spørgsmål_*.md files (default: docs)");
+        Console.WriteLine("  --output, -o <path>      Output PDF report file path (default: test.pdf)");
+        Console.WriteLine("  --compare-providers      Run side-by-side LLM component metrics benchmark");
+        Console.WriteLine("  --compare-answers        Run side-by-side prompt execution and print verbatim answers");
+        Console.WriteLine("  --help, -h               Show this help message");
     }
 
     private static string ResolveDirectory(string relativePath)

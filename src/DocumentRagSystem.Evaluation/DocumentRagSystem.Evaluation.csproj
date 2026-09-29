@@ -5,7 +5,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UserSecretsId>dd5e23de-ff7b-4ff3-8ddf-06d7dde5c43b</UserSecretsId>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DocumentRagSystem.Core\DocumentRagSystem.Core.csproj" />
+    <ProjectReference Include="..\DocumentRagSystem.Infrastructure\DocumentRagSystem.Infrastructure.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="QuestPDF" Version="2026.9.0" />
