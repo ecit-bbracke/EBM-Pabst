@@ -68,3 +68,9 @@ release/
 dist/
 *.tar.gz
 *.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
