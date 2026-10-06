@@ -158,4 +158,48 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.NotNull(result);
         Assert.NotEmpty(result.Citations);
     }
+
+    [Fact]
+    public async Task UploadPdf_WhenNonEnglish_SavesFile_AndSkipsEmbedding()
+    {
+        // Arrange
+        var testDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
+        Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
+
+        var pdfContent = await File.ReadAllBytesAsync(testDataPath);
+        
+        using var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(pdfContent);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        var nonEnglishFileName = "Data_sheet_DA_-_8300100049.pdf";
+        content.Add(fileContent, "file", nonEnglishFileName);
+
+        // Act - Upload the PDF
+        var uploadResponse = await _client.PostAsync("/api/documents/upload", content);
+        uploadResponse.EnsureSuccessStatusCode();
+
+        var uploadedDoc = await uploadResponse.Content.ReadFromJsonAsync<Document>();
+        Assert.NotNull(uploadedDoc);
+        Assert.Equal(DocumentStatus.Skipped, uploadedDoc.Status);
+        Assert.Equal("da", uploadedDoc.Language);
+        Assert.NotNull(uploadedDoc.FilePath);
+
+        // Verify the physical file was saved to the uploads directory
+        var cleanFileName = Path.GetFileName(Uri.UnescapeDataString(uploadedDoc.FilePath));
+        var uploadsDir = Path.Combine(AppContext.BaseDirectory, "uploads");
+        var physicalPath = Path.Combine(uploadsDir, cleanFileName);
+        Assert.True(File.Exists(physicalPath), $"Expected file {physicalPath} to exist on disk.");
+
+        // Clean up uploaded test file
+        try { File.Delete(physicalPath); } catch { }
+
+        // Verify status endpoint reflects Skipped status and language
+        var statusResponse = await _client.GetAsync($"/api/documents/status?fileName={nonEnglishFileName}");
+        statusResponse.EnsureSuccessStatusCode();
+        var statusResult = await statusResponse.Content.ReadFromJsonAsync<DocumentStatusResponse>();
+        Assert.NotNull(statusResult);
+        Assert.True(statusResult.HasBeenUploaded);
+        Assert.Equal("Skipped", statusResult.Status);
+        Assert.Equal("da", statusResult.Language);
+    }
 }

@@ -229,6 +229,39 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
     }
 
     [Fact]
+    public async Task GetDocumentStatus_WhenInRepositorySkipped_ReturnsSkippedWithLanguage()
+    {
+        // Arrange
+        var doc = new Document(
+            Id: "repo-skipped-123",
+            FileName: "Data_sheet_DA_-_8300100049.pdf",
+            FilePath: "/uploads/repo-skipped-123_Data_sheet_DA_-_8300100049.pdf",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Skipped,
+            ErrorMessage: "Document language is 'da'. Only English documents are embedded.",
+            Language: "da"
+        );
+        await _repository.AddDocumentAsync(doc);
+        _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(Array.Empty<Document>());
+        var client = CreateTestClient();
+
+        // Act
+        var response = await client.GetAsync("/api/documents/status?fileName=Data_sheet_DA_-_8300100049.pdf");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<DocumentStatusResponse>();
+        Assert.NotNull(result);
+        Assert.True(result.HasBeenUploaded);
+        Assert.True(result.IsUploaded);
+        Assert.Equal("Skipped", result.Status);
+        Assert.Equal("da", result.Language);
+        Assert.Equal("repo-skipped-123", result.DocumentId);
+        Assert.Contains("da", result.ErrorMessage);
+    }
+
+    [Fact]
     public async Task GetDocumentStatus_MissingFileNameParameter_ReturnsBadRequest()
     {
         // Arrange

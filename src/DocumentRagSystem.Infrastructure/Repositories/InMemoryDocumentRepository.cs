@@ -19,11 +19,16 @@ public class InMemoryDocumentRepository : IDocumentRepository
         return Task.CompletedTask;
     }
 
-    public Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null)
+    public Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null, string? language = null)
     {
         if (_documents.TryGetValue(id, out var doc))
         {
-            _documents[id] = doc with { Status = status, ErrorMessage = errorMessage };
+            _documents[id] = doc with 
+            { 
+                Status = status, 
+                ErrorMessage = errorMessage,
+                Language = language ?? doc.Language
+            };
         }
         return Task.CompletedTask;
     }

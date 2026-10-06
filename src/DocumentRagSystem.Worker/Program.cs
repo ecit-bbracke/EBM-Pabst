@@ -40,14 +40,18 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetService<Microsoft.Extensions.Logging.ILogger<QdrantVectorStore>>()));
 
-// Set up overall DocumentProcessor
+// Set up Language Detector & overall DocumentProcessor
+builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>();
+
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
         sp.GetRequiredService<IChunkingService>(),
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetRequiredService<IVectorStore>(),
-        sp.GetRequiredService<IDocumentRepository>()
+        sp.GetRequiredService<IDocumentRepository>(),
+        sp.GetRequiredService<ILanguageDetector>(),
+        sp.GetService<Microsoft.Extensions.Logging.ILogger<DocumentProcessor>>()
     ));
 
 builder.Services.AddHostedService<Worker>();

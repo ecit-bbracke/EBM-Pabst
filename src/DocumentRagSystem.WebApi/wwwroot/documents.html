@@ -196,11 +196,15 @@
                     throw new Error(await response.text() || 'Fejl under upload af fil');
                 }
 
+                const result = await response.json();
+
                 statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
                 statusDiv.classList.add('bg-green-50', 'text-green-700');
                 
                 if (bgUpload) {
                     statusDiv.textContent = 'Dokument uploadet! Det behandles nu i baggrunden.';
+                } else if (result.status === 'Skipped' || result.status === 4) {
+                    statusDiv.textContent = `Dokument gemt! Sproget er detekteret som '${result.language || 'ikke-engelsk'}'. Vektorindeksering sprunget over (kun engelske dokumenter indekseres).`;
                 } else {
                     statusDiv.textContent = 'Dokumentet blev uploadet og behandlet successfully!';
                 }
@@ -257,6 +261,9 @@
                         } else if (doc.status === 3 || doc.status === "Failed") {
                             statusColor = "bg-red-100 text-red-700";
                             statusText = "Fejlet";
+                        } else if (doc.status === 4 || doc.status === "Skipped") {
+                            statusColor = "bg-purple-100 text-purple-700";
+                            statusText = doc.language ? `Ikke engelsk (${escapeHtml(doc.language)})` : "Ikke indekseret";
                         }
 
                         const date = new Date(doc.uploadedAt).toLocaleString();

@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -13,12 +14,25 @@ public class DocumentProcessor : IDocumentProcessor
     private readonly IEmbeddingService? _embeddingService;
     private readonly IVectorStore? _vectorStore;
     private readonly IDocumentRepository? _documentRepository;
+    private readonly ILanguageDetector _languageDetector;
+    private readonly ILogger<DocumentProcessor>? _logger;
 
     // Constructor to support the exact Unit Test signature from prompt
     public DocumentProcessor(
         ITextExtractor textExtractor,
         IChunkingService chunkingService)
-        : this(textExtractor, chunkingService, null, null, null)
+        : this(textExtractor, chunkingService, null, null, null, null, null)
+    {
+    }
+
+    // Constructor for dependency injection without language detector specified
+    public DocumentProcessor(
+        ITextExtractor textExtractor,
+        IChunkingService chunkingService,
+        IEmbeddingService? embeddingService,
+        IVectorStore? vectorStore,
+        IDocumentRepository? documentRepository)
+        : this(textExtractor, chunkingService, embeddingService, vectorStore, documentRepository, null, null)
     {
     }
 
@@ -28,13 +42,17 @@ public class DocumentProcessor : IDocumentProcessor
         IChunkingService chunkingService,
         IEmbeddingService? embeddingService,
         IVectorStore? vectorStore,
-        IDocumentRepository? documentRepository)
+        IDocumentRepository? documentRepository,
+        ILanguageDetector? languageDetector,
+        ILogger<DocumentProcessor>? logger = null)
     {
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _chunkingService = chunkingService ?? throw new ArgumentNullException(nameof(chunkingService));
         _embeddingService = embeddingService;
         _vectorStore = vectorStore;
         _documentRepository = documentRepository;
+        _languageDetector = languageDetector ?? new DefaultLanguageDetector();
+        _logger = logger;
     }
 
     public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName)
@@ -57,12 +75,16 @@ public class DocumentProcessor : IDocumentProcessor
             await pdfStream.CopyToAsync(fileStream);
         }
 
+        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
+
         var document = new Document(
             Id: documentId,
             FileName: fileName,
             FilePath: documentUrl,
             UploadedAt: DateTime.UtcNow,
-            Status: DocumentStatus.Processing
+            Status: DocumentStatus.Processing,
+            ArticleId: articleId,
+            SourceDocumentId: sourceDocId
         );
 
         if (_documentRepository != null)
@@ -81,27 +103,63 @@ public class DocumentProcessor : IDocumentProcessor
                 throw new InvalidOperationException("Extracted text was empty.");
             }
 
-            var chunks = _chunkingService.ChunkText(extractedText, documentId);
+            // Detect language
+            var languageResult = await _languageDetector.DetectLanguageAsync(extractedText, fileName);
+            _logger?.LogInformation(
+                "[DocumentProcessor] Language detection for '{FileName}': '{Language}' (IsEnglish: {IsEnglish}, Confidence: {Confidence:P1}).",
+                fileName, languageResult.Language, languageResult.IsEnglish, languageResult.Confidence);
 
-            if (_embeddingService != null && _vectorStore != null)
+            if (languageResult.IsEnglish)
             {
-                foreach (var chunk in chunks)
+                var chunks = _chunkingService.ChunkText(extractedText, documentId);
+
+                if (_embeddingService != null && _vectorStore != null)
                 {
-                    var chunkWithDocumentMetadata = chunk with
+                    foreach (var chunk in chunks)
                     {
-                        FileName = document.FileName,
-                        FilePath = document.FilePath,
-                        UploadedAt = document.UploadedAt
-                    };
-                    var embedding = await _embeddingService.GenerateEmbeddingAsync(chunk.Text);
-                    await _vectorStore.AddChunkAsync(chunkWithDocumentMetadata, embedding);
+                        var chunkWithDocumentMetadata = chunk with
+                        {
+                            FileName = document.FileName,
+                            OriginalFileName = document.FileName,
+                            FilePath = document.FilePath,
+                            UploadedAt = document.UploadedAt,
+                            ArticleId = document.ArticleId,
+                            SourceDocumentId = document.SourceDocumentId
+                        };
+                        var embedding = await _embeddingService.GenerateEmbeddingAsync(chunk.Text);
+                        await _vectorStore.AddChunkAsync(chunkWithDocumentMetadata, embedding);
+                    }
+                }
+
+                document = document with 
+                { 
+                    Status = DocumentStatus.Processed,
+                    Language = languageResult.Language
+                };
+
+                if (_documentRepository != null)
+                {
+                    await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Processed, language: languageResult.Language);
                 }
             }
-
-            document = document with { Status = DocumentStatus.Processed };
-            if (_documentRepository != null)
+            else
             {
-                await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Processed);
+                var message = $"Document saved to disk, but embedding was skipped because detected language is '{languageResult.Language}' (only English documents are embedded).";
+                _logger?.LogInformation(
+                    "[DocumentProcessor] File '{FileName}' was saved to '{FilePath}', but skipped from vector database because language is '{Language}'.",
+                    fileName, filePath, languageResult.Language);
+
+                document = document with
+                {
+                    Status = DocumentStatus.Skipped,
+                    Language = languageResult.Language,
+                    ErrorMessage = message
+                };
+
+                if (_documentRepository != null)
+                {
+                    await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language);
+                }
             }
         }
         catch (Exception ex)

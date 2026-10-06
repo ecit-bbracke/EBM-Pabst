@@ -5,7 +5,8 @@ public enum DocumentStatus
     Pending,
     Processing,
     Processed,
-    Failed
+    Failed,
+    Skipped
 }
 
 public record Document(
@@ -14,7 +15,10 @@ public record Document(
     string FilePath,
     DateTime UploadedAt,
     DocumentStatus Status = DocumentStatus.Pending,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    string? Language = null,
+    string? ArticleId = null,
+    string? SourceDocumentId = null
 );
 
 public record DocumentChunk(
@@ -24,5 +28,8 @@ public record DocumentChunk(
     int Index,
     string? FileName = null,
     string? FilePath = null,
-    DateTime? UploadedAt = null
+    DateTime? UploadedAt = null,
+    string? OriginalFileName = null,
+    string? ArticleId = null,
+    string? SourceDocumentId = null
 );
