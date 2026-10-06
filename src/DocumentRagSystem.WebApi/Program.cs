@@ -210,6 +210,15 @@ builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
 
 builder.Services.AddSingleton<IContextExpander, ContextExpander>();
 
+builder.Services.AddSingleton<IDanishDocumentResolver, DanishDocumentResolver>(sp =>
+    new DanishDocumentResolver(
+        sp.GetService<IDocumentRepository>(),
+        sp.GetService<ILanguageDetector>(),
+        sp.GetService<ITextExtractor>(),
+        sp.GetService<IEbmProductCodeParser>(),
+        servedUploadDirectories,
+        sp.GetService<ILogger<DanishDocumentResolver>>()));
+
 builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>(sp =>
     new TechnicalRagOrchestrator(
         sp.GetRequiredService<IInputGovernor>(),
@@ -359,6 +368,7 @@ app.MapPost("/api/query", async (
     IValidator<QueryRequest> validator,
     IVectorStore vectorStore, 
     ITechnicalRagOrchestrator orchestrator, 
+    IDanishDocumentResolver danishResolver,
     ILogger<Program> logger
     ) =>
 {
@@ -401,6 +411,28 @@ app.MapPost("/api/query", async (
         ));
     }
 
+    // Append Danish companion documents as file references if available
+    var danishCompanions = await danishResolver.FindDanishCompanionDocumentsAsync(chunks);
+    foreach (var danishDoc in danishCompanions)
+    {
+        var daFileName = danishDoc.FileName;
+        var daUrl = ToDocumentUrl(danishDoc.FilePath, daFileName, servedUploadDirectories);
+
+        if (!citations.Any(c => string.Equals(c.filename, daFileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            citations.Add(new CitationDto(
+                ChunkId: $"{danishDoc.Id}_danish_companion",
+                DocumentId: danishDoc.Id,
+                Text: "Dansk version (reference)",
+                Index: 0,
+                filename: daFileName,
+                filepath: daUrl,
+                language: "da",
+                isCompanion: true
+            ));
+        }
+    }
+
     var effectiveConversationId = trace.ConversationStateAfter?.ConversationId ?? request.ConversationId;
     requestStopwatch.Stop();
     logger.LogInformation(
@@ -417,6 +449,7 @@ app.MapPost("/api/query/stream", async (
     IValidator<QueryRequest> validator,
     IVectorStore vectorStore,
     ITechnicalRagOrchestrator orchestrator,
+    IDanishDocumentResolver danishResolver,
     HttpContext httpContext,
     ILogger<Program> logger,
     CancellationToken cancellationToken
@@ -466,6 +499,27 @@ app.MapPost("/api/query/stream", async (
                         fileName,
                         ToDocumentUrl(filePath, fileName, servedUploadDirectories)
                     ));
+                }
+
+                var danishCompanions = await danishResolver.FindDanishCompanionDocumentsAsync(evt.Chunks, cancellationToken);
+                foreach (var danishDoc in danishCompanions)
+                {
+                    var daFileName = danishDoc.FileName;
+                    var daUrl = ToDocumentUrl(danishDoc.FilePath, daFileName, servedUploadDirectories);
+
+                    if (!citations.Any(c => string.Equals(c.filename, daFileName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        citations.Add(new CitationDto(
+                            ChunkId: $"{danishDoc.Id}_danish_companion",
+                            DocumentId: danishDoc.Id,
+                            Text: "Dansk version (reference)",
+                            Index: 0,
+                            filename: daFileName,
+                            filepath: daUrl,
+                            language: "da",
+                            isCompanion: true
+                        ));
+                    }
                 }
             }
 

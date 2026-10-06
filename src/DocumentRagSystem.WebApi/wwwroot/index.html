@@ -632,11 +632,12 @@
                         filename: cit.filename,
                         filepath: cit.filepath,
                         documentId: displayDoc,
-                        pages: new Set()
+                        pages: new Set(),
+                        isCompanion: cit.isCompanion || cit.language === 'da'
                     });
                 }
                 
-                if (cit.index !== undefined && cit.index !== null) {
+                if (cit.index !== undefined && cit.index !== null && !cit.isCompanion) {
                     uniqueCitationsMap.get(key).pages.add(cit.index + 1);
                 }
             });
@@ -651,18 +652,29 @@
                        </a>`
                     : `<span class="font-semibold text-slate-700 text-sm">${fileName}</span>`;
 
+                const isCompanion = cit.isCompanion;
                 const sortedPages = Array.from(cit.pages).sort((a, b) => a - b);
-                const pagesDisplay = sortedPages.length > 0 
-                    ? `Side: ${sortedPages.join(', ')}`
-                    : 'Side: Ikke angivet';
+                const pagesDisplay = isCompanion
+                    ? 'Dansk reference'
+                    : (sortedPages.length > 0 ? `Side: ${sortedPages.join(', ')}` : 'Side: Ikke angivet');
+
+                const headerLabel = isCompanion
+                    ? `<span class="text-red-700 font-bold flex items-center">
+                           <i class="fa-solid fa-file-lines mr-1.5 text-red-600"></i> Dansk dokument
+                       </span>`
+                    : `<span class="text-brand-600 font-bold flex items-center">
+                           <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${citationIndex}
+                       </span>`;
+
+                const badgeClass = isCompanion
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-slate-200/80 text-slate-600';
 
                 citationsHtml += `
                     <div class="border border-slate-100 rounded-lg p-3.5 bg-slate-50 hover:bg-slate-100/60 transition shadow-sm max-w-lg">
                         <div class="flex justify-between items-center mb-1.5 text-[11px] text-slate-400 font-medium">
-                            <span class="text-brand-600 font-bold flex items-center">
-                                <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${citationIndex}
-                            </span>
-                            <span class="bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded font-semibold text-[9px] tracking-wide shrink-0">
+                            ${headerLabel}
+                            <span class="${badgeClass} px-2 py-0.5 rounded font-semibold text-[9px] tracking-wide shrink-0">
                                 ${pagesDisplay}
                             </span>
                         </div>
@@ -671,7 +683,9 @@
                             <div class="truncate">${citationLink}</div>
                         </div>
                     </div>`;
-                citationIndex++;
+                if (!isCompanion) {
+                    citationIndex++;
+                }
             });
 
             return `

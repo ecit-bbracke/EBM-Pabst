@@ -98,15 +98,20 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                 if (!_dockerAvailable)
                 {
                     // Replace the real QdrantVectorStore with an in-memory mock store
+                    var storedChunks = new List<DocumentChunk>();
                     var mockStore = new Moq.Mock<IVectorStore>();
                     mockStore.Setup(x => x.AddChunkAsync(Moq.It.IsAny<DocumentChunk>(), Moq.It.IsAny<float[]>()))
+                        .Callback<DocumentChunk, float[]>((chunk, _) => storedChunks.Add(chunk))
                         .Returns(Task.CompletedTask);
                     
                     mockStore.Setup(x => x.SearchAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int>()))
-                        .ReturnsAsync(new[] 
-                        { 
-                            new DocumentChunk("e2e_chunk_0", "e2e_doc_id", "This is the main topic context.", 0) 
-                        });
+                        .ReturnsAsync(() => storedChunks.Count > 0 
+                            ? storedChunks.Take(3).ToList() 
+                            : new List<DocumentChunk> { new("e2e_chunk_0", "e2e_doc_id", "This is the main topic context.", 0) });
+
+                    mockStore.Setup(x => x.GetChunksByDocumentAndIndicesAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<IEnumerable<int>>()))
+                        .ReturnsAsync((string docId, IEnumerable<int> indices) => 
+                            storedChunks.Where(c => c.DocumentId == docId && indices.Contains(c.Index)).ToList());
 
                     var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IVectorStore));
                     if (descriptor != null)
@@ -201,5 +206,49 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.True(statusResult.HasBeenUploaded);
         Assert.Equal("Skipped", statusResult.Status);
         Assert.Equal("da", statusResult.Language);
+    }
+
+    [Fact]
+    public async Task Query_WhenReferencedDocumentHasDanishCompanion_IncludesDanishFileReferenceInCitations()
+    {
+        // Arrange
+        var enDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
+        var daDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample_da.pdf");
+
+        var enPdfContent = await File.ReadAllBytesAsync(enDataPath);
+        var daPdfContent = await File.ReadAllBytesAsync(daDataPath);
+
+        // Upload English PDF (no language code in filename)
+        using var contentEn = new MultipartFormDataContent();
+        var fileContentEn = new ByteArrayContent(enPdfContent);
+        fileContentEn.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        contentEn.Add(fileContentEn, "file", "Art_9293512011-Doc_1001.pdf");
+        var uploadEnResponse = await _client.PostAsync("/api/documents/upload", contentEn);
+        uploadEnResponse.EnsureSuccessStatusCode();
+
+        // Upload Danish companion PDF (no language code in filename)
+        using var contentDa = new MultipartFormDataContent();
+        var fileContentDa = new ByteArrayContent(daPdfContent);
+        fileContentDa.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        contentDa.Add(fileContentDa, "file", "Art_9293512011-Doc_2002.pdf");
+        var uploadDaResponse = await _client.PostAsync("/api/documents/upload", contentDa);
+        uploadDaResponse.EnsureSuccessStatusCode();
+
+        // Act - Query
+        var queryRequest = new QueryRequest("What is the main topic for 9293512011?");
+        var queryResponse = await _client.PostAsJsonAsync("/api/query", queryRequest);
+
+        // Assert
+        queryResponse.EnsureSuccessStatusCode();
+        var result = await queryResponse.Content.ReadFromJsonAsync<QueryResponse>();
+        Assert.NotNull(result);
+        Assert.NotEmpty(result.Citations);
+
+        // Verify Danish companion is present in citations
+        var danishCitation = result.Citations.FirstOrDefault(c => 
+            c.filename.Contains("Art_9293512011-Doc_2002.pdf", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(danishCitation);
+        Assert.Equal("da", danishCitation.language);
+        Assert.True(danishCitation.isCompanion);
     }
 }

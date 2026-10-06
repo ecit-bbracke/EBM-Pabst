@@ -7,7 +7,16 @@ public record QueryRequest(string Question, string? ConversationId = null);
 
 public record QueryResponse(string Answer, IEnumerable<CitationDto> Citations, string? ConversationId = null);
 
-public record CitationDto(string ChunkId, string DocumentId, string Text, int Index, string filename, string filepath);
+public record CitationDto(
+    string ChunkId, 
+    string DocumentId, 
+    string Text, 
+    int Index, 
+    string filename, 
+    string filepath,
+    string? language = null,
+    bool isCompanion = false
+);
 
 public class QueryRequestValidator : AbstractValidator<QueryRequest>
 {

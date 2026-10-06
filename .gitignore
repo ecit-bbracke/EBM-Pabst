@@ -61,6 +61,7 @@ src/DocumentRagSystem.Worker/appsettings.local.json
 !**/uploads/.gitkeep
 **/TestData/*.pdf
 !**/TestData/sample.pdf
+!**/TestData/sample_da.pdf
 
 # Publish and Release Bundles
 publish/
