@@ -9,6 +9,8 @@ using DocumentRagSystem.Infrastructure.TextExtractors;
 using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.Infrastructure.VectorStores;
+using DocumentRagSystem.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -20,7 +22,10 @@ var qdrantConnString = builder.Configuration["Qdrant:ConnectionString"] ?? "http
 var qdrantCollection = builder.Configuration["Qdrant:CollectionName"] ?? "document-chunks";
 
 // Add Singletons and Scoped Services
-builder.Services.AddSingleton<IDocumentRepository, InMemoryDocumentRepository>();
+var connectionString = builder.Configuration.GetConnectionString("IdentityDb") ?? "Data Source=identity.db";
+builder.Services.AddDbContextFactory<DocumentDbContext>(options =>
+    options.UseSqlite(connectionString));
+builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 

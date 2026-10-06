@@ -3,7 +3,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Models;
-using DocumentRagSystem.WebApi.Data;
+using DocumentRagSystem.Infrastructure.Data;
+using DocumentRagSystem.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -12,12 +13,12 @@ namespace DocumentRagSystem.UnitTests;
 public class SqliteDocumentRepositoryTests : IDisposable
 {
     private readonly string _dbFileName;
-    private readonly IDbContextFactory<ApplicationDbContext> _factory;
+    private readonly IDbContextFactory<DocumentDbContext> _factory;
 
     public SqliteDocumentRepositoryTests()
     {
         _dbFileName = $"test_repo_{Guid.NewGuid():N}.db";
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+        var options = new DbContextOptionsBuilder<DocumentDbContext>()
             .UseSqlite($"Data Source={_dbFileName}")
             .Options;
 
@@ -97,10 +98,10 @@ public class SqliteDocumentRepositoryTests : IDisposable
         Assert.Equal("d1", all[1].Id);
     }
 
-    private class TestDbContextFactory : IDbContextFactory<ApplicationDbContext>
+    private class TestDbContextFactory : IDbContextFactory<DocumentDbContext>
     {
-        private readonly DbContextOptions<ApplicationDbContext> _options;
-        public TestDbContextFactory(DbContextOptions<ApplicationDbContext> options) => _options = options;
-        public ApplicationDbContext CreateDbContext() => new(_options);
+        private readonly DbContextOptions<DocumentDbContext> _options;
+        public TestDbContextFactory(DbContextOptions<DocumentDbContext> options) => _options = options;
+        public DocumentDbContext CreateDbContext() => new(_options);
     }
 }

@@ -1,6 +1,6 @@
 using System;
 
-namespace DocumentRagSystem.WebApi.Data;
+namespace DocumentRagSystem.Infrastructure.Data;
 
 public class DocumentEntity
 {
