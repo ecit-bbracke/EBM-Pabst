@@ -40,15 +40,70 @@ Both `DocumentRagSystem.WebApi` and `DocumentRagSystem.Worker` rely on `appsetti
 {
   "Gemini": {
     "ApiKey": "YOUR_GEMINI_API_KEY",
-    "EmbeddingModel": "text-embedding-004",
+    "EmbeddingModel": "gemini-embedding-001",
     "LlmModel": "gemini-3.6-flash"
+  },
+  "Authentication": {
+    "ApiKey": "YOUR_SECURE_API_KEY"
   },
   "Qdrant": {
     "ConnectionString": "http://localhost:6334",
     "CollectionName": "document-chunks"
+  },
+  "SisterProject": {
+    "BaseUrl": "http://localhost:5224"
   }
 }
 ```
+
+---
+
+## 🔐 Authentication & Access Control
+
+The portal is secured using **Microsoft Identity Framework** (SQLite persistence in `identity.db`) for web browser sessions and **API Key Authentication** for machine-to-machine clients:
+
+### 1. Web Portal & Default Admin
+* **Default Administrator:**
+  * **Email:** `admin@ebmpabst.dk`
+  * **Password:** `Admin123!`
+* **Session Persistence:** Persistent HTTP-only secure cookie (`EbmRagAuth`) with sliding expiration.
+* **Brute-Force Protection:** Account lockout after 5 consecutive failed login attempts (15-minute lock).
+* **Brugeradministration (`/users.html`):** Authenticated administrators can list active accounts, create new employee accounts, unlock locked accounts, and remove users.
+
+### 2. API Key Authentication (Automated / Headless Clients)
+API endpoints (`/api/**`) accept an API key via either header:
+* `X-Api-Key: <your-configured-api-key>` *(Recommended)*
+* `Authorization: Bearer <your-configured-api-key>`
+* `Authorization: ApiKey <your-configured-api-key>`
+
+Configure your API key in production via the environment variable in `.env`:
+```bash
+API_KEY="your-custom-production-api-key"
+```
+Or in development via User Secrets:
+```bash
+dotnet user-secrets set "Authentication:ApiKey" "your-secret-key"
+```
+
+---
+
+## 🖥️ Web Portal Pages
+
+* **Chat Assistent (`/index.html`):** Conversational AI interface supporting multi-turn technical queries, domain-specific intent routing, and clickable citations.
+* **Dokumenter (`/documents.html`):** Synchronous & background PDF uploads, processing queue progress, and indexed document catalog.
+* **Databeregning (`/databeregning.html`):** Embedded view and proxy integration for the sister project `DataBeregningKatalog.Api`.
+* **Brugeradministration (`/users.html`):** Admin management for user accounts.
+* **Login (`/login.html`):** Secure login interface.
+
+---
+
+## 🇩🇰 Danish Companion Document Linking
+
+* Datasheet PDFs follow the standard convention `Art_<articleid>-Doc_<documentid>.pdf`.
+* During ingestion, documents undergo content-based language detection:
+  * **English (`en`)**: Chunked, embedded with `gemini-embedding-001`, and indexed into Qdrant.
+  * **Danish (`da`)**: Saved directly to `uploads/` with status `Skipped` (content language stamped).
+* When a query matches an English document, any document sharing the same `ArticleId` with detected Danish content (`Language == "da"`) is automatically appended as a companion reference in the citations.
 
 ---
 

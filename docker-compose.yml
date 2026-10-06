@@ -1,4 +1,4 @@
-﻿services:
+services:
   webapi:
     image: document-rag-system-api
     build:
@@ -9,11 +9,21 @@
       - "8081:8081"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ConnectionStrings__IdentityDb=Data Source=/app/data/identity.db
+      - Authentication__ApiKey=${API_KEY:-}
+      - Workqueue__User=${WORKQUEUE_USER:-}
+      - Workqueue__Password=${WORKQUEUE_PASSWORD:-}
+      - SisterProject__BaseUrl=${SISTER_PROJECT_BASE_URL:-http://host.docker.internal:5224}
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploads_data:/app/uploads
+      - database_data:/app/data
     depends_on:
       - qdrant
 
@@ -24,11 +34,13 @@
       dockerfile: src/DocumentRagSystem.Worker/Dockerfile
     environment:
       - DOTNET_ENVIRONMENT=Production
+      - ConnectionStrings__IdentityDb=Data Source=/app/data/identity.db
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY}
     volumes:
       - uploads_data:/app/uploads
+      - database_data:/app/data
     depends_on:
       - qdrant
 
@@ -43,3 +55,4 @@
 volumes:
   qdrant_data:
   uploads_data:
+  database_data:

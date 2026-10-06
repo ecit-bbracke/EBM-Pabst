@@ -48,6 +48,7 @@ In contrast, our **Self-Contained Deployment (SCD)**:
 * **Shared Volumes**:
   * `qdrant_data`: Persists vector indexes across container recreations.
   * `uploads_data`: A shared mount at `/app/uploads` in both `webapi` and `worker` to ensure uploaded PDFs are synced, persistent, and accessible to both services.
+  * `database_data`: Persists `identity.db` SQLite database across container recreations for user accounts and document records.
 
 ---
 

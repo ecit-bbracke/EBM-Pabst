@@ -58,7 +58,7 @@ $RemoteCommands = @"
 set -e
 echo '--> Creating remote directory if missing...'
 sudo mkdir -p $RemoteDir
-sudo chown -R $User:$User $RemoteDir
+sudo chown -R ${User}:${User} $RemoteDir
 
 echo '--> Extracting new release bundle...'
 tar -xzvf /tmp/$ArchiveName -C $RemoteDir
