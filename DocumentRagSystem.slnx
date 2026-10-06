@@ -31,7 +31,4 @@
   <Folder Name="/tests/UnitTests/">
     <Project Path="tests/UnitTests/DocumentRagSystem.UnitTests.csproj" />
   </Folder>
-  <Folder Name="/EBMPabst-energiberegning/">
-    <Project Path="../../../../../DotProjekter/EBMPabst-energiberegning/DataBeregningKatalog.Api/DataBeregningKatalog.Api.csproj" />
-  </Folder>
 </Solution>
