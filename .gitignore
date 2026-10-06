@@ -49,6 +49,11 @@ nunit-agent.log
 nunit-server-log.txt
 NUnit3.Profiler.ini
 
+# SQLite Databases
+*.db
+*.db-shm
+*.db-wal
+
 # App Settings
 src/DocumentRagSystem.WebApi/appsettings.local.json
 src/DocumentRagSystem.Worker/appsettings.local.json
