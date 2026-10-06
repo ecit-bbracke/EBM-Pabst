@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ebm-papst Portal - Brugeradministration</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for professional icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#075985',
+                            800: '#0a3f60',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 min-h-screen flex flex-col text-slate-800">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-brand-900 text-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="bg-brand-500 p-2 rounded-lg text-white shadow-sm">
+                    <i class="fa-solid fa-users-gear text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight">Brugeradministration</h1>
+                    <p class="text-[11px] text-slate-300">Microsoft Identity Framework</p>
+                </div>
+            </div>
+            <nav class="flex items-center space-x-2.5">
+                <a href="index.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
+                    <i class="fa-solid fa-comments text-xs"></i>
+                    <span>Chat Assistent</span>
+                </a>
+                <a href="documents.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
+                    <i class="fa-solid fa-folder-gear text-xs"></i>
+                    <span>Dokumenter</span>
+                </a>
+                <a href="databeregning.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
+                    <i class="fa-solid fa-calculator text-xs"></i>
+                    <span>Databeregning</span>
+                </a>
+                <span class="bg-brand-600 text-white px-3.5 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2 border border-brand-500">
+                    <i class="fa-solid fa-users text-xs"></i>
+                    <span>Brugere</span>
+                </span>
+                <button onclick="handleLogout()" class="bg-brand-800/80 hover:bg-rose-900/60 text-slate-200 hover:text-rose-100 px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-1.5 ml-1 border border-brand-700/40" title="Log ud">
+                    <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+                    <span>Log ud</span>
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-8 flex-1 max-w-5xl space-y-8">
+
+        <!-- Top Section: Create User Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6">
+            <h2 class="text-base font-semibold text-slate-900 flex items-center mb-1">
+                <i class="fa-solid fa-user-plus text-brand-600 mr-2 text-sm"></i>
+                Opret ny bruger
+            </h2>
+            <p class="text-xs text-slate-400 mb-5">Tilføj nye medarbejdere med adgang til portalen.</p>
+
+            <!-- Status Banner -->
+            <div id="create-status" class="hidden mb-4 p-3 rounded-lg text-xs"></div>
+
+            <form id="create-user-form" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                    <label for="new-email" class="block text-xs font-medium text-slate-600 mb-1">Email adresse</label>
+                    <input 
+                        type="email" 
+                        id="new-email" 
+                        required 
+                        placeholder="bruger@ebmpabst.dk" 
+                        class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label for="new-password" class="block text-xs font-medium text-slate-600 mb-1">Adgangskode (min. 6 tegn)</label>
+                    <input 
+                        type="password" 
+                        id="new-password" 
+                        required 
+                        minlength="6"
+                        placeholder="••••••••" 
+                        class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <button 
+                        type="submit" 
+                        id="create-btn"
+                        class="w-full bg-brand-600 hover:bg-brand-500 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-plus text-xs"></i>
+                        <span>Opret bruger</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Users Table Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                <div>
+                    <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                        <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
+                        Eksisterende brugere
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-0.5">Oversigt over alle registrerede konti.</p>
+                </div>
+                <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
+                    <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
+                </button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-slate-600">
+                    <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                        <tr>
+                            <th class="px-6 py-3">Bruger / Email</th>
+                            <th class="px-6 py-3">Status</th>
+                            <th class="px-6 py-3 text-right">Handlinger</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body" class="divide-y divide-slate-100">
+                        <tr>
+                            <td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">
+                                <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser brugere...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', fetchUsers);
+
+        async function fetchUsers() {
+            const tbody = document.getElementById('users-table-body');
+            const icon = document.getElementById('refresh-icon');
+            if (icon) icon.classList.add('animate-spin');
+
+            try {
+                const response = await fetch('/api/admin/users');
+                if (response.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const users = await response.json();
+
+                if (!users || users.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">Ingen brugere fundet.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = users.map(user => {
+                    const isDefaultAdmin = user.email.toLowerCase() === 'admin@ebmpabst.dk';
+                    const statusBadge = user.isLockedOut
+                        ? `<span class="bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-lock mr-1.5 text-[10px]"></i> Låst ude</span>`
+                        : `<span class="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-circle-check mr-1.5 text-[10px]"></i> Aktiv</span>`;
+
+                    let actions = '';
+                    if (user.isLockedOut) {
+                        actions += `<button onclick="unlockUser('${user.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 px-2.5 py-1 rounded-md font-medium transition mr-2"><i class="fa-solid fa-unlock mr-1"></i> Lås op</button>`;
+                    }
+                    if (!isDefaultAdmin) {
+                        actions += `<button onclick="deleteUser('${user.id}', '${escapeHtml(user.email)}')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1 rounded-md font-medium transition"><i class="fa-solid fa-trash mr-1"></i> Slet</button>`;
+                    } else {
+                        actions += `<span class="text-[11px] text-slate-400 italic">Beskyttet admin</span>`;
+                    }
+
+                    return `
+                        <tr class="hover:bg-slate-50/50 transition">
+                            <td class="px-6 py-4 font-medium text-slate-900 flex items-center space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase">
+                                    ${user.email.substring(0, 2)}
+                                </div>
+                                <div>
+                                    <div class="font-semibold text-slate-800">${escapeHtml(user.email)}</div>
+                                    <div class="text-[11px] text-slate-400 font-mono">ID: ${user.id}</div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">${statusBadge}</td>
+                            <td class="px-6 py-4 text-right">${actions}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
+            } finally {
+                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
+            }
+        }
+
+        async function handleCreateUser(e) {
+            e.preventDefault();
+            const emailInput = document.getElementById('new-email');
+            const passwordInput = document.getElementById('new-password');
+            const statusDiv = document.getElementById('create-status');
+            const submitBtn = document.getElementById('create-btn');
+
+            statusDiv.classList.add('hidden');
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/admin/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: emailInput.value.trim(),
+                        password: passwordInput.value
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusDiv.className = 'mb-4 p-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs';
+                    statusDiv.textContent = `Bruger '${emailInput.value}' oprettet succesfuldt!`;
+                    statusDiv.classList.remove('hidden');
+                    emailInput.value = '';
+                    passwordInput.value = '';
+                    fetchUsers();
+                } else {
+                    statusDiv.className = 'mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs';
+                    statusDiv.textContent = data?.message || 'Fejl under oprettelse af bruger.';
+                    statusDiv.classList.remove('hidden');
+                }
+            } catch (err) {
+                statusDiv.className = 'mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs';
+                statusDiv.textContent = 'Netværksfejl under oprettelse.';
+                statusDiv.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function deleteUser(id, email) {
+            if (!confirm(`Er du sikker på, at du vil slette brugeren '${email}'?`)) return;
+
+            try {
+                const response = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    fetchUsers();
+                } else {
+                    const data = await response.json();
+                    alert(data?.message || 'Kunne ikke slette bruger.');
+                }
+            } catch (err) {
+                alert('Netværksfejl under sletning.');
+            }
+        }
+
+        async function unlockUser(id) {
+            try {
+                const response = await fetch(`/api/admin/users/${id}/unlock`, { method: 'POST' });
+                if (response.ok) {
+                    fetchUsers();
+                } else {
+                    const data = await response.json();
+                    alert(data?.message || 'Kunne ikke låse bruger op.');
+                }
+            } catch (err) {
+                alert('Netværksfejl under oplåsning.');
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch {}
+            window.location.href = '/login.html';
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>

@@ -19,8 +19,8 @@
                             500: '#0284c7',
                             600: '#0369a1',
                             700: '#075985',
-                            800: '#0c4a6e',
-                            900: '#0f172a',
+                            800: '#0a3f60',
+                            900: '#0c4a6e',
                         }
                     }
                 }
@@ -33,104 +33,86 @@
             padding: 0;
             height: 100%;
             overflow: hidden;
-            background: #05070d;
+            background: #f8fafc;
         }
         .form-frame {
             width: 100%;
             height: 100%;
             border: none;
-            background: #05070d;
+            background: #f8fafc;
         }
     </style>
 </head>
-<body class="flex flex-col h-screen text-slate-100">
+<body class="flex flex-col h-screen text-slate-800 bg-slate-50">
 
     <!-- Top Navigation Bar -->
-    <header class="bg-brand-900 text-white shadow-md flex-shrink-0 z-20 border-b border-slate-800">
-        <div class="container mx-auto px-6 py-3.5 flex justify-between items-center">
+    <header class="bg-brand-900 text-white shadow-md flex-shrink-0 z-20">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-3">
                 <div class="bg-brand-500 p-2 rounded-lg text-white shadow-sm">
-                    <i class="fa-solid fa-calculator text-lg"></i>
+                    <i class="fa-solid fa-calculator text-xl"></i>
                 </div>
                 <div>
-                    <h1 class="text-lg font-bold tracking-tight">Databeregning & Ventilator Formular</h1>
-                    <p class="text-[11px] text-slate-400">EBMPabst Energiberegning Katalog</p>
+                    <h1 class="text-xl font-bold tracking-tight">Databeregning & Ventilator Formular</h1>
+                    <p class="text-[11px] text-slate-300">EBMPabst Energiberegning Katalog</p>
                 </div>
             </div>
             <nav class="flex items-center space-x-2.5">
-                <a href="index.html" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition shadow-sm flex items-center space-x-1.5">
+                <a href="index.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
                     <i class="fa-solid fa-comments text-xs"></i>
                     <span>Chat Assistent</span>
                 </a>
-                <a href="documents.html" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition shadow-sm flex items-center space-x-1.5">
+                <a href="documents.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
                     <i class="fa-solid fa-folder-gear text-xs"></i>
-                    <span>Administrer dokumenter</span>
+                    <span>Dokumenter</span>
                 </a>
-                <span class="bg-brand-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-sm flex items-center space-x-1.5 border border-brand-500">
+                <span class="bg-brand-600 text-white px-3.5 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2 border border-brand-500">
                     <i class="fa-solid fa-calculator text-xs"></i>
                     <span>Databeregning</span>
                 </span>
-                <a href="users.html" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition shadow-sm flex items-center space-x-1.5">
+                <a id="nav-users" href="users.html" class="hidden bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
                     <i class="fa-solid fa-users text-xs"></i>
                     <span>Brugere</span>
                 </a>
-                <a href="/databeregningsform" target="_blank" rel="noopener noreferrer" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-medium transition shadow-sm flex items-center space-x-1" title="Åbn i nyt vindue">
-                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                <a href="/databeregningsform" target="_blank" rel="noopener noreferrer" class="bg-brand-800/80 hover:bg-brand-700 text-slate-200 px-2.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-1 border border-brand-700/40" title="Åbn i nyt vindue">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
                 </a>
-                <button onclick="handleLogout()" class="bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-200 px-3 py-1.5 rounded-lg text-xs font-medium transition shadow-sm flex items-center space-x-1.5 ml-1" title="Log ud">
+                <button onclick="handleLogout()" class="bg-brand-800/80 hover:bg-rose-900/60 text-slate-200 hover:text-rose-100 px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-1.5 ml-1 border border-brand-700/40" title="Log ud">
                     <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
                     <span>Log ud</span>
                 </button>
             </nav>
-        </div>
-    </header>
-
-    <!-- Main Workspace (Iframe Embedding Sister Project's /databeregningsform) -->
-    <main class="flex-1 w-full relative bg-[#05070d] overflow-hidden">
-        <iframe 
-            id="form-iframe" 
-            src="/databeregningsform" 
-            class="form-frame" 
-            title="EBM-Pabst databeregning form"
-            onerror="handleFrameError()">
-        </iframe>
-
-        <!-- Loading / Offline Overlay -->
-        <div id="loading-overlay" class="absolute inset-0 bg-[#05070d] flex flex-col items-center justify-center p-6 text-center transition-opacity duration-300 pointer-events-none opacity-0">
-            <div class="bg-[#0b1a3a] border border-[#1e3a8a] rounded-xl p-8 max-w-md shadow-2xl space-y-4 pointer-events-auto">
-                <div class="w-12 h-12 bg-amber-500/20 text-amber-400 rounded-full flex items-center justify-center mx-auto text-xl">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
                 </div>
-                <h3 class="text-base font-bold text-white">Kunne ikke indlæse formular</h3>
-                <p class="text-xs text-slate-300 leading-relaxed">
-                    Søsterprojektet <strong>DataBeregningKatalog.Api</strong> svarer ikke på <code>/databeregningsform</code>.
-                </p>
-                <div class="text-[11px] bg-black/60 rounded p-2 text-left font-mono text-sky-300 border border-slate-800">
-                    dotnet run --project C:\DotProjekter\EBMPabst-energiberegning\DataBeregningKatalog.Api
-                </div>
-                <button onclick="reloadForm()" class="w-full bg-brand-600 hover:bg-brand-500 text-white py-2 rounded-lg text-xs font-semibold transition">
-                    Prøv igen
-                </button>
-            </div>
-        </div>
-    </main>
+                </header>
 
-    <script>
-        function reloadForm() {
-            const frame = document.getElementById('form-iframe');
-            const overlay = document.getElementById('loading-overlay');
-            overlay.classList.add('opacity-0');
-            overlay.classList.add('pointer-events-none');
-            frame.src = '/databeregningsform?' + new Date().getTime();
-        }
+                <!-- Embedded Sister Application Frame -->
+                <main class="flex-1 w-full h-full relative overflow-hidden bg-slate-50">
+                <iframe 
+                id="databeregning-frame"
+                src="/databeregningsform" 
+                title="ebm-papst Databeregning formular"
+                class="form-frame"
+                allow="fullscreen">
+                </iframe>
+                </main>
 
-        function handleFrameError() {
-            const overlay = document.getElementById('loading-overlay');
-            overlay.classList.remove('opacity-0');
-            overlay.classList.remove('pointer-events-none');
-        }
+                <script>
+                document.addEventListener('DOMContentLoaded', checkAdminNav);
 
-        async function handleLogout() {
+                async function checkAdminNav() {
+                try {
+                const res = await fetch('/api/auth/me');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.isAdmin) {
+                        const navUsers = document.getElementById('nav-users');
+                        if (navUsers) navUsers.classList.remove('hidden');
+                    }
+                }
+                } catch {}
+                }
+
+                async function handleLogout() {
             try {
                 await fetch('/api/auth/logout', { method: 'POST' });
             } catch {}

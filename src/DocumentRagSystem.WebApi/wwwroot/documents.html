@@ -19,6 +19,7 @@
                             500: '#0284c7',
                             600: '#0369a1',
                             700: '#075985',
+                            800: '#0a3f60',
                             900: '#0c4a6e',
                         }
                     }
@@ -40,11 +41,27 @@
                     <h1 class="text-xl font-bold tracking-tight">Dokumentadministration</h1>
                 </div>
             </div>
-            <nav>
-                <a href="index.html" class="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2">
+            <nav class="flex items-center space-x-2.5">
+                <a href="index.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
                     <i class="fa-solid fa-comments text-xs"></i>
-                    <span>Chat</span>
+                    <span>Chat Assistent</span>
                 </a>
+                <span class="bg-brand-600 text-white px-3.5 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2 border border-brand-500">
+                    <i class="fa-solid fa-folder-gear text-xs"></i>
+                    <span>Dokumenter</span>
+                </span>
+                <a href="databeregning.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
+                    <i class="fa-solid fa-calculator text-xs"></i>
+                    <span>Databeregning</span>
+                </a>
+                <a id="nav-users" href="users.html" class="hidden bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
+                    <i class="fa-solid fa-users text-xs"></i>
+                    <span>Brugere</span>
+                </a>
+                <button onclick="handleLogout()" class="bg-brand-800/80 hover:bg-rose-900/60 text-slate-200 hover:text-rose-100 px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-1.5 ml-1 border border-brand-700/40" title="Log ud">
+                    <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+                    <span>Log ud</span>
+                </button>
             </nav>
         </div>
     </header>
@@ -133,7 +150,21 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             fetchDocuments();
+            checkAdminNav();
         });
+
+        async function checkAdminNav() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.isAdmin) {
+                        const navUsers = document.getElementById('nav-users');
+                        if (navUsers) navUsers.classList.remove('hidden');
+                    }
+                }
+            } catch {}
+        }
 
         function escapeHtml(value) {
             return String(value ?? '')
@@ -307,6 +338,13 @@
                     setTimeout(() => refreshIcon.classList.remove('animate-spin'), 600);
                 }
             }
+        }
+
+        async function handleLogout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch {}
+            window.location.href = '/login.html';
         }
     </script>
 </body>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for professional icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-md">
+        <!-- Logo & Branding -->
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-600 shadow-md shadow-brand-500/20 mb-3 text-white text-2xl">
+                <i class="fa-solid fa-brain"></i>
+            </div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Login</h1>
+        </div>
+
+        <!-- Login Card -->
+        <div class="bg-white border border-slate-200/90 rounded-2xl p-8 shadow-xl shadow-slate-200/50 relative">
+            <div class="mb-6">
+                <h2 class="text-lg font-semibold text-slate-900">Log ind</h2>
+                <p class="text-xs text-slate-400 mt-0.5">Indtast dine oplysninger for at få adgang til portalen</p>
+            </div>
+
+            <!-- Error Banner -->
+            <div id="error-banner" class="hidden mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center space-x-2">
+                <i class="fa-solid fa-circle-exclamation text-rose-500"></i>
+                <span id="error-message">Ugyldig email eller adgangskode.</span>
+            </div>
+
+            <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label for="email" class="block text-xs font-medium text-slate-700 mb-1.5">Email adresse</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400 text-sm">
+                            <i class="fa-solid fa-envelope"></i>
+                        </span>
+                        <input 
+                            type="email" 
+                            id="email" 
+                            name="email" 
+                            required 
+                            autocomplete="email"
+                            value="admin@ebmpabst.dk"
+                            class="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div>
+                    <label for="password" class="block text-xs font-medium text-slate-700 mb-1.5">Adgangskode</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400 text-sm">
+                            <i class="fa-solid fa-lock"></i>
+                        </span>
+                        <input 
+                            type="password" 
+                            id="password" 
+                            name="password" 
+                            required 
+                            autocomplete="current-password"
+                            value="Admin123!"
+                            class="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between text-xs pt-1">
+                    <label class="flex items-center text-slate-600 cursor-pointer select-none">
+                        <input type="checkbox" id="remember-me" checked class="w-4 h-4 rounded bg-slate-50 border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer mr-2">
+                        <span>Husk mig på denne enhed</span>
+                    </label>
+                </div>
+
+                <button 
+                    type="submit" 
+                    id="submit-btn"
+                    class="w-full bg-brand-600 hover:bg-brand-500 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition shadow-sm hover:shadow flex items-center justify-center space-x-2 cursor-pointer mt-2">
+                    <span id="btn-text">Log ind</span>
+                    <i id="btn-spinner" class="fa-solid fa-spinner animate-spin hidden"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const emailInput = document.getElementById('email');
+            const passwordInput = document.getElementById('password');
+            const rememberMeInput = document.getElementById('remember-me');
+            const submitBtn = document.getElementById('submit-btn');
+            const btnText = document.getElementById('btn-text');
+            const btnSpinner = document.getElementById('btn-spinner');
+            const errorBanner = document.getElementById('error-banner');
+            const errorMessage = document.getElementById('error-message');
+
+            errorBanner.classList.add('hidden');
+            submitBtn.disabled = true;
+            btnText.textContent = 'Logger ind...';
+            btnSpinner.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: emailInput.value.trim(),
+                        password: passwordInput.value,
+                        rememberMe: rememberMeInput.checked
+                    })
+                });
+
+                if (response.ok) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const returnUrl = urlParams.get('returnUrl') || '/index.html';
+                    window.location.href = returnUrl;
+                } else {
+                    const errorData = await response.json().catch(() => null);
+                    errorMessage.textContent = errorData?.message || 'Ugyldig email eller adgangskode.';
+                    errorBanner.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorMessage.textContent = 'Netværksfejl under login. Tjek forbindelsen.';
+                errorBanner.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = 'Log ind';
+                btnSpinner.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
