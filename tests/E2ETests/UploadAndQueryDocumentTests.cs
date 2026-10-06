@@ -122,6 +122,9 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                 }
             });
         }).CreateClient();
+
+        var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResponse.EnsureSuccessStatusCode();
     }
 
     public async Task DisposeAsync()

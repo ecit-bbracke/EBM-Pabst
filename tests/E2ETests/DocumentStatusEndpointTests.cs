@@ -28,9 +28,9 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
         _factory = factory;
     }
 
-    private HttpClient CreateTestClient()
+    private async Task<HttpClient> CreateTestClientAsync()
     {
-        return _factory.WithWebHostBuilder(builder =>
+        var client = _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
@@ -59,6 +59,23 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
                 services.AddSingleton<ILlmService>(mockLlm.Object);
             });
         }).CreateClient();
+
+        var loginResp = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResp.EnsureSuccessStatusCode();
+        return client;
+    }
+
+    [Fact]
+    public async Task GetDocumentStatus_WhenNotAuthenticated_ReturnsUnauthorized()
+    {
+        // Arrange
+        var unauthenticatedClient = _factory.CreateClient();
+
+        // Act
+        var response = await unauthenticatedClient.GetAsync("/api/documents/status?fileName=test.pdf");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -67,7 +84,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
         // Arrange
         _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<Document>());
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status?fileName=unknown_doc.pdf");
@@ -96,7 +113,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
         await _repository.AddDocumentAsync(doc);
         _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<Document>());
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status?fileName=datasheet_k3g.pdf");
@@ -125,7 +142,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
         );
         _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
             .ReturnsAsync(new[] { vectorDoc });
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status?fileName=axial_fan_w3g.pdf");
@@ -153,7 +170,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
             ErrorMessage: "Invalid PDF structure."
         );
         await _repository.AddDocumentAsync(failedDoc);
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status?fileName=corrupt.pdf");
@@ -179,7 +196,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
             Status: DocumentStatus.Processed
         );
         await _repository.AddDocumentAsync(doc);
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // 1. Query parameter (?fileName=...)
         var respQuery = await client.GetAsync("/api/documents/status?fileName=spec_sheet.pdf");
@@ -215,7 +232,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
             Status: DocumentStatus.Processed
         );
         await _repository.AddDocumentAsync(doc);
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act - Query without '.pdf' extension
         var response = await client.GetAsync("/api/documents/status?fileName=my_special_document");
@@ -244,7 +261,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
         await _repository.AddDocumentAsync(doc);
         _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
             .ReturnsAsync(Array.Empty<Document>());
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status?fileName=Data_sheet_DA_-_8300100049.pdf");
@@ -265,7 +282,7 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
     public async Task GetDocumentStatus_MissingFileNameParameter_ReturnsBadRequest()
     {
         // Arrange
-        var client = CreateTestClient();
+        var client = await CreateTestClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents/status");

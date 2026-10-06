@@ -27,11 +27,109 @@ using DocumentRagSystem.Infrastructure.VectorStores;
 using DocumentRagSystem.WebApi.DTOs;
 using DocumentRagSystem.WebApi.HostedServices;
 using DocumentRagSystem.WebApi.Middleware;
+using DocumentRagSystem.Infrastructure.Data;
+using DocumentRagSystem.WebApi.Data;
+using DocumentRagSystem.WebApi.Endpoints;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+// Database & Microsoft Identity Configuration
+var connectionString = builder.Configuration.GetConnectionString("IdentityDb") ?? "Data Source=identity.db";
+builder.Services.AddDbContextFactory<ApplicationDbContext>(options =>
+    options.UseSqlite(connectionString));
+builder.Services.AddDbContextFactory<DocumentDbContext>(options =>
+    options.UseSqlite(connectionString));
+
+builder.Services.AddScoped(sp =>
+    sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
+
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+{
+    options.Password.RequireDigit = false;
+    options.Password.RequireLowercase = false;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = false;
+    options.Password.RequiredLength = 6;
+    options.SignIn.RequireConfirmedAccount = false;
+
+    // Account Lockout Protection
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    options.Lockout.MaxFailedAccessAttempts = 5;
+    options.Lockout.AllowedForNewUsers = true;
+})
+.AddEntityFrameworkStores<ApplicationDbContext>()
+.AddDefaultTokenProviders();
+
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.LoginPath = "/login.html";
+    options.LogoutPath = "/api/auth/logout";
+    options.AccessDeniedPath = "/index.html";
+    options.Cookie.Name = "EbmRagAuth";
+    options.Cookie.HttpOnly = true;
+    options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    options.SlidingExpiration = true;
+    options.Events.OnRedirectToLogin = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/uploads"))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+        context.Response.Redirect("/index.html");
+        return Task.CompletedTask;
+    };
+});
+
+// Configure Hybrid Authentication (Cookie for web portal + API Key for API clients)
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = "SmartScheme";
+    options.DefaultAuthenticateScheme = "SmartScheme";
+    options.DefaultChallengeScheme = "SmartScheme";
+})
+.AddPolicyScheme("SmartScheme", "Cookie or ApiKey", options =>
+{
+    options.ForwardDefaultSelector = context =>
+    {
+        var authHeader = context.Request.Headers.Authorization.ToString();
+        if (context.Request.Headers.ContainsKey(ApiKeyAuthenticationOptions.HeaderName) ||
+            authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ||
+            authHeader.StartsWith("ApiKey ", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiKeyAuthenticationOptions.DefaultScheme;
+        }
+        return IdentityConstants.ApplicationScheme;
+    };
+})
+.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+    ApiKeyAuthenticationOptions.DefaultScheme, options => { });
+
+builder.Services.AddOptions<ApiKeyAuthenticationOptions>(ApiKeyAuthenticationOptions.DefaultScheme)
+    .Configure<IConfiguration>((options, config) =>
+    {
+        options.ApiKey = config["Authentication:ApiKey"] 
+                         ?? Environment.GetEnvironmentVariable("API_KEY") 
+                         ?? string.Empty;
+    });
+
+builder.Services.AddAuthorization();
 
 // Register Core & Infrastructure Services
 var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
@@ -99,7 +197,7 @@ builder.Services.AddHttpClient("LocalLlmHealthClient", (sp, client) =>
 });
 
 // Add Singletons and Scoped Services
-builder.Services.AddSingleton<IDocumentRepository, InMemoryDocumentRepository>();
+builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 
@@ -255,9 +353,60 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.UseHttpsRedirection();
 }
 
-app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Secure HTML pages and API routes middleware
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+
+    // Allow login page, auth API endpoints, static assets, and health checks
+    if (path.Equals("/login.html", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/health", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".css", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".woff", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".woff2", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase))
+    {
+        await next();
+        return;
+    }
+
+    // Require authentication
+    if (context.User.Identity?.IsAuthenticated != true)
+    {
+        if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        var returnUrl = Uri.EscapeDataString(path + context.Request.QueryString);
+        context.Response.Redirect($"/login.html?returnUrl={returnUrl}");
+        return;
+    }
+
+    // Restrict /users.html strictly to Admins
+    if (path.Equals("/users.html", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!IsUserAdmin(context.User))
+        {
+            context.Response.Redirect("/index.html");
+            return;
+        }
+    }
+
+    await next();
+});
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -302,6 +451,7 @@ app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore
 
     return Results.Ok(docs);
 })
+.RequireAuthorization()
 .WithName("GetAllDocuments");
 
 // DOCUMENT STATUS ENDPOINTS
@@ -320,6 +470,7 @@ app.MapGet("/api/documents/status", async (
 
     return await GetDocumentStatusResultAsync(resolvedFileName, repository, vectorStore, servedUploadDirectories);
 })
+.RequireAuthorization()
 .WithName("GetDocumentStatusByQuery")
 .WithSummary("Get document upload status by filename (query parameter)")
 .WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
@@ -338,6 +489,7 @@ app.MapGet("/api/documents/status/{*fileName}", async (
 
     return await GetDocumentStatusResultAsync(fileName, repository, vectorStore, servedUploadDirectories);
 })
+.RequireAuthorization()
 .WithName("GetDocumentStatusByPath")
 .WithSummary("Get document upload status by filename (route parameter)")
 .WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
@@ -356,6 +508,7 @@ app.MapGet("/api/documents/{fileName}/status", async (
 
     return await GetDocumentStatusResultAsync(fileName, repository, vectorStore, servedUploadDirectories);
 })
+.RequireAuthorization()
 .WithName("GetDocumentStatusByResourcePath")
 .WithSummary("Get document upload status by filename (resource route parameter)")
 .WithDescription("Checks whether a document has already been uploaded by filename and returns its current status.")
@@ -441,6 +594,7 @@ app.MapPost("/api/query", async (
 
     return Results.Ok(new QueryResponse(htmlAnswer, citations, effectiveConversationId));
 })
+.RequireAuthorization()
 .WithName("QueryDocuments");
 
 // STREAMING QUERY ENDPOINT (SSE)
@@ -549,6 +703,7 @@ app.MapPost("/api/query/stream", async (
 
     return Results.Empty;
 })
+.RequireAuthorization()
 .WithName("QueryDocumentsStream");
 
 // GET CONVERSATION STATE
@@ -557,6 +712,7 @@ app.MapGet("/api/conversation/{id}", async (string id, IConversationStateStore s
     var state = await stateStore.GetStateAsync(id);
     return state != null ? Results.Ok(state) : Results.NotFound();
 })
+.RequireAuthorization()
 .WithName("GetConversationState");
 
 // CLEAR CONVERSATION STATE
@@ -565,6 +721,7 @@ app.MapDelete("/api/conversation/{id}", async (string id, IConversationStateStor
     await stateStore.ClearStateAsync(id);
     return Results.NoContent();
 })
+.RequireAuthorization()
 .WithName("ClearConversationState");
 
 // REMOVE SPECIFIC CONSTRAINT FROM CONVERSATION
@@ -574,6 +731,7 @@ app.MapDelete("/api/conversation/{id}/constraints/{attribute}", async (string id
     var updated = await stateStore.GetStateAsync(id);
     return updated != null ? Results.Ok(updated) : Results.NotFound();
 })
+.RequireAuthorization()
 .WithName("RemoveConversationConstraint");
 
 // RESET CONVERSATION CONSTRAINTS
@@ -594,7 +752,188 @@ app.MapPost("/api/conversation/{id}/reset", async (string id, IConversationState
     }
     return Results.NotFound();
 })
+.RequireAuthorization()
 .WithName("ResetConversationConstraints");
+
+// AUTH ENDPOINTS
+app.MapPost("/api/auth/login", async (
+    LoginRequest model, 
+    SignInManager<IdentityUser> signInManager, 
+    UserManager<IdentityUser> userManager) =>
+{
+    if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
+    {
+        return Results.BadRequest(new { message = "Email og adgangskode skal udfyldes." });
+    }
+
+    var user = await userManager.FindByEmailAsync(model.Email) ?? await userManager.FindByNameAsync(model.Email);
+    if (user == null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var result = await signInManager.PasswordSignInAsync(user, model.Password, isPersistent: model.RememberMe, lockoutOnFailure: true);
+    if (result.Succeeded)
+    {
+        return Results.Ok(new { message = "Logget ind", email = user.Email });
+    }
+
+    if (result.IsLockedOut)
+    {
+        return Results.BadRequest(new { message = "Kontoen er midlertidigt låst pga. for mange mislykkede loginforsøg. Prøv igen om 15 minutter." });
+    }
+
+    return Results.Unauthorized();
+})
+.AllowAnonymous()
+.WithName("Login");
+
+app.MapPost("/api/auth/logout", async (SignInManager<IdentityUser> signInManager) =>
+{
+    await signInManager.SignOutAsync();
+    return Results.Ok(new { message = "Logget ud" });
+})
+.RequireAuthorization()
+.WithName("Logout");
+
+app.MapGet("/api/auth/me", (ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated == true)
+    {
+        return Results.Ok(new { isAuthenticated = true, email = user.Identity.Name, isAdmin = IsUserAdmin(user) });
+    }
+    return Results.Unauthorized();
+})
+.RequireAuthorization()
+.WithName("GetCurrentUser");
+
+// USER MANAGEMENT ENDPOINTS
+app.MapGet("/api/admin/users", async (
+    ClaimsPrincipal currentUser,
+    UserManager<IdentityUser> userManager) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var users = await userManager.Users.ToListAsync();
+    var dtos = users.Select(u => new UserSummaryDto(
+        Id: u.Id,
+        Email: u.Email ?? u.UserName ?? string.Empty,
+        UserName: u.UserName,
+        IsLockedOut: u.LockoutEnd.HasValue && u.LockoutEnd.Value > DateTimeOffset.UtcNow
+    )).ToList();
+
+    return Results.Ok(dtos);
+})
+.RequireAuthorization()
+.WithName("GetAdminUsers");
+
+app.MapPost("/api/admin/users", async (
+    CreateUserRequest model,
+    ClaimsPrincipal currentUser,
+    UserManager<IdentityUser> userManager) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
+    {
+        return Results.BadRequest(new { message = "Email og adgangskode skal udfyldes." });
+    }
+
+    var existing = await userManager.FindByEmailAsync(model.Email);
+    if (existing != null)
+    {
+        return Results.BadRequest(new { message = "En bruger med denne email findes allerede." });
+    }
+
+    var newUser = new IdentityUser
+    {
+        UserName = model.Email.Trim(),
+        Email = model.Email.Trim(),
+        EmailConfirmed = true
+    };
+
+    var result = await userManager.CreateAsync(newUser, model.Password);
+    if (result.Succeeded)
+    {
+        return Results.Ok(new UserSummaryDto(
+            Id: newUser.Id,
+            Email: newUser.Email,
+            UserName: newUser.UserName,
+            IsLockedOut: false
+        ));
+    }
+
+    return Results.BadRequest(new { message = string.Join(", ", result.Errors.Select(e => e.Description)) });
+})
+.RequireAuthorization()
+.WithName("CreateAdminUser");
+
+app.MapDelete("/api/admin/users/{id}", async (
+    string id,
+    ClaimsPrincipal currentUser,
+    UserManager<IdentityUser> userManager) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var user = await userManager.FindByIdAsync(id);
+    if (user == null)
+    {
+        return Results.NotFound(new { message = "Bruger ikke fundet." });
+    }
+
+    if (string.Equals(user.Email, "admin@ebmpabst.dk", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { message = "Standard administratoren kan ikke slettes." });
+    }
+
+    if (string.Equals(user.Email, currentUser.Identity?.Name, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { message = "Du kan ikke slette din egen bruger." });
+    }
+
+    var result = await userManager.DeleteAsync(user);
+    if (result.Succeeded)
+    {
+        return Results.Ok(new { message = "Bruger slettet." });
+    }
+
+    return Results.BadRequest(new { message = string.Join(", ", result.Errors.Select(e => e.Description)) });
+})
+.RequireAuthorization()
+.WithName("DeleteAdminUser");
+
+app.MapPost("/api/admin/users/{id}/unlock", async (
+    string id,
+    ClaimsPrincipal currentUser,
+    UserManager<IdentityUser> userManager) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var user = await userManager.FindByIdAsync(id);
+    if (user == null)
+    {
+        return Results.NotFound(new { message = "Bruger ikke fundet." });
+    }
+
+    await userManager.SetLockoutEndDateAsync(user, null);
+    await userManager.ResetAccessFailedCountAsync(user);
+
+    return Results.Ok(new { message = "Bruger låst op." });
+})
+.RequireAuthorization()
+.WithName("UnlockAdminUser");
 
 // DOCUMENT UPLOAD ENDPOINT
 app.MapPost("/api/documents/upload", async (
@@ -669,9 +1008,149 @@ app.MapPost("/api/documents/upload", async (
         return Results.Ok(document);
     }
 })
+.RequireAuthorization()
 .WithName("UploadDocument");
 
+// DATABEREGNING ENDPOINTS (Native execution with Workqueue robot integration)
+app.MapDataberegning();
+
+// Seed default admin user and ensure tables exist
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await db.Database.EnsureCreatedAsync();
+
+    // Ensure all Identity tables and Documents table exist even if database was created by Worker or partially migrated
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS "AspNetRoles" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetRoles" PRIMARY KEY,
+            "Name" TEXT NULL,
+            "NormalizedName" TEXT NULL,
+            "ConcurrencyStamp" TEXT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "RoleNameIndex" ON "AspNetRoles" ("NormalizedName");
+
+        CREATE TABLE IF NOT EXISTS "AspNetUsers" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetUsers" PRIMARY KEY,
+            "UserName" TEXT NULL,
+            "NormalizedUserName" TEXT NULL,
+            "Email" TEXT NULL,
+            "NormalizedEmail" TEXT NULL,
+            "EmailConfirmed" INTEGER NOT NULL,
+            "PasswordHash" TEXT NULL,
+            "SecurityStamp" TEXT NULL,
+            "ConcurrencyStamp" TEXT NULL,
+            "PhoneNumber" TEXT NULL,
+            "PhoneNumberConfirmed" INTEGER NOT NULL,
+            "TwoFactorEnabled" INTEGER NOT NULL,
+            "LockoutEnd" TEXT NULL,
+            "LockoutEnabled" INTEGER NOT NULL,
+            "AccessFailedCount" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "EmailIndex" ON "AspNetUsers" ("NormalizedEmail");
+        CREATE UNIQUE INDEX IF NOT EXISTS "UserNameIndex" ON "AspNetUsers" ("NormalizedUserName");
+
+        CREATE TABLE IF NOT EXISTS "AspNetRoleClaims" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetRoleClaims" PRIMARY KEY AUTOINCREMENT,
+            "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetRoleClaims_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
+            "ClaimType" TEXT NULL,
+            "ClaimValue" TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_AspNetRoleClaims_RoleId" ON "AspNetRoleClaims" ("RoleId");
+
+        CREATE TABLE IF NOT EXISTS "AspNetUserClaims" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetUserClaims" PRIMARY KEY AUTOINCREMENT,
+            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserClaims_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+            "ClaimType" TEXT NULL,
+            "ClaimValue" TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_AspNetUserClaims_UserId" ON "AspNetUserClaims" ("UserId");
+
+        CREATE TABLE IF NOT EXISTS "AspNetUserLogins" (
+            "LoginProvider" TEXT NOT NULL,
+            "ProviderKey" TEXT NOT NULL,
+            "ProviderDisplayName" TEXT NULL,
+            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserLogins_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+            CONSTRAINT "PK_AspNetUserLogins" PRIMARY KEY ("LoginProvider", "ProviderKey")
+        );
+        CREATE INDEX IF NOT EXISTS "IX_AspNetUserLogins_UserId" ON "AspNetUserLogins" ("UserId");
+
+        CREATE TABLE IF NOT EXISTS "AspNetUserRoles" (
+            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+            "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
+            CONSTRAINT "PK_AspNetUserRoles" PRIMARY KEY ("UserId", "RoleId")
+        );
+        CREATE INDEX IF NOT EXISTS "IX_AspNetUserRoles_RoleId" ON "AspNetUserRoles" ("RoleId");
+
+        CREATE TABLE IF NOT EXISTS "AspNetUserTokens" (
+            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserTokens_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+            "LoginProvider" TEXT NOT NULL,
+            "Name" TEXT NOT NULL,
+            "Value" TEXT NULL,
+            CONSTRAINT "PK_AspNetUserTokens" PRIMARY KEY ("UserId", "LoginProvider", "Name")
+        );
+
+        CREATE TABLE IF NOT EXISTS "Documents" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_Documents" PRIMARY KEY,
+            "FileName" TEXT NOT NULL,
+            "FilePath" TEXT NOT NULL,
+            "UploadedAt" TEXT NOT NULL,
+            "Status" TEXT NOT NULL,
+            "ErrorMessage" TEXT NULL,
+            "Language" TEXT NULL,
+            "ArticleId" TEXT NULL,
+            "SourceDocumentId" TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
+        CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
+    """);
+
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    if (!await roleManager.RoleExistsAsync("Admin"))
+    {
+        await roleManager.CreateAsync(new IdentityRole("Admin"));
+    }
+
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+    var adminEmail = "admin@ebmpabst.dk";
+    var defaultUser = await userManager.FindByEmailAsync(adminEmail);
+    if (defaultUser == null)
+    {
+        defaultUser = new IdentityUser
+        {
+            UserName = adminEmail,
+            Email = adminEmail,
+            EmailConfirmed = true
+        };
+        var result = await userManager.CreateAsync(defaultUser, "Admin123!");
+        if (result.Succeeded)
+        {
+            await userManager.AddToRoleAsync(defaultUser, "Admin");
+            app.Logger.LogInformation("Default admin user created and assigned Admin role: {Email}", adminEmail);
+        }
+        else
+        {
+            app.Logger.LogWarning("Failed to create default admin user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
+        }
+    }
+    else
+    {
+        if (!await userManager.IsInRoleAsync(defaultUser, "Admin"))
+        {
+            await userManager.AddToRoleAsync(defaultUser, "Admin");
+        }
+    }
+}
+
 app.Run();
+
+static bool IsUserAdmin(ClaimsPrincipal user)
+{
+    if (user.Identity?.IsAuthenticated != true) return false;
+    return user.IsInRole("Admin") ||
+           string.Equals(user.Identity.Name, "admin@ebmpabst.dk", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(user.Identity.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
+}
 
 static string FirstNonEmpty(params string?[] values)
 {
