@@ -144,6 +144,12 @@ public static class Program
             Timeout = TimeSpan.FromMinutes(3)
         };
 
+        var webApiKey = Environment.GetEnvironmentVariable("API_KEY");
+        if (!string.IsNullOrWhiteSpace(webApiKey))
+        {
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key", webApiKey);
+        }
+
         // 1. Fetch currently uploaded documents to avoid redundant work
         Console.WriteLine("Fetching already uploaded documents from API...");
         var uploadedFilenames = await GetUploadedDocumentFilenamesAsync(httpClient);
