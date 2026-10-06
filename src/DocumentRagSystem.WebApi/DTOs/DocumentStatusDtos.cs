@@ -10,7 +10,10 @@ public record DocumentStatusResponse(
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("filePath")] string? FilePath = null,
     [property: JsonPropertyName("uploadedAt")] DateTime? UploadedAt = null,
-    [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null
+    [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,
+    [property: JsonPropertyName("language")] string? Language = null,
+    [property: JsonPropertyName("articleId")] string? ArticleId = null,
+    [property: JsonPropertyName("sourceDocumentId")] string? SourceDocumentId = null
 )
 {
     [JsonPropertyName("isUploaded")]

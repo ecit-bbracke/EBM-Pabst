@@ -52,6 +52,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private readonly ILlmService _llmService;
     private readonly IConversationalQueryRefiner _queryRefiner;
     private readonly IConversationStateStore _stateStore;
+    private readonly IContextExpander _contextExpander;
     private readonly ILogger<TechnicalRagOrchestrator>? _logger;
 
     // Workflow executors dictionary
@@ -71,6 +72,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IConversationalQueryRefiner? queryRefiner = null,
         IConversationStateStore? stateStore = null,
         IDocumentRepository? documentRepository = null,
+        IContextExpander? contextExpander = null,
         ILogger<TechnicalRagOrchestrator>? logger = null
     )
     {
@@ -81,6 +83,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         _outputGovernor = outputGovernor ?? throw new ArgumentNullException(nameof(outputGovernor));
         _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
         _llmService = new LlmClientToServiceAdapter(llmClient);
+        _contextExpander = contextExpander ?? new ContextExpander();
         _logger = logger;
 
         var parser = ebmParser ?? new EbmProductCodeParser();
@@ -111,6 +114,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IConversationalQueryRefiner? queryRefiner = null,
         IConversationStateStore? stateStore = null,
         IDocumentRepository? documentRepository = null,
+        IContextExpander? contextExpander = null,
         ILogger<TechnicalRagOrchestrator>? logger = null
     )
         : this(
@@ -124,6 +128,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             queryRefiner,
             stateStore,
             documentRepository,
+            contextExpander,
             logger)
     {
     }
@@ -139,6 +144,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IConversationalQueryRefiner? queryRefiner = null,
         IConversationStateStore? stateStore = null,
         IDocumentRepository? documentRepository = null,
+        IContextExpander? contextExpander = null,
         ILogger<TechnicalRagOrchestrator>? logger = null
     )
         : this(
@@ -152,6 +158,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             queryRefiner,
             stateStore,
             documentRepository,
+            contextExpander,
             logger)
     {
     }
@@ -274,16 +281,21 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 6. Execute Initial Workflow / First Retrieval (reusing parallelized initial search)
         stageStopwatch.Restart();
         var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(effectiveQuestion, govResult, vectorStore, initialSearchTask);
+
+        // Positional Expansion: Expand context with adjacent neighbor chunks
+        var expandedContextChunks = await _contextExpander.ExpandContextAsync(contextChunks, vectorStore);
+
         timings["WorkflowExecution"] = stageStopwatch.ElapsedMilliseconds;
-        _logger?.LogInformation("[Orchestrator] Workflow execution ({Workflow}) completed in {DurationMs}ms (Chunks: {ChunkCount}).", workflowType, timings["WorkflowExecution"], contextChunks.Count);
+        _logger?.LogInformation("[Orchestrator] Workflow execution ({Workflow}) completed in {DurationMs}ms (Initial Chunks: {InitialCount}, Expanded Chunks: {ChunkCount}).", 
+            workflowType, timings["WorkflowExecution"], contextChunks.Count, expandedContextChunks.Count);
 
         retrievals.Add(new RetrievalTrace(
             Purpose: $"Initial retrieval for workflow: {workflowType}",
             Query: effectiveQuestion,
-            Results: contextChunks.Select(c => c.Text).ToList()
+            Results: expandedContextChunks.Select(c => c.Text).ToList()
         ));
 
-        var allChunks = new List<DocumentChunk>(contextChunks);
+        var allChunks = new List<DocumentChunk>(expandedContextChunks);
         var currentDraft = draftResponse;
         List<EvidenceClaim> evidenceClaims = new();
 
@@ -340,15 +352,18 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                     break;
                 }
 
+                // Positional Expansion on additional chunks
+                var expandedAdditional = await _contextExpander.ExpandContextAsync(additionalChunks, vectorStore);
+
                 // Merge additional chunks
                 var initialCount = allChunks.Count;
-                allChunks.AddRange(additionalChunks);
-                allChunks = allChunks.GroupBy(c => c.Id).Select(g => g.First()).ToList();
+                allChunks.AddRange(expandedAdditional);
+                allChunks = allChunks.GroupBy(c => c.Id).Select(g => g.First()).OrderBy(c => c.DocumentId).ThenBy(c => c.Index).ToList();
 
                 retrievals.Add(new RetrievalTrace(
                     Purpose: $"Iterative retrieval #{iterations} for claim: {targetClaim.Claim}",
                     Query: targetedQuery,
-                    Results: additionalChunks.Select(c => c.Text).ToList()
+                    Results: expandedAdditional.Select(c => c.Text).ToList()
                 ));
 
                 if (allChunks.Count == initialCount)
@@ -595,15 +610,19 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 6. Execute Initial Workflow
         stageStopwatch.Restart();
         var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(effectiveQuestion, govResult, vectorStore, initialSearchTask);
+
+        // Positional Expansion: Expand context with adjacent neighbor chunks
+        var expandedContextChunks = await _contextExpander.ExpandContextAsync(contextChunks, vectorStore, cancellationToken: cancellationToken);
+
         timings["WorkflowExecution"] = stageStopwatch.ElapsedMilliseconds;
 
         retrievals.Add(new RetrievalTrace(
             Purpose: $"Initial retrieval for workflow: {workflowType}",
             Query: effectiveQuestion,
-            Results: contextChunks.Select(c => c.Text).ToList()
+            Results: expandedContextChunks.Select(c => c.Text).ToList()
         ));
 
-        var allChunks = new List<DocumentChunk>(contextChunks);
+        var allChunks = new List<DocumentChunk>(expandedContextChunks);
 
         // 7. Evidence evaluation
         stageStopwatch.Restart();

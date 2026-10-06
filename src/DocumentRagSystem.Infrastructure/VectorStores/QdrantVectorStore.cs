@@ -169,6 +169,22 @@ public class QdrantVectorStore : IVectorStore
             point.Payload["file_name"] = chunk.FileName;
         }
 
+        var originalFileName = chunk.OriginalFileName ?? chunk.FileName;
+        if (!string.IsNullOrWhiteSpace(originalFileName))
+        {
+            point.Payload["original_file_name"] = originalFileName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(chunk.ArticleId))
+        {
+            point.Payload["article_id"] = chunk.ArticleId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(chunk.SourceDocumentId))
+        {
+            point.Payload["source_document_id"] = chunk.SourceDocumentId;
+        }
+
         if (!string.IsNullOrWhiteSpace(chunk.FilePath))
         {
             point.Payload["file_path"] = chunk.FilePath;
@@ -231,10 +247,13 @@ public class QdrantVectorStore : IVectorStore
             var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
             var index = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : 0;
             var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
+            var originalFileName = point.Payload.TryGetValue("original_file_name", out var origVal) ? origVal.StringValue : fileName;
+            var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
+            var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
             var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
             var uploadedAt = TryGetUploadedAt(point.Payload);
 
-            chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt));
+            chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
         }
 
         _logger?.LogInformation(
@@ -276,17 +295,26 @@ public class QdrantVectorStore : IVectorStore
 
                 var documentId = documentIdValue.StringValue;
                 var uploadedAt = TryGetUploadedAt(point.Payload) ?? DateTime.MinValue;
+                var resolvedName = point.Payload.TryGetValue("original_file_name", out var origNameVal) && !string.IsNullOrWhiteSpace(origNameVal.StringValue)
+                    ? origNameVal.StringValue
+                    : (point.Payload.TryGetValue("file_name", out var fileNameValue) && !string.IsNullOrWhiteSpace(fileNameValue.StringValue)
+                        ? fileNameValue.StringValue
+                        : documentId);
+                var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
+                var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
+
                 var document = new RagDocument(
                     Id: documentId,
-                    FileName: point.Payload.TryGetValue("file_name", out var fileNameValue) &&
-                              !string.IsNullOrWhiteSpace(fileNameValue.StringValue)
-                        ? fileNameValue.StringValue
-                        : documentId,
+                    FileName: resolvedName,
                     FilePath: point.Payload.TryGetValue("file_path", out var filePathValue)
                         ? filePathValue.StringValue
                         : string.Empty,
                     UploadedAt: uploadedAt,
-                    Status: DocumentStatus.Processed);
+                    Status: DocumentStatus.Processed,
+                    ErrorMessage: null,
+                    Language: null,
+                    ArticleId: articleId,
+                    SourceDocumentId: sourceDocId);
 
                 if (!documents.TryGetValue(documentId, out var existing) ||
                     document.UploadedAt > existing.UploadedAt ||
@@ -305,6 +333,68 @@ public class QdrantVectorStore : IVectorStore
             .OrderByDescending(document => document.UploadedAt)
             .ThenBy(document => document.FileName)
             .ToList();
+    }
+
+    public async Task<IEnumerable<DocumentChunk>> GetChunksByDocumentAndIndicesAsync(string documentId, IEnumerable<int> indices)
+    {
+        if (string.IsNullOrWhiteSpace(documentId) || indices == null)
+            return Array.Empty<DocumentChunk>();
+
+        var targetIndices = new HashSet<int>(indices.Where(i => i >= 0));
+        if (targetIndices.Count == 0)
+            return Array.Empty<DocumentChunk>();
+
+        var collections = await _client.ListCollectionsAsync();
+        if (!collections.Contains(_collectionName))
+        {
+            return Array.Empty<DocumentChunk>();
+        }
+
+        var filter = new Filter
+        {
+            Must =
+            {
+                new Condition
+                {
+                    Field = new FieldCondition
+                    {
+                        Key = "document_id",
+                        Match = new Match { Keyword = documentId }
+                    }
+                }
+            }
+        };
+
+        var response = await _client.ScrollAsync(
+            collectionName: _collectionName,
+            filter: filter,
+            limit: 256,
+            payloadSelector: true,
+            vectorsSelector: false);
+
+        var chunks = new List<DocumentChunk>();
+        foreach (var point in response.Result)
+        {
+            var idx = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : -1;
+            if (!targetIndices.Contains(idx))
+            {
+                continue;
+            }
+
+            var chunkId = point.Payload.TryGetValue("chunk_id", out var idVal) ? idVal.StringValue : point.Id.ToString();
+            var docId = point.Payload.TryGetValue("document_id", out var docVal) ? docVal.StringValue : documentId;
+            var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
+            var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
+            var originalFileName = point.Payload.TryGetValue("original_file_name", out var origVal) ? origVal.StringValue : fileName;
+            var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
+            var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
+            var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
+            var uploadedAt = TryGetUploadedAt(point.Payload);
+
+            chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
+        }
+
+        return chunks.OrderBy(c => c.Index).ToList();
     }
 
     private static DateTime? TryGetUploadedAt(IDictionary<string, Value> payload)

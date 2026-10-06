@@ -156,14 +156,21 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetService<ILogger<QdrantVectorStore>>()));
 
-// Set up overall DocumentProcessor
+// Set up Language Detector & overall DocumentProcessor
+builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>(sp =>
+    new DefaultLanguageDetector(
+        sp.GetService<ILlmClientResolver>(),
+        sp.GetService<ILogger<DefaultLanguageDetector>>()));
+
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
         sp.GetRequiredService<IChunkingService>(),
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetRequiredService<IVectorStore>(),
-        sp.GetRequiredService<IDocumentRepository>()
+        sp.GetRequiredService<IDocumentRepository>(),
+        sp.GetRequiredService<ILanguageDetector>(),
+        sp.GetService<ILogger<DocumentProcessor>>()
     ));
 
 // Set up RAG Orchestrator Layer & ebm-papst Domain Services
@@ -201,6 +208,8 @@ builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
         sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<OutputGovernor>>()));
 
+builder.Services.AddSingleton<IContextExpander, ContextExpander>();
+
 builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrator>(sp =>
     new TechnicalRagOrchestrator(
         sp.GetRequiredService<IInputGovernor>(),
@@ -213,6 +222,7 @@ builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrato
         sp.GetRequiredService<IConversationalQueryRefiner>(),
         sp.GetRequiredService<IConversationStateStore>(),
         sp.GetService<IDocumentRepository>(),
+        sp.GetRequiredService<IContextExpander>(),
         sp.GetService<ILogger<TechnicalRagOrchestrator>>()));
 
 // Add Health Checks
@@ -811,10 +821,11 @@ static async Task<IResult> GetDocumentStatusResultAsync(
         int StatusPriority(DocumentStatus status) => status switch
         {
             DocumentStatus.Processed => 1,
-            DocumentStatus.Processing => 2,
-            DocumentStatus.Pending => 3,
-            DocumentStatus.Failed => 4,
-            _ => 5
+            DocumentStatus.Skipped => 2,
+            DocumentStatus.Processing => 3,
+            DocumentStatus.Pending => 4,
+            DocumentStatus.Failed => 5,
+            _ => 6
         };
 
         var bestMatch = matches
@@ -830,7 +841,10 @@ static async Task<IResult> GetDocumentStatusResultAsync(
             FileName: bestMatch.FileName,
             FilePath: bestMatch.FilePath,
             UploadedAt: bestMatch.UploadedAt,
-            ErrorMessage: bestMatch.ErrorMessage
+            ErrorMessage: bestMatch.ErrorMessage,
+            Language: bestMatch.Language,
+            ArticleId: bestMatch.ArticleId,
+            SourceDocumentId: bestMatch.SourceDocumentId
         ));
     }
 
