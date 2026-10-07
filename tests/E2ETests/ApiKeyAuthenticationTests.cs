@@ -1,14 +1,19 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using DocumentRagSystem.Core.Interfaces;
+using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.WebApi.DTOs;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace DocumentRagSystem.E2ETests;
@@ -31,6 +36,15 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
                 {
                     ["Authentication:ApiKey"] = ValidTestApiKey
                 });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                var storeDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IVectorStore));
+                if (storeDescriptor != null) services.Remove(storeDescriptor);
+                var mockStore = new Mock<IVectorStore>();
+                mockStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>())).ReturnsAsync(Array.Empty<Document>());
+                services.AddSingleton<IVectorStore>(mockStore.Object);
             });
         });
     }

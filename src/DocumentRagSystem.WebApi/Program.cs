@@ -444,7 +444,16 @@ app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = Dat
 app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore vectorStore) =>
 {
     var repositoryDocs = await repository.GetAllDocumentsAsync();
-    var vectorDocs = await vectorStore.GetDocumentsAsync();
+    IEnumerable<Document> vectorDocs = Array.Empty<Document>();
+    try
+    {
+        vectorDocs = await vectorStore.GetDocumentsAsync();
+    }
+    catch
+    {
+        // Resilient fallback: return repository documents if vector store is unreachable
+    }
+
     var docs = repositoryDocs
         .Concat(vectorDocs)
         .GroupBy(doc => doc.Id)
