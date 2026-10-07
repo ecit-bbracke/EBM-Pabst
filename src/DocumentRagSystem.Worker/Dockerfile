@@ -25,6 +25,7 @@ RUN dotnet publish -c Release -r linux-x64 --self-contained true -o /app/publish
 
 # Stage 2: Runtime Image
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runtime
+USER root
 WORKDIR /app
 COPY --from=build /app/publish .
 COPY --from=build /app/data ./data
