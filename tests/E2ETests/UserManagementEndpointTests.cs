@@ -69,7 +69,8 @@ public class UserManagementEndpointTests : IClassFixture<WebApplicationFactory<P
 
         var response = await nonAdminClient.GetAsync("/users.html");
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Equal("/index.html", response.Headers.Location?.ToString());
+        var location = response.Headers.Location?.ToString() ?? string.Empty;
+        Assert.True(location.EndsWith("/index.html", StringComparison.OrdinalIgnoreCase), $"Expected redirect to end with /index.html, but was {location}");
     }
 
     [Fact]

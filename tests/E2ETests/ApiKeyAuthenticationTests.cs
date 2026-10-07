@@ -22,6 +22,8 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_apikey_{Guid.NewGuid():N}.db");
+
             builder.ConfigureAppConfiguration((context, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
