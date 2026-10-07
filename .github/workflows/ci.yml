@@ -59,6 +59,7 @@ jobs:
           -c Release
           --no-build
           --logger "trx;LogFileName=e2e-tests.trx"
+          --logger "console;verbosity=detailed"
           --collect:"XPlat Code Coverage"
           --results-directory ./TestResults/E2ETests
 

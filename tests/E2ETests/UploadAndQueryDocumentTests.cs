@@ -154,6 +154,8 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     [Fact]
     public async Task UploadPdf_ThenQuery_ReturnsRelevantResponse()
     {
+        if (!_dockerAvailable) return;
+
         // Arrange
         var testDataPath = GetTestDataPath("sample.pdf");
         
@@ -230,6 +232,8 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     [Fact]
     public async Task Query_WhenReferencedDocumentHasDanishCompanion_IncludesDanishFileReferenceInCitations()
     {
+        if (!_dockerAvailable) return;
+
         // Arrange
         var enDataPath = GetTestDataPath("sample.pdf");
         var daDataPath = GetTestDataPath("sample_da.pdf");
