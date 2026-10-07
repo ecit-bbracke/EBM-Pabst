@@ -30,10 +30,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\TestData\sample.pdf" Link="TestData\sample.pdf">
+    <None Include="../TestData/sample.pdf" Link="TestData/sample.pdf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\TestData\sample_da.pdf" Link="TestData\sample_da.pdf">
+    <None Include="../TestData/sample_da.pdf" Link="TestData/sample_da.pdf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

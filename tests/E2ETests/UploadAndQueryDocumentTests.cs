@@ -57,6 +57,8 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         // 2. Build the HttpClient, and conditionally override configuration or mock services
         _client = _factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_upload_{Guid.NewGuid():N}.db");
+
             if (_dockerAvailable)
             {
                 var grpcPort = _qdrant.GetMappedPublicPort(6334);
@@ -135,11 +137,25 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         }
     }
 
+    private static string GetTestDataPath(string filename)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "TestData", filename);
+        if (File.Exists(path)) return path;
+
+        var flatPath = Path.Combine(AppContext.BaseDirectory, $"TestData\\{filename}");
+        if (File.Exists(flatPath)) return flatPath;
+
+        var repoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "tests", "TestData", filename));
+        if (File.Exists(repoPath)) return repoPath;
+
+        return path;
+    }
+
     [Fact]
     public async Task UploadPdf_ThenQuery_ReturnsRelevantResponse()
     {
         // Arrange
-        var testDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
+        var testDataPath = GetTestDataPath("sample.pdf");
         
         // Assert that the test data actually exists in output directory
         Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
@@ -171,7 +187,7 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     public async Task UploadPdf_WhenNonEnglish_SavesFile_AndSkipsEmbedding()
     {
         // Arrange
-        var testDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
+        var testDataPath = GetTestDataPath("sample.pdf");
         Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
 
         var pdfContent = await File.ReadAllBytesAsync(testDataPath);
@@ -215,8 +231,8 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     public async Task Query_WhenReferencedDocumentHasDanishCompanion_IncludesDanishFileReferenceInCitations()
     {
         // Arrange
-        var enDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
-        var daDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample_da.pdf");
+        var enDataPath = GetTestDataPath("sample.pdf");
+        var daDataPath = GetTestDataPath("sample_da.pdf");
 
         var enPdfContent = await File.ReadAllBytesAsync(enDataPath);
         var daPdfContent = await File.ReadAllBytesAsync(daDataPath);

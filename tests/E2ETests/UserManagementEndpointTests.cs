@@ -15,7 +15,10 @@ public class UserManagementEndpointTests : IClassFixture<WebApplicationFactory<P
 
     public UserManagementEndpointTests(WebApplicationFactory<Program> factory)
     {
-        _factory = factory;
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_user_{Guid.NewGuid():N}.db");
+        });
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync()

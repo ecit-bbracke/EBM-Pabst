@@ -32,6 +32,8 @@ public class DocumentStatusEndpointTests : IClassFixture<WebApplicationFactory<P
     {
         var client = _factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_status_{Guid.NewGuid():N}.db");
+
             builder.ConfigureServices(services =>
             {
                 // Replace IDocumentRepository with test instance
