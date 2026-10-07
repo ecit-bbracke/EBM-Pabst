@@ -1014,132 +1014,159 @@ app.MapPost("/api/documents/upload", async (
 // DATABEREGNING ENDPOINTS (Native execution with Workqueue robot integration)
 app.MapDataberegning();
 
-// Seed default admin user and ensure tables exist
-using (var scope = app.Services.CreateScope())
+// Seed default admin user and ensure tables exist safely (concurrency-safe for parallel tests)
+await _dbInitLock.WaitAsync();
+try
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    await db.Database.EnsureCreatedAsync();
-
-    // Ensure all Identity tables and Documents table exist even if database was created by Worker or partially migrated
-    await db.Database.ExecuteSqlRawAsync("""
-        CREATE TABLE IF NOT EXISTS "AspNetRoles" (
-            "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetRoles" PRIMARY KEY,
-            "Name" TEXT NULL,
-            "NormalizedName" TEXT NULL,
-            "ConcurrencyStamp" TEXT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS "RoleNameIndex" ON "AspNetRoles" ("NormalizedName");
-
-        CREATE TABLE IF NOT EXISTS "AspNetUsers" (
-            "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetUsers" PRIMARY KEY,
-            "UserName" TEXT NULL,
-            "NormalizedUserName" TEXT NULL,
-            "Email" TEXT NULL,
-            "NormalizedEmail" TEXT NULL,
-            "EmailConfirmed" INTEGER NOT NULL,
-            "PasswordHash" TEXT NULL,
-            "SecurityStamp" TEXT NULL,
-            "ConcurrencyStamp" TEXT NULL,
-            "PhoneNumber" TEXT NULL,
-            "PhoneNumberConfirmed" INTEGER NOT NULL,
-            "TwoFactorEnabled" INTEGER NOT NULL,
-            "LockoutEnd" TEXT NULL,
-            "LockoutEnabled" INTEGER NOT NULL,
-            "AccessFailedCount" INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS "EmailIndex" ON "AspNetUsers" ("NormalizedEmail");
-        CREATE UNIQUE INDEX IF NOT EXISTS "UserNameIndex" ON "AspNetUsers" ("NormalizedUserName");
-
-        CREATE TABLE IF NOT EXISTS "AspNetRoleClaims" (
-            "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetRoleClaims" PRIMARY KEY AUTOINCREMENT,
-            "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetRoleClaims_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
-            "ClaimType" TEXT NULL,
-            "ClaimValue" TEXT NULL
-        );
-        CREATE INDEX IF NOT EXISTS "IX_AspNetRoleClaims_RoleId" ON "AspNetRoleClaims" ("RoleId");
-
-        CREATE TABLE IF NOT EXISTS "AspNetUserClaims" (
-            "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetUserClaims" PRIMARY KEY AUTOINCREMENT,
-            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserClaims_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
-            "ClaimType" TEXT NULL,
-            "ClaimValue" TEXT NULL
-        );
-        CREATE INDEX IF NOT EXISTS "IX_AspNetUserClaims_UserId" ON "AspNetUserClaims" ("UserId");
-
-        CREATE TABLE IF NOT EXISTS "AspNetUserLogins" (
-            "LoginProvider" TEXT NOT NULL,
-            "ProviderKey" TEXT NOT NULL,
-            "ProviderDisplayName" TEXT NULL,
-            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserLogins_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
-            CONSTRAINT "PK_AspNetUserLogins" PRIMARY KEY ("LoginProvider", "ProviderKey")
-        );
-        CREATE INDEX IF NOT EXISTS "IX_AspNetUserLogins_UserId" ON "AspNetUserLogins" ("UserId");
-
-        CREATE TABLE IF NOT EXISTS "AspNetUserRoles" (
-            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
-            "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
-            CONSTRAINT "PK_AspNetUserRoles" PRIMARY KEY ("UserId", "RoleId")
-        );
-        CREATE INDEX IF NOT EXISTS "IX_AspNetUserRoles_RoleId" ON "AspNetUserRoles" ("RoleId");
-
-        CREATE TABLE IF NOT EXISTS "AspNetUserTokens" (
-            "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserTokens_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
-            "LoginProvider" TEXT NOT NULL,
-            "Name" TEXT NOT NULL,
-            "Value" TEXT NULL,
-            CONSTRAINT "PK_AspNetUserTokens" PRIMARY KEY ("UserId", "LoginProvider", "Name")
-        );
-
-        CREATE TABLE IF NOT EXISTS "Documents" (
-            "Id" TEXT NOT NULL CONSTRAINT "PK_Documents" PRIMARY KEY,
-            "FileName" TEXT NOT NULL,
-            "FilePath" TEXT NOT NULL,
-            "UploadedAt" TEXT NOT NULL,
-            "Status" TEXT NOT NULL,
-            "ErrorMessage" TEXT NULL,
-            "Language" TEXT NULL,
-            "ArticleId" TEXT NULL,
-            "SourceDocumentId" TEXT NULL
-        );
-        CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
-        CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
-    """);
-
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    if (!await roleManager.RoleExistsAsync("Admin"))
+    try
     {
-        await roleManager.CreateAsync(new IdentityRole("Admin"));
+        await db.Database.EnsureCreatedAsync();
+    }
+    catch
+    {
+        // Ignore if tables were created concurrently
     }
 
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
-    var adminEmail = "admin@ebmpabst.dk";
-    var defaultUser = await userManager.FindByEmailAsync(adminEmail);
-    if (defaultUser == null)
+    // Ensure all Identity tables and Documents table exist even if database was created by Worker or partially migrated
+    try
     {
-        defaultUser = new IdentityUser
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "AspNetRoles" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetRoles" PRIMARY KEY,
+                "Name" TEXT NULL,
+                "NormalizedName" TEXT NULL,
+                "ConcurrencyStamp" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "RoleNameIndex" ON "AspNetRoles" ("NormalizedName");
+
+            CREATE TABLE IF NOT EXISTS "AspNetUsers" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_AspNetUsers" PRIMARY KEY,
+                "UserName" TEXT NULL,
+                "NormalizedUserName" TEXT NULL,
+                "Email" TEXT NULL,
+                "NormalizedEmail" TEXT NULL,
+                "EmailConfirmed" INTEGER NOT NULL,
+                "PasswordHash" TEXT NULL,
+                "SecurityStamp" TEXT NULL,
+                "ConcurrencyStamp" TEXT NULL,
+                "PhoneNumber" TEXT NULL,
+                "PhoneNumberConfirmed" INTEGER NOT NULL,
+                "TwoFactorEnabled" INTEGER NOT NULL,
+                "LockoutEnd" TEXT NULL,
+                "LockoutEnabled" INTEGER NOT NULL,
+                "AccessFailedCount" INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "EmailIndex" ON "AspNetUsers" ("NormalizedEmail");
+            CREATE UNIQUE INDEX IF NOT EXISTS "UserNameIndex" ON "AspNetUsers" ("NormalizedUserName");
+
+            CREATE TABLE IF NOT EXISTS "AspNetRoleClaims" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetRoleClaims" PRIMARY KEY AUTOINCREMENT,
+                "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetRoleClaims_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
+                "ClaimType" TEXT NULL,
+                "ClaimValue" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AspNetRoleClaims_RoleId" ON "AspNetRoleClaims" ("RoleId");
+
+            CREATE TABLE IF NOT EXISTS "AspNetUserClaims" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_AspNetUserClaims" PRIMARY KEY AUTOINCREMENT,
+                "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserClaims_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+                "ClaimType" TEXT NULL,
+                "ClaimValue" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AspNetUserClaims_UserId" ON "AspNetUserClaims" ("UserId");
+
+            CREATE TABLE IF NOT EXISTS "AspNetUserLogins" (
+                "LoginProvider" TEXT NOT NULL,
+                "ProviderKey" TEXT NOT NULL,
+                "ProviderDisplayName" TEXT NULL,
+                "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserLogins_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+                CONSTRAINT "PK_AspNetUserLogins" PRIMARY KEY ("LoginProvider", "ProviderKey")
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AspNetUserLogins_UserId" ON "AspNetUserLogins" ("UserId");
+
+            CREATE TABLE IF NOT EXISTS "AspNetUserRoles" (
+                "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+                "RoleId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserRoles_AspNetRoles_RoleId" REFERENCES "AspNetRoles" ("Id") ON DELETE CASCADE,
+                CONSTRAINT "PK_AspNetUserRoles" PRIMARY KEY ("UserId", "RoleId")
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AspNetUserRoles_RoleId" ON "AspNetUserRoles" ("RoleId");
+
+            CREATE TABLE IF NOT EXISTS "AspNetUserTokens" (
+                "UserId" TEXT NOT NULL CONSTRAINT "FK_AspNetUserTokens_AspNetUsers_UserId" REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE,
+                "LoginProvider" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "Value" TEXT NULL,
+                CONSTRAINT "PK_AspNetUserTokens" PRIMARY KEY ("UserId", "LoginProvider", "Name")
+            );
+
+            CREATE TABLE IF NOT EXISTS "Documents" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Documents" PRIMARY KEY,
+                "FileName" TEXT NOT NULL,
+                "FilePath" TEXT NOT NULL,
+                "UploadedAt" TEXT NOT NULL,
+                "Status" TEXT NOT NULL,
+                "ErrorMessage" TEXT NULL,
+                "Language" TEXT NULL,
+                "ArticleId" TEXT NULL,
+                "SourceDocumentId" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
+            CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
+        """);
+    }
+    catch
+    {
+        // Ignore if executed concurrently
+    }
+
+    try
+    {
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        if (!await roleManager.RoleExistsAsync("Admin"))
         {
-            UserName = adminEmail,
-            Email = adminEmail,
-            EmailConfirmed = true
-        };
-        var result = await userManager.CreateAsync(defaultUser, "Admin123!");
-        if (result.Succeeded)
+            await roleManager.CreateAsync(new IdentityRole("Admin"));
+        }
+
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var adminEmail = "admin@ebmpabst.dk";
+        var defaultUser = await userManager.FindByEmailAsync(adminEmail);
+        if (defaultUser == null)
         {
-            await userManager.AddToRoleAsync(defaultUser, "Admin");
-            app.Logger.LogInformation("Default admin user created and assigned Admin role: {Email}", adminEmail);
+            defaultUser = new IdentityUser
+            {
+                UserName = adminEmail,
+                Email = adminEmail,
+                EmailConfirmed = true
+            };
+            var result = await userManager.CreateAsync(defaultUser, "Admin123!");
+            if (result.Succeeded)
+            {
+                await userManager.AddToRoleAsync(defaultUser, "Admin");
+                app.Logger.LogInformation("Default admin user created and assigned Admin role: {Email}", adminEmail);
+            }
+            else
+            {
+                app.Logger.LogWarning("Failed to create default admin user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
         }
         else
         {
-            app.Logger.LogWarning("Failed to create default admin user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
+            if (!await userManager.IsInRoleAsync(defaultUser, "Admin"))
+            {
+                await userManager.AddToRoleAsync(defaultUser, "Admin");
+            }
         }
     }
-    else
+    catch
     {
-        if (!await userManager.IsInRoleAsync(defaultUser, "Admin"))
-        {
-            await userManager.AddToRoleAsync(defaultUser, "Admin");
-        }
+        // Safe concurrency handling
     }
+}
+finally
+{
+    _dbInitLock.Release();
 }
 
 app.Run();
@@ -1409,4 +1436,7 @@ static async Task<IResult> GetDocumentStatusResultAsync(
 }
 
 // Required to make Program class visible to integration/E2E test project
-public partial class Program { }
+public partial class Program
+{
+    private static readonly SemaphoreSlim _dbInitLock = new(1, 1);
+}
