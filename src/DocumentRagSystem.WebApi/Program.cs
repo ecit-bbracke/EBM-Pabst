@@ -119,14 +119,21 @@ builder.Services.AddAuthentication(options =>
     };
 })
 .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
-    ApiKeyAuthenticationOptions.DefaultScheme, options => { });
+    ApiKeyAuthenticationOptions.DefaultScheme, options =>
+    {
+        options.ApiKey = builder.Configuration["Authentication:ApiKey"] 
+                         ?? Environment.GetEnvironmentVariable("API_KEY") 
+                         ?? string.Empty;
+    });
 
 builder.Services.AddOptions<ApiKeyAuthenticationOptions>(ApiKeyAuthenticationOptions.DefaultScheme)
     .Configure<IConfiguration>((options, config) =>
     {
-        options.ApiKey = config["Authentication:ApiKey"] 
-                         ?? Environment.GetEnvironmentVariable("API_KEY") 
-                         ?? string.Empty;
+        var key = config["Authentication:ApiKey"] ?? Environment.GetEnvironmentVariable("API_KEY");
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            options.ApiKey = key;
+        }
     });
 
 builder.Services.AddAuthorization();
