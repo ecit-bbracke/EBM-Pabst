@@ -1,4 +1,4 @@
-﻿namespace DocumentRagSystem.WebApi.Endpoints;
+namespace DocumentRagSystem.WebApi.Endpoints;
 
 using System;
 using System.Collections.Generic;
@@ -64,6 +64,7 @@ public static class DataberegningEndpoints
                 .dele .enhed { right: 4px; padding: 1px 4px; }
                 input { padding: 8px 10px; background: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; }
                 input:focus { outline: none; border-color: #3b82f6; }
+                input:read-only { background: #f1f5f9; }
                 .knapper { display: flex; gap: 8px; }
                 button { padding: 10px 18px; border-radius: 8px; border: 1px solid #1e40af; background: #ffffff; color: #0f172a; cursor: pointer; }
                 button:hover { border-color: #3b82f6; }
@@ -106,7 +107,7 @@ public static class DataberegningEndpoints
                 <div id="ventilatorer"></div>
                 <div class="knapper ny-knapper">
                   <button type="button" onclick="tilfoejVentilator()">Tilføj ventilator</button>
-                    <button type="button" class="ryd" onclick="nyBeregning()">Ryd felter</button>
+                  <button type="button" class="ryd" onclick="nyBeregning()">Ryd felter</button>
                   <button class="gem">Gem</button>
                 </div>
                 <div class="knapper vis-knapper">
@@ -117,6 +118,7 @@ public static class DataberegningEndpoints
 
             <script>
               const felter = [
+                ["ventilatorIdInd", "Ventilator-ID", ""],
                 ["luftmaengdeMaaltInd", "Luftmængde målt", "m³/h"],
                 ["luftmaengdeMaxInd", "Evt. Luftmængde max", "m³/h"],
                 ["statiskTrykInd", "Statisk tryk over ventilator", "Pa"],
@@ -126,8 +128,9 @@ public static class DataberegningEndpoints
                 ["statiskVirkningsgradInd", "Statisk virknings-grad", "%"],
                 [["stroemInd", "Strøm", "A"], ["spaendingInd", "Spænding", "V"], ["cosInd", "COS", "d"]],
                 ["optagetEffektInd", "Optaget effekt", "kW"],
-                ["forbrugAarligtInd", "Forbrug årligt", "timer"],
+                ["forbrugAarligtInd", "Forbrug årligt", "kWh"],
 
+                ["ventilatorIdUd", "Ventilator-ID", ""],
                 ["luftmaengdeMaaltUd", "Luftmængde målt", "m³/h"],
                 ["luftmaengdeMaxUd", "Evt. Luftmængde max", "m³/h"],
                 ["statiskTrykUd", "Statisk tryk over ventilator", "Pa"],
@@ -137,42 +140,48 @@ public static class DataberegningEndpoints
                 ["statiskVirkningsgradUd", "Statisk virknings-grad", "%"],
                 [["stroemUd", "Strøm", "A"], ["spaendingUd", "Spænding", "V"], ["cosUd", "COS", "d"]],
                 ["optagetEffektUd", "Optaget effekt", "kW"],
-                ["forbrugAarligtUd", "Forbrug årligt", "timer"]
+                ["forbrugAarligtUd", "Forbrug årligt", "kWh"]
               ];
 
-              const valgfri = /^(luftmaengdeMax|stroem|spaending|cos)/;
+              const valgfri = /^(luftmaengdeMax|stroem|spaending|cos|statiskTryk|totalTryk)/;
+              const beregnet = /^(statiskVirkningsgrad|forbrugAarligt|ventilatorId)/;
 
               let beregninger = [];
               const form = document.getElementById("form");
               form.addEventListener("invalid", e => e.target.closest("details")?.setAttribute("open", ""), true);
               const stamInputs = () => document.querySelectorAll("#stamdata input");
 
-              const felt = (name, label, enhed) => `<label class="felt">${enhed ? `<span class="enhed">${enhed}</span>` : ""}<input name="${name}" placeholder="${label}" title="${label}" ${valgfri.test(name) ? "" : "required"}></label>`;
+              const felt = (name, label, enhed) => skjult.test(name) ? `<input type="hidden" name="${name}">` : `<label class="felt">${enhed ? `<span class="enhed">${enhed}</span>` : ""}<input name="${name}" placeholder="${label}" title="${label}" ${valgfri.test(name) ? "" : "required"} ${beregnet.test(name) ? "readonly" : ""}></label>`;
 
               const inputs = f => f.map(e => Array.isArray(e[0])
                 ? `<div class="dele">${e.map(([n, l, en]) => felt(n, l, en)).join("")}</div>`
                 : felt(...e)).join("");
 
+              function nummerer() {
+                document.querySelectorAll(".ventilator").forEach((v, i) => {
+                  const nr = String(i + 1).padStart(2, "0");
+                  v.id = `ventilator${i + 1}`;
+                  v.querySelector(".titel").textContent = `Ventilator ${i + 1}`;
+                  v.querySelector("[name=ventilatorIdInd]").value = `VE${nr} ind`;
+                  v.querySelector("[name=ventilatorIdUd]").value = `VE${nr} ud`;
+                });
+              }
+
               function tilfoejVentilator() {
-                const ventilatorer = document.getElementById("ventilatorer");
-                const nr = ventilatorer.children.length + 1;
                 const ventilator = document.createElement("details");
                 ventilator.open = true;
                 ventilator.className = "ventilator";
-                ventilator.id = `ventilator${nr}`;
-                ventilator.innerHTML = `<summary><span class="titel">Ventilator ${nr}</span><button type="button" class="slet" onclick="sletVentilator(this)">Slet</button></summary>
-                  <div class="felter"><h3>Ind</h3>${inputs(felter.slice(0, 10))}<h3>Ud</h3>${inputs(felter.slice(10))}</div>`;
-                ventilatorer.append(ventilator);
+                ventilator.innerHTML = `<summary><span class="titel"></span><button type="button" class="slet" onclick="sletVentilator(this)">Slet</button></summary>
+                  <div class="felter"><h3>Ind</h3>${inputs(felter.slice(0, 11))}<h3>Ud</h3>${inputs(felter.slice(11))}</div>`;
+                document.getElementById("ventilatorer").append(ventilator);
+                nummerer();
                 return ventilator;
               }
 
               function sletVentilator(knap) {
                 if (document.querySelectorAll(".ventilator").length === 1) return;
                 knap.closest(".ventilator").remove();
-                document.querySelectorAll(".ventilator").forEach((v, i) => {
-                  v.id = `ventilator${i + 1}`;
-                  v.querySelector(".titel").textContent = `Ventilator ${i + 1}`;
-                });
+                nummerer();
                 gemKladde();
               }
 
@@ -192,12 +201,40 @@ public static class DataberegningEndpoints
 
               const hentData = () => ({
                 ...Object.fromEntries([...stamInputs()].map(i => [i.name, i.value])),
-                ventilatorer: [...document.querySelectorAll(".ventilator")].map(k =>
-                  Object.fromEntries([...k.querySelectorAll("input")].map(i => [i.name, i.value])))
+                ventilatorer: [...document.querySelectorAll(".ventilator")].flatMap(k => ["Ind", "Ud"].map(s =>
+                  Object.fromEntries([...k.querySelectorAll(`input[name$=${s}]`)].map(i => [i.name.slice(0, -s.length), i.value]))))
               });
 
               const gemKladde = () => { if (!form.classList.contains("laast")) localStorage.setItem("kladde", JSON.stringify(hentData())); };
               const hentKladde = () => JSON.parse(localStorage.getItem("kladde"));
+              const skjult = /^ventilatorId/;
+
+              const tal = v => parseFloat(v.replace(/\./g, "").replace(",", "."));
+
+              const virkningsgrad = felt => {
+                const statisk = felt("statiskTryk"), total = felt("totalTryk");
+                total.readOnly = statisk.value !== "";
+                statisk.readOnly = total.value !== "";
+                const q = tal(felt("luftmaengdeMaalt").value), p = tal(statisk.value || total.value), e = tal(felt("optagetEffekt").value);
+                felt("statiskVirkningsgrad").value = q && p && e ? ((q / 3600 * p) / (e * 1000) * 100).toFixed(1).replace(".", ",") : "";
+              };
+
+              const forbrug = felt => {
+                const e = tal(felt("optagetEffekt").value), t = tal(felt("aarligDriftstid").value);
+                felt("forbrugAarligt").value = e && t ? String(Math.round(e * t)) : "";
+              };
+
+              const beregn = ventilator => ["Ind", "Ud"].forEach(s => {
+                const felt = n => ventilator.querySelector(`[name=${n}${s}]`);
+                virkningsgrad(felt);
+                forbrug(felt);
+              });
+
+              form.addEventListener("input", e => {
+                const v = e.target.closest(".ventilator");
+                if (v) beregn(v);
+              });
+
               form.addEventListener("input", gemKladde);
 
               function udfyld(data, laast) {
@@ -207,11 +244,14 @@ public static class DataberegningEndpoints
                   input.readOnly = laast;
                 });
                 document.getElementById("ventilatorer").innerHTML = "";
-                (data?.ventilatorer ?? [{}]).forEach(v =>
+                const v = data?.ventilatorer ?? [{}, {}];
+                for (let i = 0; i < v.length; i += 2)
                   tilfoejVentilator().querySelectorAll("input").forEach(input => {
-                    input.value = v[input.name] ?? "";
-                    input.readOnly = laast;
-                  }));
+                    const [, n, s] = input.name.match(/(.*)(Ind|Ud)$/);
+                    input.value = v[s === "Ind" ? i : i + 1]?.[n] ?? input.value;
+                    input.readOnly = laast || beregnet.test(input.name);
+                  });
+                if (!laast) document.querySelectorAll(".ventilator").forEach(beregn);
               }
 
               function aabnBeregning(i) {
@@ -243,6 +283,7 @@ public static class DataberegningEndpoints
                 });
                 localStorage.removeItem("kladde");
                 hentHistorik();
+                nyBeregning();
               };
             </script>
             </body>
@@ -329,7 +370,7 @@ public static class DataberegningEndpoints
 
             try
             {
-                var svar = await client.PostAsJsonAsync("https://backend.ecit-automate.com/crm/rest/v2/workqueue", item);
+                var svar = await client.PostAsJsonAsync("https://backend.ecit-automate.com/crm/rest/v2/workqueue", item, new JsonSerializerOptions());
                 var content = await svar.Content.ReadAsStringAsync();
                 return Results.Content(content, "application/json", statusCode: (int)svar.StatusCode);
             }
@@ -343,37 +384,23 @@ public static class DataberegningEndpoints
     }
 }
 
-record WorkqueueItem(int DataID, string TITEL, string ROBOT, string CreatedAt, string INPUT);
+public record WorkqueueItem(int DataID, string TITEL, string ROBOT, string CreatedAt, string INPUT);
 
-record Databeregning(string Installeringssted, string Kunde, string KundesAdresse, string Kontakt, List<DataberegningInput> Ventilatorer);
+public record Databeregning(string Installeringssted, string Kunde, string KundesAdresse, string Kontakt, List<DataberegningInput> Ventilatorer);
 
-record DataberegningInput(
-    string LuftmaengdeMaaltInd,
-    string LuftmaengdeMaxInd,
-    string StatiskTrykInd,
-    string TotalTrykInd,
-    string KammermaalHInd,
-    string KammermaalDInd,
-    string KammermaalLInd,
-    string AarligDriftstidInd,
-    string StatiskVirkningsgradInd,
-    string StroemInd,
-    string SpaendingInd,
-    string CosInd,
-    string OptagetEffektInd,
-    string ForbrugAarligtInd,
-
-    string LuftmaengdeMaaltUd,
-    string LuftmaengdeMaxUd,
-    string StatiskTrykUd,
-    string TotalTrykUd,
-    string KammermaalHUd,
-    string KammermaalDUd,
-    string KammermaalLUd,
-    string AarligDriftstidUd,
-    string StatiskVirkningsgradUd,
-    string StroemUd,
-    string SpaendingUd,
-    string CosUd,
-    string OptagetEffektUd,
-    string ForbrugAarligtUd);
+public record DataberegningInput(
+    string VentilatorId,
+    string LuftmaengdeMaalt,
+    string LuftmaengdeMax,
+    string StatiskTryk,
+    string TotalTryk,
+    string KammermaalH,
+    string KammermaalD,
+    string KammermaalL,
+    string AarligDriftstid,
+    string StatiskVirkningsgrad,
+    string Stroem,
+    string Spaending,
+    string Cos,
+    string OptagetEffekt,
+    string ForbrugAarligt);
