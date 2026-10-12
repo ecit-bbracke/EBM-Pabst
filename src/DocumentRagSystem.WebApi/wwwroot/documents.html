@@ -315,9 +315,14 @@
                                         <i class="fa-solid fa-file-pdf text-red-500 text-lg mt-0.5 shrink-0"></i>
                                         ${documentLink}
                                     </div>
-                                    <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold shrink-0 ${statusColor}">
-                                        ${statusText}
-                                    </span>
+                                    <div class="flex items-center space-x-2 shrink-0">
+                                        <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold ${statusColor}">
+                                            ${statusText}
+                                        </span>
+                                        <button onclick="deleteDocument('${escapeHtml(doc.id)}', '${fileName}')" title="Slet dokument og chunks" class="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150">
+                                            <i class="fa-solid fa-trash-can text-sm"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-400">
                                     <span>ID: ${doc.id}</span>
@@ -337,6 +342,29 @@
                 if (refreshIcon) {
                     setTimeout(() => refreshIcon.classList.remove('animate-spin'), 600);
                 }
+            }
+        }
+
+        async function deleteDocument(id, fileName) {
+            if (!confirm(`Er du sikker på, at du vil slette '${fileName}'?\n\nDette fjerner både filen fra disken, metadata i databasen og alle tilhørende chunks i vektordatabasen.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(err || 'Kunne ikke slette dokumentet');
+                }
+
+                // Genindlæs dokumentlisten
+                fetchDocuments();
+            } catch (error) {
+                console.error('Fejl ved sletning:', error);
+                alert(`Fejl ved sletning af dokument: ${error.message}`);
             }
         }
 

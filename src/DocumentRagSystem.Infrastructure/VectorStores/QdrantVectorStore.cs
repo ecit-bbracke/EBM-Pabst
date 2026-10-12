@@ -397,6 +397,42 @@ public class QdrantVectorStore : IVectorStore
         return chunks.OrderBy(c => c.Index).ToList();
     }
 
+    public async Task DeleteDocumentChunksAsync(string documentId)
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+            return;
+
+        try
+        {
+            var collections = await _client.ListCollectionsAsync();
+            if (!collections.Contains(_collectionName))
+                return;
+
+            var filter = new Filter
+            {
+                Must =
+                {
+                    new Condition
+                    {
+                        Field = new FieldCondition
+                        {
+                            Key = "document_id",
+                            Match = new Match { Keyword = documentId }
+                        }
+                    }
+                }
+            };
+
+            await _client.DeleteAsync(collectionName: _collectionName, filter: filter);
+            _logger?.LogInformation("[QdrantVectorStore] Deleted chunks for document ID: {DocumentId}", documentId);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "[QdrantVectorStore] Failed to delete chunks for document ID: {DocumentId}", documentId);
+            throw;
+        }
+    }
+
     private static DateTime? TryGetUploadedAt(IDictionary<string, Value> payload)
     {
         if (!payload.TryGetValue("uploaded_at", out var uploadedAtValue) ||

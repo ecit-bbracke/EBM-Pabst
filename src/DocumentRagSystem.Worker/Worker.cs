@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -16,21 +17,28 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly IDocumentProcessor _documentProcessor;
     private readonly IVectorStore _vectorStore;
+    private readonly IConfiguration _configuration;
 
-    public Worker(ILogger<Worker> logger, IDocumentProcessor documentProcessor, IVectorStore vectorStore)
+    public Worker(
+        ILogger<Worker> logger,
+        IDocumentProcessor documentProcessor,
+        IVectorStore vectorStore,
+        IConfiguration configuration)
     {
         _logger = logger;
         _documentProcessor = documentProcessor;
         _vectorStore = vectorStore;
+        _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Worker started. Checking for PDFs in data/Generelt...");
-        bool processDataDirectory = true;
+        bool seedData = _configuration.GetValue<bool>("Worker:SeedData", false)
+            || string.Equals(_configuration["SEED_DATA"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (processDataDirectory)
+        if (seedData)
         {
+            _logger.LogInformation("Worker started. SEED_DATA is enabled. Checking for PDFs in data/Generelt...");
             try
             {
                 var dataDir = ResolveDataDirectory();
@@ -112,16 +120,22 @@ public class Worker : BackgroundService
                 _logger.LogError(ex, "An error occurred during startup PDF processing.");
             }
 
-            _logger.LogInformation("Startup PDF processing completed. Entering idle loop.");
+            _logger.LogInformation("Startup PDF processing completed.");
+        }
+        else
+        {
+            _logger.LogInformation("Worker started. Automatic PDF seeding is disabled (SEED_DATA is false).");
+        }
 
-            while (!stoppingToken.IsCancellationRequested)
+        _logger.LogInformation("Worker entering idle loop.");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            if (_logger.IsEnabled(LogLevel.Information))
             {
-                if (_logger.IsEnabled(LogLevel.Information))
-                {
-                    _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-                }
-                await Task.Delay(30000, stoppingToken);
+                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
             }
+            await Task.Delay(30000, stoppingToken);
         }
     }
 

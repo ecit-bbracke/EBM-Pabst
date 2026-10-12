@@ -470,6 +470,71 @@ app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore
 .RequireAuthorization()
 .WithName("GetAllDocuments");
 
+// DELETE DOCUMENT ENDPOINT
+app.MapDelete("/api/documents/{id}", async (
+    string id,
+    IDocumentRepository repository,
+    IVectorStore vectorStore,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrWhiteSpace(id))
+    {
+        return Results.BadRequest(new { error = "Dokument-ID skal angives." });
+    }
+
+    var doc = await repository.GetDocumentByIdAsync(id);
+    if (doc == null)
+    {
+        try
+        {
+            var vectorDocs = await vectorStore.GetDocumentsAsync();
+            doc = vectorDocs.FirstOrDefault(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            // Vector store fallback
+        }
+    }
+
+    if (doc == null)
+    {
+        return Results.NotFound(new { message = "Dokumentet blev ikke fundet." });
+    }
+
+    // 1. Delete physical file from disk
+    DeletePhysicalDocumentFile(doc.FilePath, doc.FileName, servedUploadDirectories);
+
+    // 2. Delete chunks from vector database
+    try
+    {
+        await vectorStore.DeleteDocumentChunksAsync(id);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Fejl under sletning af chunks i vektordatabasen for dokument ID: {DocumentId}", id);
+    }
+
+    // 3. Delete document record from SQLite repository
+    try
+    {
+        await repository.DeleteDocumentAsync(id);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Fejl under sletning af dokument fra repository for dokument ID: {DocumentId}", id);
+    }
+
+    logger.LogInformation("Dokument slettet succesfuldt: {FileName} (ID: {DocumentId})", doc.FileName, id);
+    return Results.NoContent();
+})
+.RequireAuthorization()
+.WithName("DeleteDocument")
+.WithSummary("Slet dokument")
+.WithDescription("Sletter den fysiske fil fra disken, fjerner metadata fra databasen samt alle tilhørende chunks i vektordatabasen.")
+.Produces(StatusCodes.Status204NoContent)
+.Produces(StatusCodes.Status404NotFound)
+.Produces(StatusCodes.Status400BadRequest);
+
 // DOCUMENT STATUS ENDPOINTS
 app.MapGet("/api/documents/status", async (
     [FromQuery] string? fileName,
@@ -1276,6 +1341,62 @@ static string ToDocumentUrl(string? filePath, string? fileName, IEnumerable<stri
 
     var pathFileName = Path.GetFileName(filePath);
     return ToExistingUploadUrl(pathFileName, uploadDirectories, filePath);
+}
+
+static void DeletePhysicalDocumentFile(string? filePath, string? fileName, IEnumerable<string> uploadDirectories)
+{
+    var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    if (!string.IsNullOrWhiteSpace(filePath))
+    {
+        var rawName = Path.GetFileName(Uri.UnescapeDataString(filePath));
+        if (!string.IsNullOrWhiteSpace(rawName))
+        {
+            candidates.Add(rawName);
+            if (rawName.Length > 37 && rawName[36] == '_')
+            {
+                candidates.Add(rawName.Substring(37));
+            }
+        }
+
+        if (File.Exists(filePath))
+        {
+            try { File.Delete(filePath); } catch { }
+        }
+    }
+
+    if (!string.IsNullOrWhiteSpace(fileName))
+    {
+        var cleanFileName = Path.GetFileName(fileName);
+        if (!string.IsNullOrWhiteSpace(cleanFileName))
+        {
+            candidates.Add(cleanFileName);
+        }
+    }
+
+    foreach (var dir in uploadDirectories)
+    {
+        if (!Directory.Exists(dir)) continue;
+
+        foreach (var c in candidates)
+        {
+            var direct = Path.Combine(dir, c);
+            if (File.Exists(direct))
+            {
+                try { File.Delete(direct); } catch { }
+            }
+
+            try
+            {
+                var pattern = $"*_{c}";
+                foreach (var match in Directory.GetFiles(dir, pattern))
+                {
+                    try { File.Delete(match); } catch { }
+                }
+            }
+            catch { }
+        }
+    }
 }
 
 static string ToExistingUploadUrl(string? fileName, IEnumerable<string> uploadDirectories, string? fallbackUrl = null)

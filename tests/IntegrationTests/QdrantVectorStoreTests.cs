@@ -80,4 +80,37 @@ public class QdrantVectorStoreTests : IAsyncLifetime
         Assert.Equal("Sample text", retrieved.Text);
         Assert.Equal("doc1", retrieved.DocumentId);
     }
+
+    [Fact]
+    public async Task DeleteDocumentChunksAsync_DeletesStoredChunksForDocument()
+    {
+        if (!_dockerAvailable)
+        {
+            Console.WriteLine("Docker is not available in this environment. Skipping Qdrant integration test.");
+            return;
+        }
+
+        // Arrange
+        var grpcPort = _qdrant.GetMappedPublicPort(6334);
+        var qdrantConnectionString = $"http://{_qdrant.Hostname}:{grpcPort}";
+        var store = new QdrantVectorStore(qdrantConnectionString, "test-delete-collection", null);
+        var chunk1 = new DocumentChunk("c1", "doc-to-delete", "Chunk 1 to delete", 0);
+        var chunk2 = new DocumentChunk("c2", "doc-to-keep", "Chunk 2 to keep", 0);
+        var embedding = new float[] { 0.1f, 0.2f };
+
+        await store.AddChunkAsync(chunk1, embedding);
+        await store.AddChunkAsync(chunk2, embedding);
+
+        // Verify chunk1 exists
+        var initialDocs = await store.GetDocumentsAsync();
+        Assert.Contains(initialDocs, d => d.Id == "doc-to-delete");
+
+        // Act
+        await store.DeleteDocumentChunksAsync("doc-to-delete");
+
+        // Assert
+        var remainingDocs = await store.GetDocumentsAsync();
+        Assert.DoesNotContain(remainingDocs, d => d.Id == "doc-to-delete");
+        Assert.Contains(remainingDocs, d => d.Id == "doc-to-keep");
+    }
 }

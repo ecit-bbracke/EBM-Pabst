@@ -97,13 +97,35 @@ Write-Host "`n--> Generating SHA256 checksums..." -ForegroundColor Yellow
 $ChecksumFile = Join-Path $DistDir "SHA256SUMS.txt"
 $Checksums = @()
 
+function Get-FileSha256 {
+    param([string]$Path)
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLower()
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $hashBytes = $sha256.ComputeHash($stream)
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($b in $hashBytes) {
+            [void]$sb.Append($b.ToString("x2"))
+        }
+        return $sb.ToString()
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
 if (Test-Path $TarGzPath) {
-    $hashTar = (Get-FileHash -Path $TarGzPath -Algorithm SHA256).Hash.ToLower()
+    $hashTar = Get-FileSha256 -Path $TarGzPath
     $Checksums += "$hashTar  $ArchiveName.tar.gz"
 }
 
 if (Test-Path $ZipPath) {
-    $hashZip = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash.ToLower()
+    $hashZip = Get-FileSha256 -Path $ZipPath
     $Checksums += "$hashZip  $ArchiveName.zip"
 }
 

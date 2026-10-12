@@ -10,4 +10,5 @@ public interface IVectorStore
     Task<IEnumerable<DocumentChunk>> SearchAsync(string query, int limit = 3);
     Task<IEnumerable<Document>> GetDocumentsAsync(int limit = 1000);
     Task<IEnumerable<DocumentChunk>> GetChunksByDocumentAndIndicesAsync(string documentId, IEnumerable<int> indices);
+    Task DeleteDocumentChunksAsync(string documentId);
 }

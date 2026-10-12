@@ -98,6 +98,22 @@ public class SqliteDocumentRepositoryTests : IDisposable
         Assert.Equal("d1", all[1].Id);
     }
 
+    [Fact]
+    public async Task DeleteDocumentAsync_RemovesDocumentFromDatabase()
+    {
+        var repo = new SqliteDocumentRepository(_factory);
+        var doc = new Document("delete-id", "to_delete.pdf", "/uploads/to_delete.pdf", DateTime.UtcNow);
+        await repo.AddDocumentAsync(doc);
+
+        var beforeDelete = await repo.GetDocumentByIdAsync("delete-id");
+        Assert.NotNull(beforeDelete);
+
+        await repo.DeleteDocumentAsync("delete-id");
+
+        var afterDelete = await repo.GetDocumentByIdAsync("delete-id");
+        Assert.Null(afterDelete);
+    }
+
     private class TestDbContextFactory : IDbContextFactory<DocumentDbContext>
     {
         private readonly DbContextOptions<DocumentDbContext> _options;

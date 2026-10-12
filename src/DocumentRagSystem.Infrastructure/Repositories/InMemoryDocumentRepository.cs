@@ -43,4 +43,13 @@ public class InMemoryDocumentRepository : IDocumentRepository
     {
         return Task.FromResult<IEnumerable<Document>>(_documents.Values.OrderByDescending(d => d.UploadedAt).ToList());
     }
+
+    public Task DeleteDocumentAsync(string id)
+    {
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            _documents.TryRemove(id, out _);
+        }
+        return Task.CompletedTask;
+    }
 }

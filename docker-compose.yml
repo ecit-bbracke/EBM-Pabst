@@ -38,6 +38,7 @@ services:
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY}
+      - SEED_DATA=${SEED_DATA:-false}
     volumes:
       - uploads_data:/app/uploads
       - database_data:/app/data

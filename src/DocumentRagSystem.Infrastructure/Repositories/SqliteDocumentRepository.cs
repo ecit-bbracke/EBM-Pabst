@@ -115,6 +115,19 @@ public class SqliteDocumentRepository : IDocumentRepository
         return entities.Select(ToModel).ToList();
     }
 
+    public async Task DeleteDocumentAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.Documents.FindAsync(id);
+        if (entity != null)
+        {
+            context.Documents.Remove(entity);
+            await context.SaveChangesAsync();
+        }
+    }
+
     private static DocumentEntity ToEntity(Document doc) => new()
     {
         Id = doc.Id,

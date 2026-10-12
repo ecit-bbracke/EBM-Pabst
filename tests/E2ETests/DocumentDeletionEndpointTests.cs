@@ -1,0 +1,130 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
+using DocumentRagSystem.Core.Interfaces;
+using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Infrastructure.Repositories;
+using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using Xunit;
+
+namespace DocumentRagSystem.E2ETests;
+
+public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+{
+    private readonly WebApplicationFactory<Program> _factory;
+    private readonly InMemoryDocumentRepository _repository = new();
+    private readonly Mock<IVectorStore> _mockVectorStore = new();
+    private const string ValidApiKey = "test-delete-api-key";
+    private readonly string _testUploadsDir;
+
+    public DocumentDeletionEndpointTests(WebApplicationFactory<Program> factory)
+    {
+        _testUploadsDir = Path.Combine(Path.GetTempPath(), $"uploads_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testUploadsDir);
+
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_delete_{Guid.NewGuid():N}.db");
+            builder.UseSetting("Authentication:ApiKey", ValidApiKey);
+            builder.UseSetting("Uploads:Directory", _testUploadsDir);
+
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Authentication:ApiKey"] = ValidApiKey,
+                    ["Uploads:Directory"] = _testUploadsDir
+                });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                var repoDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IDocumentRepository));
+                if (repoDescriptor != null) services.Remove(repoDescriptor);
+                services.AddSingleton<IDocumentRepository>(_repository);
+
+                var storeDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IVectorStore));
+                if (storeDescriptor != null) services.Remove(storeDescriptor);
+                services.AddSingleton<IVectorStore>(_mockVectorStore.Object);
+            });
+        });
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WithoutAuth_RequiresAuthentication()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var response = await client.DeleteAsync("/api/documents/doc-123");
+
+        (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Redirect).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenNotFound_ReturnsNotFound()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>())).ReturnsAsync(Array.Empty<Document>());
+
+        var response = await client.DeleteAsync($"/api/documents/non-existent-{Guid.NewGuid():N}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenExists_DeletesFile_Chunks_AndRepositoryRecord()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        var docId = $"doc_{Guid.NewGuid():N}";
+        var fileName = "sample_test_doc.pdf";
+        var uniqueDiskFileName = $"{Guid.NewGuid():N}_{fileName}";
+        var physicalFilePath = Path.Combine(_testUploadsDir, uniqueDiskFileName);
+        await File.WriteAllTextAsync(physicalFilePath, "%PDF-1.4 test file content");
+
+        var doc = new Document(
+            Id: docId,
+            FileName: fileName,
+            FilePath: $"/uploads/{uniqueDiskFileName}",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed
+        );
+
+        await _repository.AddDocumentAsync(doc);
+
+        _mockVectorStore
+            .Setup(x => x.DeleteDocumentChunksAsync(docId))
+            .Returns(Task.CompletedTask)
+            .Verifiable();
+
+        // Act
+        var response = await client.DeleteAsync($"/api/documents/{docId}");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Verify file deleted
+        File.Exists(physicalFilePath).Should().BeFalse();
+
+        // Verify chunks deleted in vector store
+        _mockVectorStore.Verify(x => x.DeleteDocumentChunksAsync(docId), Times.Once);
+
+        // Verify removed from repository
+        var retrieved = await _repository.GetDocumentByIdAsync(docId);
+        retrieved.Should().BeNull();
+    }
+}

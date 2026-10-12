@@ -10,4 +10,5 @@ public interface IDocumentRepository
     Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null, string? language = null);
     Task<Document?> GetDocumentByIdAsync(string id);
     Task<IEnumerable<Document>> GetAllDocumentsAsync();
+    Task DeleteDocumentAsync(string id);
 }
