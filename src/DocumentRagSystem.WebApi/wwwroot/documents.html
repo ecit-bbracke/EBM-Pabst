@@ -121,18 +121,53 @@
         <div class="lg:col-span-2 space-y-6">
             <!-- Liste over indlæste dokumenter -->
             <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 space-y-4">
-                <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
                     <h2 class="text-lg font-semibold text-slate-900 flex items-center">
                         <i class="fa-solid fa-folder text-brand-500 mr-2"></i>
                         Indlæste dokumenter
+                        <span id="docs-count-badge" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium hidden">0</span>
                     </h2>
-                    <button onclick="fetchDocuments()" title="Opdater liste" class="text-slate-400 hover:text-brand-500 transition">
-                        <i id="refresh-docs-icon" class="fa-solid fa-arrows-rotate"></i>
-                    </button>
+                    <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                        <button onclick="fetchDocuments()" title="Opdater liste" class="text-slate-400 hover:text-brand-500 transition p-1.5 rounded-lg hover:bg-slate-50">
+                            <i id="refresh-docs-icon" class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Søgning og sideindstillinger -->
+                <div class="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                        <input type="text" id="doc-search" placeholder="Søg i filnavn, artikel ID..." 
+                               class="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-700 bg-slate-50/50" 
+                               oninput="onSearchInput(this.value)">
+                        <button id="clear-search-btn" onclick="clearSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs hidden">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <div class="flex items-center space-x-2 text-xs text-slate-500 shrink-0">
+                        <span>Vis:</span>
+                        <select id="doc-pagesize" onchange="onPageSizeChange(this.value)" class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500">
+                            <option value="10">10</option>
+                            <option value="20" selected>20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
                 </div>
                 
-                <div id="documents-list" class="space-y-3 min-h-[300px] max-h-[600px] overflow-y-auto pr-1">
+                <div id="documents-list" class="space-y-3 min-h-[300px]">
                     <!-- Indlæste dokumenter tilføjes her via JS -->
+                </div>
+
+                <!-- Paginering bundpanel -->
+                <div id="pagination-container" class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-slate-500 hidden">
+                    <div id="pagination-info" class="text-slate-600 font-medium">
+                        Viser 1-20 af 100 dokumenter
+                    </div>
+                    <div id="pagination-controls" class="flex items-center space-x-1">
+                        <!-- Paginering knapper renderes her -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -256,93 +291,223 @@
             }
         }
 
-        // Hent indlæste dokumenter fra API'et
+        let currentPage = 1;
+        let pageSize = 20;
+        let searchQuery = '';
+        let totalPages = 1;
+        let totalCount = 0;
+        let searchDebounceTimer = null;
+
+        function onSearchInput(value) {
+            clearTimeout(searchDebounceTimer);
+            const clearBtn = document.getElementById('clear-search-btn');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !value);
+
+            searchDebounceTimer = setTimeout(() => {
+                searchQuery = value.trim();
+                currentPage = 1;
+                fetchDocuments();
+            }, 300);
+        }
+
+        function clearSearch() {
+            const input = document.getElementById('doc-search');
+            if (input) input.value = '';
+            const clearBtn = document.getElementById('clear-search-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
+            searchQuery = '';
+            currentPage = 1;
+            fetchDocuments();
+        }
+
+        function onPageSizeChange(val) {
+            pageSize = parseInt(val, 10) || 20;
+            currentPage = 1;
+            fetchDocuments();
+        }
+
+        function goToPage(page) {
+            if (page < 1 || page > totalPages || page === currentPage) return;
+            currentPage = page;
+            fetchDocuments();
+        }
+
+        // Hent indlæste dokumenter fra API'et med paginering og søgning
         async function fetchDocuments() {
             const refreshIcon = document.getElementById('refresh-docs-icon');
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
 
+            const listContainer = document.getElementById('documents-list');
+            const paginationContainer = document.getElementById('pagination-container');
+            const countBadge = document.getElementById('docs-count-badge');
+
             try {
-                const response = await fetch('/api/documents');
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    pageSize: pageSize
+                });
+                if (searchQuery) {
+                    params.append('search', searchQuery);
+                }
+
+                const response = await fetch(`/api/documents?${params.toString()}`);
                 if (!response.ok) throw new Error('Netværksforbindelsen var ikke ok');
-                const docs = await response.json();
                 
-                const listContainer = document.getElementById('documents-list');
+                const data = await response.json();
+                const isPaged = data && !Array.isArray(data) && Array.isArray(data.items);
+                const docs = isPaged ? data.items : (Array.isArray(data) ? data : []);
+
+                totalCount = isPaged ? data.totalCount : docs.length;
+                totalPages = isPaged ? data.totalPages : 1;
+                currentPage = isPaged ? data.page : 1;
+
+                if (countBadge) {
+                    countBadge.textContent = totalCount;
+                    countBadge.classList.remove('hidden');
+                }
+
                 listContainer.innerHTML = '';
 
                 if (docs.length === 0) {
                     listContainer.innerHTML = `
                         <div class="text-center py-12 text-slate-400 text-sm">
                             <i class="fa-solid fa-folder-open text-3xl mb-3 block"></i>
-                            Ingen dokumenter indlæst endnu.
+                            ${searchQuery ? 'Ingen dokumenter matchede din søgning.' : 'Ingen dokumenter indlæst endnu.'}
                         </div>`;
-                } else {
-                    docs.forEach(doc => {
-                        let statusColor = "bg-slate-100 text-slate-600";
-                        let statusText = doc.status;
+                    if (paginationContainer) paginationContainer.classList.add('hidden');
+                    return;
+                }
 
-                        if (doc.status === 0 || doc.status === "Pending") {
-                            statusColor = "bg-amber-100 text-amber-700";
-                            statusText = "Afventer";
-                        } else if (doc.status === 1 || doc.status === "Processing") {
-                            statusColor = "bg-blue-100 text-blue-700";
-                            statusText = "Behandler";
-                        } else if (doc.status === 2 || doc.status === "Processed") {
-                            statusColor = "bg-green-100 text-green-700";
-                            statusText = "Behandlet";
-                        } else if (doc.status === 3 || doc.status === "Failed") {
-                            statusColor = "bg-red-100 text-red-700";
-                            statusText = "Fejlet";
-                        } else if (doc.status === 4 || doc.status === "Skipped") {
-                            statusColor = "bg-purple-100 text-purple-700";
-                            statusText = doc.language ? `Ikke engelsk (${escapeHtml(doc.language)})` : "Ikke indekseret";
-                        }
+                docs.forEach(doc => {
+                    let statusColor = "bg-slate-100 text-slate-600";
+                    let statusText = doc.status;
 
-                        const date = new Date(doc.uploadedAt).toLocaleString();
+                    if (doc.status === 0 || doc.status === "Pending") {
+                        statusColor = "bg-amber-100 text-amber-700";
+                        statusText = "Afventer";
+                    } else if (doc.status === 1 || doc.status === "Processing") {
+                        statusColor = "bg-blue-100 text-blue-700";
+                        statusText = "Behandler";
+                    } else if (doc.status === 2 || doc.status === "Processed") {
+                        statusColor = "bg-green-100 text-green-700";
+                        statusText = "Behandlet";
+                    } else if (doc.status === 3 || doc.status === "Failed") {
+                        statusColor = "bg-red-100 text-red-700";
+                        statusText = "Fejlet";
+                    } else if (doc.status === 4 || doc.status === "Skipped") {
+                        statusColor = "bg-purple-100 text-purple-700";
+                        statusText = doc.language ? `Ikke engelsk (${escapeHtml(doc.language)})` : "Ikke indekseret";
+                    }
 
-                        const fileName = escapeHtml(doc.fileName);
-                        const documentLink = isDocumentUrl(doc.filePath)
-                            ? `<a href="${escapeHtml(doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-700 hover:text-brand-800 hover:underline truncate text-sm flex-1 font-semibold" title="${fileName}">
-                                   ${fileName}
-                               </a>`
-                            : `<span class="font-medium text-slate-900 truncate text-sm flex-1 font-semibold" title="${fileName}">
-                                   ${fileName}
-                               </span>`;
+                    const date = doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString() : 'N/A';
+                    const fileName = escapeHtml(doc.fileName || 'Uden navn');
+                    const documentLink = isDocumentUrl(doc.FilePath || doc.filePath)
+                        ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-700 hover:text-brand-800 hover:underline truncate text-sm flex-1 font-semibold" title="${fileName}">
+                               ${fileName}
+                           </a>`
+                        : `<span class="font-medium text-slate-900 truncate text-sm flex-1 font-semibold" title="${fileName}">
+                               ${fileName}
+                           </span>`;
 
-                        listContainer.innerHTML += `
-                            <div class="p-4 bg-slate-50 border border-slate-200/60 rounded-xl hover:border-slate-300 transition duration-150 shadow-sm">
-                                <div class="flex justify-between items-start gap-4">
-                                    <div class="flex items-start space-x-3 truncate flex-1">
-                                        <i class="fa-solid fa-file-pdf text-red-500 text-lg mt-0.5 shrink-0"></i>
-                                        ${documentLink}
-                                    </div>
-                                    <div class="flex items-center space-x-2 shrink-0">
-                                        <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold ${statusColor}">
-                                            ${statusText}
-                                        </span>
-                                        <button onclick="deleteDocument('${escapeHtml(doc.id)}', '${fileName}')" title="Slet dokument og chunks" class="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150">
-                                            <i class="fa-solid fa-trash-can text-sm"></i>
-                                        </button>
-                                    </div>
+                    listContainer.innerHTML += `
+                        <div class="p-4 bg-slate-50 border border-slate-200/60 rounded-xl hover:border-slate-300 transition duration-150 shadow-sm">
+                            <div class="flex justify-between items-start gap-4">
+                                <div class="flex items-start space-x-3 truncate flex-1">
+                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg mt-0.5 shrink-0"></i>
+                                    ${documentLink}
                                 </div>
-                                <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-400">
-                                    <span>ID: ${doc.id}</span>
-                                    <span>Uploadet: ${date}</span>
+                                <div class="flex items-center space-x-2 shrink-0">
+                                    <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold ${statusColor}">
+                                        ${statusText}
+                                    </span>
+                                    <button onclick="deleteDocument('${escapeHtml(doc.id)}', '${fileName}')" title="Slet dokument og chunks" class="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150">
+                                        <i class="fa-solid fa-trash-can text-sm"></i>
+                                    </button>
                                 </div>
-                            </div>`;
-                    });
+                            </div>
+                            <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-400">
+                                <span>ID: ${escapeHtml(doc.id || '')}</span>
+                                <span>Uploadet: ${date}</span>
+                            </div>
+                        </div>`;
+                });
+
+                if (paginationContainer) {
+                    if (totalCount > pageSize || totalPages > 1) {
+                        paginationContainer.classList.remove('hidden');
+                        renderPagination(totalCount, totalPages, currentPage, pageSize);
+                    } else {
+                        paginationContainer.classList.add('hidden');
+                    }
                 }
             } catch (error) {
                 console.error('Fejl ved indlæsning af dokumenter:', error);
-                document.getElementById('documents-list').innerHTML = `
+                listContainer.innerHTML = `
                     <div class="text-center py-12 text-red-500 text-sm">
                         <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 block"></i>
                         Kunne ikke indlæse dokumenter.
                     </div>`;
+                if (paginationContainer) paginationContainer.classList.add('hidden');
             } finally {
                 if (refreshIcon) {
                     setTimeout(() => refreshIcon.classList.remove('animate-spin'), 600);
                 }
             }
+        }
+
+        function renderPagination(total, pages, current, size) {
+            const infoEl = document.getElementById('pagination-info');
+            const controlsEl = document.getElementById('pagination-controls');
+            if (!infoEl || !controlsEl) return;
+
+            const from = Math.min((current - 1) * size + 1, total);
+            const to = Math.min(current * size, total);
+            infoEl.textContent = `Viser ${from}-${to} af ${total} dokumenter`;
+
+            let html = '';
+
+            const prevDisabled = current <= 1;
+            html += `<button onclick="goToPage(${current - 1})" ${prevDisabled ? 'disabled' : ''} 
+                             class="px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" title="Forrige side">
+                        <i class="fa-solid fa-chevron-left text-[10px]"></i>
+                     </button>`;
+
+            const maxButtons = 5;
+            let startPage = Math.max(1, current - Math.floor(maxButtons / 2));
+            let endPage = Math.min(pages, startPage + maxButtons - 1);
+            if (endPage - startPage + 1 < maxButtons) {
+                startPage = Math.max(1, endPage - maxButtons + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<button onclick="goToPage(1)" class="px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">1</button>`;
+                if (startPage > 2) {
+                    html += `<span class="px-1 text-slate-400">...</span>`;
+                }
+            }
+
+            for (let p = startPage; p <= endPage; p++) {
+                const isActive = p === current;
+                html += `<button onclick="goToPage(${p})" 
+                                 class="px-2.5 py-1 rounded-md font-medium ${isActive ? 'bg-brand-600 text-white border border-brand-600' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}">
+                            ${p}
+                         </button>`;
+            }
+
+            if (endPage < pages) {
+                if (endPage < pages - 1) {
+                    html += `<span class="px-1 text-slate-400">...</span>`;
+                }
+                html += `<button onclick="goToPage(${pages})" class="px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">${pages}</button>`;
+            }
+
+            const nextDisabled = current >= pages;
+            html += `<button onclick="goToPage(${current + 1})" ${nextDisabled ? 'disabled' : ''} 
+                             class="px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" title="Næste side">
+                        <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                     </button>`;
+
+            controlsEl.innerHTML = html;
         }
 
         async function deleteDocument(id, fileName) {

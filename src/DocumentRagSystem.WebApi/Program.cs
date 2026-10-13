@@ -440,8 +440,13 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))
    .WithName("HealthCheck");
 
-// GET ALL DOCUMENTS ENDPOINT
-app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore vectorStore) =>
+// GET ALL DOCUMENTS ENDPOINT (Supports pagination and filtering)
+app.MapGet("/api/documents", async (
+    [FromQuery] int? page,
+    [FromQuery] int? pageSize,
+    [FromQuery] string? search,
+    IDocumentRepository repository,
+    IVectorStore vectorStore) =>
 {
     var repositoryDocs = await repository.GetAllDocumentsAsync();
     IEnumerable<Document> vectorDocs = Array.Empty<Document>();
@@ -463,9 +468,48 @@ app.MapGet("/api/documents", async (IDocumentRepository repository, IVectorStore
             .First())
         .Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) })
         .OrderByDescending(doc => doc.UploadedAt)
-        .ToList();
+        .AsEnumerable();
 
-    return Results.Ok(docs);
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        var term = search.Trim();
+        docs = docs.Where(d =>
+            (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(d.Id) && d.Id.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(d.SourceDocumentId) && d.SourceDocumentId.Contains(term, StringComparison.OrdinalIgnoreCase))
+        );
+    }
+
+    var docList = docs.ToList();
+
+    if (page.HasValue || pageSize.HasValue)
+    {
+        var currentPage = Math.Max(1, page ?? 1);
+        var size = Math.Clamp(pageSize ?? 20, 1, 100);
+        var totalCount = docList.Count;
+        var totalPages = (int)Math.Ceiling(totalCount / (double)size);
+        if (totalPages == 0) totalPages = 1;
+
+        var items = docList
+            .Skip((currentPage - 1) * size)
+            .Take(size)
+            .ToList();
+
+        var paged = new PagedResult<Document>(
+            Items: items,
+            TotalCount: totalCount,
+            Page: currentPage,
+            PageSize: size,
+            TotalPages: totalPages,
+            HasPreviousPage: currentPage > 1,
+            HasNextPage: currentPage < totalPages
+        );
+
+        return Results.Ok(paged);
+    }
+
+    return Results.Ok(docList);
 })
 .RequireAuthorization()
 .WithName("GetAllDocuments");

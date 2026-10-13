@@ -403,9 +403,15 @@ public static class Program
             {
                 var content = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(content);
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                var arrayElement = doc.RootElement.ValueKind == JsonValueKind.Array
+                    ? doc.RootElement
+                    : doc.RootElement.TryGetProperty("items", out var itemsProp) && itemsProp.ValueKind == JsonValueKind.Array
+                        ? itemsProp
+                        : default;
+
+                if (arrayElement.ValueKind == JsonValueKind.Array)
                 {
-                    foreach (var element in doc.RootElement.EnumerateArray())
+                    foreach (var element in arrayElement.EnumerateArray())
                     {
                         if (element.TryGetProperty("fileName", out var fileNameProp) && fileNameProp.ValueKind == JsonValueKind.String)
                         {
