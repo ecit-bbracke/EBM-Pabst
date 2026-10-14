@@ -88,7 +88,26 @@ public class PdfTextExtractor : ITextExtractor
     private string ExtractPageAsMarkdownTable(Page page, double rowTolerancePoints = 3.5)
     {
         var allWords = page.GetWords().ToList();
-        if (!allWords.Any()) return string.Empty;
+        if (!allWords.Any())
+        {
+            // Fallback 1: check page.Text directly (PdfPig raw glyph extraction)
+            if (!string.IsNullOrWhiteSpace(page.Text))
+            {
+                return page.Text.Trim();
+            }
+
+            // Fallback 2: check page.Letters
+            if (page.Letters != null && page.Letters.Any())
+            {
+                var lettersText = string.Concat(page.Letters.Select(l => l.Value)).Trim();
+                if (!string.IsNullOrWhiteSpace(lettersText))
+                {
+                    return lettersText;
+                }
+            }
+
+            return string.Empty;
+        }
 
         // Separate headers and footers from main content based on page height proportions
         double pageHeight = page.Height;

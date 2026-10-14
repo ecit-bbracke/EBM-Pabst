@@ -55,13 +55,89 @@ public class DocumentProcessor : IDocumentProcessor
         _logger = logger;
     }
 
-    public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName)
+    public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null)
     {
-        var documentId = Guid.NewGuid().ToString();
         var uploadsDir = Path.Combine(AppContext.BaseDirectory, "uploads");
         if (!Directory.Exists(uploadsDir))
         {
             Directory.CreateDirectory(uploadsDir);
+        }
+
+        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
+
+        // 1. Look for existing document with same ID, SourceDocumentId, or FileName to overwrite
+        Document? existingDoc = null;
+        if (_documentRepository != null)
+        {
+            try
+            {
+                var allDocs = await _documentRepository.GetAllDocumentsAsync();
+                existingDoc = allDocs.FirstOrDefault(d =>
+                    (!string.IsNullOrWhiteSpace(documentId) && string.Equals(d.Id, documentId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.Id, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to query repository for existing documents during upload.");
+            }
+        }
+
+        if (existingDoc == null && _vectorStore != null)
+        {
+            try
+            {
+                var vectorDocs = await _vectorStore.GetDocumentsAsync();
+                existingDoc = vectorDocs.FirstOrDefault(d =>
+                    (!string.IsNullOrWhiteSpace(documentId) && string.Equals(d.Id, documentId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.Id, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to query vector store for existing documents during upload.");
+            }
+        }
+
+        var targetDocumentId = documentId
+            ?? existingDoc?.Id
+            ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
+
+        // 2. Remove old physical file if overwriting
+        if (existingDoc != null && !string.IsNullOrWhiteSpace(existingDoc.FilePath))
+        {
+            try
+            {
+                var oldDiskName = Path.GetFileName(Uri.UnescapeDataString(existingDoc.FilePath));
+                var oldDiskPath = Path.Combine(uploadsDir, oldDiskName);
+                if (File.Exists(oldDiskPath))
+                {
+                    File.Delete(oldDiskPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Could not delete old file {FilePath} during document overwrite.", existingDoc.FilePath);
+            }
+        }
+
+        // 3. Delete old chunks from vector store if overwriting
+        if (existingDoc != null && _vectorStore != null)
+        {
+            try
+            {
+                await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id);
+                if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to delete old chunks for document {DocumentId} during overwrite.", existingDoc.Id);
+            }
         }
 
         var safeFileName = Path.GetFileName(fileName);
@@ -75,10 +151,8 @@ public class DocumentProcessor : IDocumentProcessor
             await pdfStream.CopyToAsync(fileStream);
         }
 
-        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
-
         var document = new Document(
-            Id: documentId,
+            Id: targetDocumentId,
             FileName: fileName,
             FilePath: documentUrl,
             UploadedAt: DateTime.UtcNow,
@@ -100,7 +174,21 @@ public class DocumentProcessor : IDocumentProcessor
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                throw new InvalidOperationException("Extracted text was empty.");
+                var message = $"Dokumentet '{fileName}' indeholder ingen digital tekst (f.eks. indscannet billede eller tegning uden OCR-lag) og kan ikke indekseres til AI-søgning.";
+                _logger?.LogWarning("[DocumentProcessor] File '{FileName}' contains no extractable text. Setting status to Failed.", fileName);
+
+                document = document with
+                {
+                    Status = DocumentStatus.Failed,
+                    ErrorMessage = message
+                };
+
+                if (_documentRepository != null)
+                {
+                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Failed, message);
+                }
+
+                return document;
             }
 
             // Detect language
@@ -111,7 +199,7 @@ public class DocumentProcessor : IDocumentProcessor
 
             if (languageResult.IsEnglish)
             {
-                var chunks = _chunkingService.ChunkText(extractedText, documentId);
+                var chunks = _chunkingService.ChunkText(extractedText, targetDocumentId);
 
                 if (_embeddingService != null && _vectorStore != null)
                 {
@@ -139,7 +227,7 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_documentRepository != null)
                 {
-                    await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Processed, language: languageResult.Language);
+                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language);
                 }
             }
             else
@@ -158,7 +246,7 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_documentRepository != null)
                 {
-                    await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language);
+                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language);
                 }
             }
         }
@@ -167,7 +255,7 @@ public class DocumentProcessor : IDocumentProcessor
             document = document with { Status = DocumentStatus.Failed, ErrorMessage = ex.Message };
             if (_documentRepository != null)
             {
-                await _documentRepository.UpdateDocumentStatusAsync(documentId, DocumentStatus.Failed, ex.Message);
+                await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Failed, ex.Message);
             }
             throw;
         }

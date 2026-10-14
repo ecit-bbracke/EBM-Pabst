@@ -1095,13 +1095,23 @@ app.MapPost("/api/documents/upload", async (
         await file.CopyToAsync(memoryStream);
         memoryStream.Position = 0;
 
-        var documentId = Guid.NewGuid().ToString();
+        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(file.FileName);
+        var allDocs = await repository.GetAllDocumentsAsync();
+        var existingDoc = allDocs.FirstOrDefault(d =>
+            (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
+            string.Equals(d.FileName, file.FileName, StringComparison.OrdinalIgnoreCase));
+
+        var documentId = existingDoc?.Id 
+            ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
+
         var tempDocument = new Document(
             Id: documentId,
             FileName: file.FileName,
-            FilePath: "Queued/Background",
+            FilePath: existingDoc?.FilePath ?? "Queued/Background",
             UploadedAt: DateTime.UtcNow,
-            Status: DocumentStatus.Pending
+            Status: DocumentStatus.Pending,
+            ArticleId: articleId,
+            SourceDocumentId: sourceDocId
         );
         await repository.AddDocumentAsync(tempDocument);
 
@@ -1109,7 +1119,7 @@ app.MapPost("/api/documents/upload", async (
         {
             try
             {
-                await processor.ProcessPdfAsync(memoryStream, file.FileName);
+                await processor.ProcessPdfAsync(memoryStream, file.FileName, documentId);
             }
             catch (Exception ex)
             {
@@ -1129,6 +1139,17 @@ app.MapPost("/api/documents/upload", async (
 
         using var stream = file.OpenReadStream();
         var document = await processor.ProcessPdfAsync(stream, file.FileName);
+
+        if (document.Status == DocumentStatus.Failed)
+        {
+            return Results.BadRequest(new
+            {
+                error = document.ErrorMessage ?? "Behandlingen af dokumentet mislykkedes.",
+                status = "Failed",
+                id = document.Id,
+                fileName = document.FileName
+            });
+        }
 
         return Results.Ok(document);
     }

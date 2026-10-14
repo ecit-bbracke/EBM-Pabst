@@ -6,5 +6,5 @@ namespace DocumentRagSystem.Core.Interfaces;
 
 public interface IDocumentProcessor
 {
-    Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName);
+    Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null);
 }

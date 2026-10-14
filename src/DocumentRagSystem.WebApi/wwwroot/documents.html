@@ -259,7 +259,14 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(await response.text() || 'Fejl under upload af fil');
+                    let errMsg = 'Fejl under upload af fil';
+                    try {
+                        const errObj = await response.json();
+                        errMsg = errObj.error || errObj.message || errObj.Detail || JSON.stringify(errObj);
+                    } catch {
+                        errMsg = await response.text();
+                    }
+                    throw new Error(errMsg);
                 }
 
                 const result = await response.json();
