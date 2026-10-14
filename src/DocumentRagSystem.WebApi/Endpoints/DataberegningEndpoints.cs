@@ -26,8 +26,9 @@ public static class DataberegningEndpoints
             <title>EBM-Pabst databeregning form</title>
             <style>
                 html { scrollbar-gutter: stable; }
-                body { margin: 0; min-height: 100vh; display: flex; justify-content: center; background: #f8fafc; color: #1e293b; font-family: system-ui, sans-serif; }
-                aside { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; box-sizing: border-box; overflow-y: auto; padding: 24px 16px; background: #ffffff; border-right: 1px solid #e2e8f0; }
+                body { margin: 0; padding: 20px 16px; min-height: 100vh; display: flex; justify-content: center; background: #f8fafc; color: #1e293b; font-family: system-ui, sans-serif; box-sizing: border-box; }
+                .layout { display: flex; gap: 24px; max-width: 1050px; width: 100%; align-items: flex-start; justify-content: center; }
+                aside { width: 260px; flex-shrink: 0; box-sizing: border-box; overflow-y: auto; padding: 20px 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; height: fit-content; max-height: calc(100vh - 40px); position: sticky; top: 20px; }
                 aside h2 { margin: 0; font-size: 16px; color: #0284c7; }
                 .ny-top { width: 100%; margin-bottom: 20px; }
                 .historik-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -38,7 +39,8 @@ public static class DataberegningEndpoints
                 .historik-punkt { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; text-align: left; }
                 .historik-punkt small { color: #64748b; font-size: 12px; }
                 .historik-punkt.aktiv { background: #ffffff; border-color: #f59e0b; }
-                #form { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 40px 16px; }
+                main { flex: 1; display: flex; justify-content: center; min-width: 0; }
+                #form { display: flex; flex-direction: column; align-items: center; gap: 20px; width: 100%; padding: 0 0 40px 0; }
                 h1 { margin: 0; color: #0f172a; }
                 #stamdata { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; width: 618px; }
                 #stamdata label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #0284c7; }
@@ -83,6 +85,7 @@ public static class DataberegningEndpoints
             </style>
             </head>
             <body>
+            <div class="layout">
             <aside>
               <button type="button" class="gem ny-top" onclick="nyBeregning()">+ Ny beregning</button>
               <div class="historik-top">
@@ -115,6 +118,7 @@ public static class DataberegningEndpoints
                 </div>
               </form>
             </main>
+            </div>
 
             <script>
               const felter = [
