@@ -89,21 +89,25 @@ dotnet user-secrets set "Authentication:ApiKey" "your-secret-key"
 
 ## 🖥️ Web Portal Pages
 
-* **Chat Assistent (`/index.html`):** Conversational AI interface supporting multi-turn technical queries, domain-specific intent routing, and clickable citations.
-* **Dokumenter (`/documents.html`):** Synchronous & background PDF uploads, processing queue progress, and indexed document catalog.
-* **Databeregning (`/databeregning.html`):** Embedded view and proxy integration for the sister project `DataBeregningKatalog.Api`.
-* **Brugeradministration (`/users.html`):** Admin management for user accounts.
-* **Login (`/login.html`):** Secure login interface.
+All portal pages share a consistent, centered 3-column responsive grid layout (`container mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8`):
+
+* **Chat Assistent (`/index.html`):** Conversational AI interface supporting multi-turn technical queries, persistent conversation history (1/3 left panel), domain-specific intent routing, and clickable citations (2/3 right panel).
+* **Dokumenter (`/documents.html`):** Synchronous & background PDF uploads (1/3 left panel), search filter, page size selector (10, 20, 50, 100), pagination controls, single-document deletion (deletes disk files, SQLite record, and Qdrant chunks), and Danish date timestamps (2/3 right panel).
+* **Databeregning (`/databeregning.html`):** Fully integrated energy calculation workspace with calculation history (1/3 left panel), dynamic fan formulas for efficiency and annual kWh consumption, and direct integration with ECIT Automate workqueue robot (2/3 right panel).
+* **Brugeradministration (`/users.html`):** Clean administrative user management interface.
+* **Login (`/login.html`):** Secure login interface with cookie authentication.
 
 ---
 
-## 🇩🇰 Danish Companion Document Linking
+## 🌐 Global Language Detection & Companion Document Linking
 
-* Datasheet PDFs follow the standard convention `Art_<articleid>-Doc_<documentid>.pdf`.
-* During ingestion, documents undergo content-based language detection:
-  * **English (`en`)**: Chunked, embedded with `gemini-embedding-001`, and indexed into Qdrant.
-  * **Danish (`da`)**: Saved directly to `uploads/` with status `Skipped` (content language stamped).
-* When a query matches an English document, any document sharing the same `ArticleId` with detected Danish content (`Language == "da"`) is automatically appended as a companion reference in the citations.
+* Datasheet PDFs typically follow the standard convention `Art_<articleid>-Doc_<documentid>.pdf`.
+* During ingestion, documents undergo comprehensive language detection supporting **18+ languages** (English, Danish, German, Spanish, French, Italian, Portuguese, Dutch, Swedish, Norwegian, Polish, Czech, Finnish, Russian, Chinese, Japanese, Korean, Arabic) via character scripts, diacritics, technical wordsets, and LLM classification:
+  * **English (`en`)**: Chunked, embedded with `gemini-embedding-001`, and indexed into Qdrant with status `Processed` (displayed as `Behandlet (Engelsk)`).
+  * **Non-English**: Saved to disk under `uploads/` with status `Skipped` and stamped with detected language (e.g. `Ikke engelsk (Dansk)`, `Ikke engelsk (Spansk)`).
+  * **Scanned / Textless PDFs**: Handled gracefully. If a PDF contains no digital text layer (e.g. scanned image without OCR), it is marked `Failed` with an informative message and returns `400 Bad Request` rather than an unhandled 500 error.
+* **Companion Linking:** When a query matches an English document, any non-English document sharing the same `ArticleId` is automatically appended as a companion reference in the citations.
+* **Document Overwrite:** Uploading a document with an existing `documentId`, `SourceDocumentId`, or filename automatically replaces the physical file, deletes old chunks from Qdrant, and updates the database record without creating duplicate entries.
 
 ---
 
@@ -123,10 +127,10 @@ This is the easiest way to launch the Web API, the Worker, and a local Qdrant da
      ```
 2. Run Docker Compose:
    ```cmd
-   docker-compose up --build
+   docker compose up --build
    ```
 3. The Web API will be available at `http://localhost:8080` (or HTTPS via `8081`).
-4. On container startup, the Worker will scan the mapped `data/Generelt` directory and automatically begin processing and indexing all existing PDF data sheets.
+4. **Data Seeding**: By default, automatic seeding of `data/Generelt/` on container startup is disabled (`SEED_DATA=false`). To enable automatic ingestion on startup, set `SEED_DATA=true` in your environment or `.env` file.
 
 ### Option B: Running Locally with .NET CLI
 If you want to run the services individually on your machine:
@@ -147,10 +151,13 @@ If you want to run the services individually on your machine:
 ### Option C: Deploying to Ubuntu Linux Server (Self-Contained Docker)
 For deploying the system to an Ubuntu Linux production or staging server using modern self-contained Docker images:
 1. Refer to the comprehensive [Ubuntu Linux Docker Deployment Guide](docs/deployment.md) for full instructions.
-2. In this deployment mode, the application compiles targeting the native `linux-x64` platform, bundling the entire .NET 10.0 runtime. This enables running inside a minimal `runtime-deps` Docker image without requiring .NET 10.0 to be pre-installed on the host system or inside the container.
-3. Simply move your code to the server, prepare a `.env` file containing your `GEMINI_API_KEY`, and launch the services:
+2. Deploy directly with a single command from your local Windows machine:
+   ```powershell
+   .\deploy-to-server.ps1
+   ```
+3. Or manually trigger deployment via Bash on Linux:
    ```bash
-   docker compose up --build -d
+   ./scripts/deploy-to-remote.sh 185.158.62.152 5665 ubuntu
    ```
 
 ---
@@ -175,14 +182,45 @@ For deploying the system to an Ubuntu Linux production or staging server using m
     *   `file` (Form File, PDF format only, Required)
     *   `background` (Query parameter, Boolean, Optional)
 *   **Behavior**:
-    *   If `background=true`, the document metadata is instantly saved as `Pending` and queued for asynchronous background processing, returning `202 Accepted`.
-    *   Otherwise, the API processes the PDF synchronously and returns the fully indexed document object with `200 OK`.
+    *   If `background=true`, the document metadata is saved as `Pending` and queued for background processing, returning `202 Accepted`.
+    *   Otherwise, the API processes the PDF synchronously and returns the document object with `200 OK`.
+    *   Re-uploading an existing document ID or filename replaces the file and vector chunks without duplicates.
+    *   Textless PDFs return `400 Bad Request` with an explanation.
 
-### 3. Retrieve Ingested Documents
+### 3. Retrieve Ingested Documents (with Paging & Search)
 *   **Endpoint:** `GET /api/documents`
-*   **Description:** Returns a chronological list of all processed files and their pipeline execution state (`Processed`, `Processing`, `Failed`).
+*   **Parameters:**
+    *   `page` (Query parameter, Integer, Optional, e.g. `1`)
+    *   `pageSize` (Query parameter, Integer 1–100, Optional, e.g. `20`)
+    *   `search` (Query parameter, String, Optional, filters on filename, articleId, or documentId)
+*   **Response (Paged):**
+    ```json
+    {
+      "items": [ ... ],
+      "totalCount": 142,
+      "page": 1,
+      "pageSize": 20,
+      "totalPages": 8,
+      "hasPreviousPage": false,
+      "hasNextPage": true
+    }
+    ```
+    *(Calling without `page`/`pageSize` parameters returns a raw array for backward compatibility).*
 
-### 4. Query Documents (RAG)
+### 4. Delete Single Document
+*   **Endpoint:** `DELETE /api/documents/{id}`
+*   **Description:** Completely deletes the document: removes the physical PDF file from `uploads/`, deletes all vector chunks in Qdrant, and removes the metadata record from SQLite. Returns `204 No Content`.
+
+### 5. Document Processing Status
+*   **Endpoint:** `GET /api/documents/{fileName}/status` or `GET /api/documents/status?fileName=...`
+*   **Description:** Returns the indexing status (`Pending`, `Processing`, `Processed`, `Skipped`, `Failed`), detected language, article ID, and error message if applicable.
+
+### 6. Databeregning Endpoints
+*   **`GET /databeregning`:** Retrieves historical calculation tasks from the ECIT Automate workqueue robot.
+*   **`POST /databeregning`:** Creates and submits a new calculation with multi-fan input specs to the robot queue.
+*   **`GET /databeregningsform`:** Serves the standalone databeregning HTML form.
+
+### 7. Query Documents (RAG)
 *   **Endpoint:** `POST /api/query`
 *   **Content-Type:** `application/json`
 *   **Payload:**
@@ -208,9 +246,24 @@ For deploying the system to an Ubuntu Linux production or staging server using m
 
 ---
 
+## 🧹 Maintenance & Server Operations
+
+*   **Reset Server Data & Free Disk Space:**
+    To completely wipe all uploaded PDFs, reset SQLite, purge Qdrant vectors, and clean up Docker cache/logs on the server:
+    * **From Windows (PowerShell):**
+      ```powershell
+      .\slet_alle_data_på_server.ps1
+      ```
+    * **Directly on the server (Bash):**
+      ```bash
+      ./slet_alle_data_på_server.sh
+      ```
+
+---
+
 ## 🧪 Testing & Evaluation
 
-The solution includes an extensive, multi-tiered test suite (80+ automated tests across unit, integration, and E2E suites) as well as an automated benchmark evaluation console app.
+The solution includes an extensive, multi-tiered test suite (**215+ automated tests** across unit, integration, and E2E suites) as well as an automated benchmark evaluation console app.
 
 ### Running Automated Tests
 

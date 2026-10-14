@@ -87,9 +87,15 @@ Main endpoints:
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Health check. |
-| `GET /api/documents` | Lists known documents, merging repository and vector metadata. |
-| `POST /api/documents/upload` | Uploads and processes PDF documents. |
+| `GET /api/documents` | Lists known documents (supports `page`, `pageSize`, and `search` query parameters). |
+| `POST /api/documents/upload` | Uploads and processes PDF documents (supports synchronous and `?background=true`). |
+| `DELETE /api/documents/{id}` | Deletes a document: removes physical PDF file, SQLite record, and Qdrant chunks. |
+| `GET /api/documents/{fileName}/status` | Checks indexing status and detected language for a specific file. |
 | `POST /api/query` | Runs semantic search and asks Gemini for an answer. |
+| `GET /api/query/stream` | Server-Sent Events (SSE) streaming endpoint for real-time answer generation. |
+| `GET /databeregning` | Retrieves calculation history from ECIT Automate workqueue robot. |
+| `POST /databeregning` | Submits new calculation with fan specifications to workqueue robot. |
+| `GET /databeregningsform` | Serves standalone databeregning HTML form. |
 | `/uploads/...` | Serves uploaded PDFs so citations can link back to documents. |
 
 ## Worker Project
@@ -103,21 +109,23 @@ Important files and folders:
 | Path | Purpose |
 | --- | --- |
 | `Program.cs` | Worker dependency injection and hosted-service setup. |
-| `Worker.cs` | Main ingestion worker. |
+| `Worker.cs` | Main ingestion worker (conditional startup seeding via `SEED_DATA=true`). |
 | `HostedServices/PeriodicCleanupService.cs` | Periodic cleanup of temporary upload files. |
 
-The Worker indexes PDFs from `data/Generelt/` and writes embeddings into Qdrant using the shared Core and Infrastructure services.
+The Worker indexes PDFs from `data/Generelt/` (when `SEED_DATA=true`) and writes embeddings into Qdrant using the shared Core and Infrastructure services.
 
 ## Tests
 
 Path: `tests`
 
+The solution includes 215+ automated tests across the test projects:
+
 | Project | Purpose |
 | --- | --- |
-| `UnitTests` | Fast tests for chunking, document processing, and markdown/table behavior. |
-| `IntegrationTests` | Tests Qdrant vector store behavior, using Testcontainers when Docker is available. |
-| `E2ETests` | Exercises upload and query flows through the WebApi. |
-| `TestData/` | Shared test files such as `sample.pdf`. |
+| `UnitTests` | Fast tests for chunking, document processing, language detection (18+ languages), markdown table formatting, and specialized workflows. |
+| `IntegrationTests` | Tests Qdrant vector store behavior, point insertion, chunk deletion, and payload preservation using Testcontainers. |
+| `E2ETests` | Exercises full ASP.NET Core API flows (upload, deletion, pagination, query, authentication). |
+| `TestData/` | Shared test files such as `sample.pdf` and Danish companion sample. |
 
 ## Where To Put New Code
 
