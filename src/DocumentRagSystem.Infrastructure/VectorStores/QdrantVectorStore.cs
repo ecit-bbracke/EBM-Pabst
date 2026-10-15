@@ -91,6 +91,19 @@ public class QdrantVectorStore : IVectorStore
                     "text",
                     PayloadSchemaType.Text
                 );
+
+                // Add keyword indexes for fast deletion and positional neighbor expansion
+                await _client.CreatePayloadIndexAsync(
+                    _collectionName,
+                    "document_id",
+                    PayloadSchemaType.Keyword
+                );
+                
+                await _client.CreatePayloadIndexAsync(
+                    _collectionName,
+                    "article_id",
+                    PayloadSchemaType.Keyword
+                );
             }
 
             _embeddingSize = vectorSize;
