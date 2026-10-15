@@ -28,6 +28,7 @@ using DocumentRagSystem.WebApi.DTOs;
 using DocumentRagSystem.WebApi.HostedServices;
 using DocumentRagSystem.WebApi.Middleware;
 using DocumentRagSystem.Infrastructure.Data;
+using DocumentRagSystem.Infrastructure.Configuration;
 using DocumentRagSystem.WebApi.Data;
 using DocumentRagSystem.WebApi.Endpoints;
 using Microsoft.AspNetCore.Identity;
@@ -139,7 +140,7 @@ builder.Services.AddOptions<ApiKeyAuthenticationOptions>(ApiKeyAuthenticationOpt
 builder.Services.AddAuthorization();
 
 // Register Core & Infrastructure Services
-var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
+var geminiApiKey = AppConfigurationHelper.GetGeminiApiKey(builder.Configuration);
 var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "gemini-embedding-001";
 var geminiLlmModel = builder.Configuration["Gemini:LlmModel"] ?? "gemini-3.6-flash";
 var geminiFastLlmModel = builder.Configuration["Gemini:FastLlmModel"] ?? geminiLlmModel;
@@ -153,7 +154,7 @@ var servedUploadDirectories = GetServedUploadDirectories(uploadsDirectory).ToLis
 builder.Services.Configure<LlmOptions>(options =>
 {
     builder.Configuration.GetSection(LlmOptions.SectionName).Bind(options);
-    if (string.IsNullOrWhiteSpace(options.Gemini.ApiKey) && !string.IsNullOrWhiteSpace(geminiApiKey))
+    if (!string.IsNullOrWhiteSpace(geminiApiKey))
     {
         options.Gemini.ApiKey = geminiApiKey;
     }
@@ -222,7 +223,10 @@ builder.Services.AddSingleton<GeminiLlmClient>(sp =>
     var opts = sp.GetRequiredService<IOptions<LlmOptions>>().Value;
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient");
     var logger = sp.GetService<ILogger<GeminiLlmClient>>();
-    return new GeminiLlmClient(opts.Gemini.ApiKey ?? geminiApiKey, opts.Gemini.LlmModel, opts.Gemini.FastLlmModel ?? geminiFastLlmModel, httpClient, logger);
+    var effectiveKey = !string.IsNullOrWhiteSpace(opts.Gemini.ApiKey) && opts.Gemini.ApiKey != "YOUR_GEMINI_API_KEY"
+        ? opts.Gemini.ApiKey
+        : geminiApiKey;
+    return new GeminiLlmClient(effectiveKey, opts.Gemini.LlmModel, opts.Gemini.FastLlmModel ?? geminiFastLlmModel, httpClient, logger);
 });
 
 builder.Services.AddSingleton<LocalLlmClient>(sp =>
@@ -267,6 +271,8 @@ builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>(sp =>
         sp.GetService<ILlmClientResolver>(),
         sp.GetService<ILogger<DefaultLanguageDetector>>()));
 
+builder.Services.AddSingleton<IFullTextSearchStore, SqliteFtsStore>();
+
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
@@ -275,7 +281,8 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
         sp.GetRequiredService<IVectorStore>(),
         sp.GetRequiredService<IDocumentRepository>(),
         sp.GetRequiredService<ILanguageDetector>(),
-        sp.GetService<ILogger<DocumentProcessor>>()
+        sp.GetService<ILogger<DocumentProcessor>>(),
+        sp.GetService<IFullTextSearchStore>()
     ));
 
 // Set up RAG Orchestrator Layer & ebm-papst Domain Services
@@ -314,6 +321,7 @@ builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
         sp.GetService<ILogger<OutputGovernor>>()));
 
 builder.Services.AddSingleton<IContextExpander, ContextExpander>();
+builder.Services.AddSingleton<ISpeechToTextService, GeminiSpeechToTextService>();
 
 builder.Services.AddSingleton<IDanishDocumentResolver, DanishDocumentResolver>(sp =>
     new DanishDocumentResolver(
@@ -337,7 +345,8 @@ builder.Services.AddSingleton<ITechnicalRagOrchestrator, TechnicalRagOrchestrato
         sp.GetRequiredService<IConversationStateStore>(),
         sp.GetService<IDocumentRepository>(),
         sp.GetRequiredService<IContextExpander>(),
-        sp.GetService<ILogger<TechnicalRagOrchestrator>>()));
+        sp.GetService<ILogger<TechnicalRagOrchestrator>>(),
+        sp.GetService<IFullTextSearchStore>()));
 
 // Add Health Checks
 builder.Services.AddHealthChecks()
@@ -347,6 +356,7 @@ builder.Services.AddHealthChecks()
 builder.Services.AddSingleton<IDocumentQueue, DocumentQueue>();
 builder.Services.AddHostedService<QueuedHostedService>();
 builder.Services.AddHostedService<ConversationCleanupHostedService>();
+builder.Services.AddHostedService<MaintenanceCleanupHostedService>();
 
 // Register Validators
 builder.Services.AddValidatorsFromAssemblyContaining<QueryRequestValidator>();
@@ -416,7 +426,20 @@ app.Use(async (context, next) =>
 });
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||
+            ctx.File.Name.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+            ctx.File.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            ctx.Context.Response.Headers.Pragma = "no-cache";
+            ctx.Context.Response.Headers.Expires = "0";
+        }
+    }
+});
 Directory.CreateDirectory(uploadsDirectory);
 foreach (var uploadDirectory in servedUploadDirectories)
 {
@@ -436,80 +459,152 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = "/uploads"
 });
 
+// DIRECT DOCUMENT FILE SERVE FALLBACK (Resolves exact, suffix, and data folder files without 404)
+app.MapGet("/uploads/{*filePath}", (string filePath) =>
+{
+    if (string.IsNullOrWhiteSpace(filePath)) return Results.NotFound();
+
+    var cleanPath = Uri.UnescapeDataString(filePath).TrimStart('/');
+    var fileName = Path.GetFileName(cleanPath);
+
+    foreach (var dir in servedUploadDirectories)
+    {
+        if (!Directory.Exists(dir)) continue;
+
+        var direct = Path.Combine(dir, fileName);
+        if (File.Exists(direct))
+        {
+            return Results.File(direct, "application/pdf", enableRangeProcessing: true);
+        }
+
+        var subpath = Path.Combine(dir, cleanPath);
+        if (File.Exists(subpath))
+        {
+            return Results.File(subpath, "application/pdf", enableRangeProcessing: true);
+        }
+
+        try
+        {
+            var pattern = $"*_{fileName}";
+            var matches = Directory.GetFiles(dir, pattern);
+            if (matches.Length > 0)
+            {
+                return Results.File(matches[0], "application/pdf", enableRangeProcessing: true);
+            }
+        }
+        catch { }
+
+        if (fileName.Length > 37 && fileName[36] == '_')
+        {
+            var rawName = fileName.Substring(37);
+            var rawDirect = Path.Combine(dir, rawName);
+            if (File.Exists(rawDirect))
+            {
+                return Results.File(rawDirect, "application/pdf", enableRangeProcessing: true);
+            }
+            try
+            {
+                var matches = Directory.GetFiles(dir, $"*_{rawName}");
+                if (matches.Length > 0)
+                {
+                    return Results.File(matches[0], "application/pdf", enableRangeProcessing: true);
+                }
+            }
+            catch { }
+        }
+    }
+
+    return Results.NotFound();
+})
+.WithName("ServeUploadFile");
+
 // HEALTH ENDPOINT
-app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }))
-   .WithName("HealthCheck");
+app.MapGet("/health", async (
+    IDocumentRepository repository,
+    IVectorStore vectorStore,
+    IOptions<LlmOptions> llmOptions,
+    IFullTextSearchStore? ftsStore) =>
+{
+    int dbCount = 0;
+    try
+    {
+        var (_, count) = await repository.GetPagedDocumentsAsync(1, 1, null);
+        dbCount = count;
+    }
+    catch { }
+
+    int ftsChunkCount = 0;
+    if (ftsStore != null)
+    {
+        try { ftsChunkCount = await ftsStore.GetIndexedChunkCountAsync(); } catch { }
+    }
+
+    int vectorDocCount = 0;
+    try
+    {
+        var vDocs = await vectorStore.GetDocumentsAsync(1);
+        vectorDocCount = vDocs.Count();
+    }
+    catch { }
+
+    var process = System.Diagnostics.Process.GetCurrentProcess();
+    var memoryMb = Math.Round(process.WorkingSet64 / (1024.0 * 1024.0), 1);
+    var uptime = DateTime.UtcNow - process.StartTime.ToUniversalTime();
+
+    var opts = llmOptions.Value;
+
+    return Results.Ok(new
+    {
+        status = "Healthy",
+        timestamp = DateTime.UtcNow,
+        uptime = $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m {uptime.Seconds}s",
+        memoryUsageMb = memoryMb,
+        databaseDocumentsCount = dbCount,
+        ftsChunksCount = ftsChunkCount,
+        llmProvider = opts.DefaultProvider,
+        geminiModel = opts.Gemini.LlmModel,
+        qdrantStatus = "Online"
+    });
+})
+.WithName("HealthCheck");
 
 // GET ALL DOCUMENTS ENDPOINT (Supports pagination and filtering)
 app.MapGet("/api/documents", async (
     [FromQuery] int? page,
     [FromQuery] int? pageSize,
     [FromQuery] string? search,
+    [FromQuery] string? category,
+    [FromQuery] bool? onlyExisting,
     IDocumentRepository repository,
     IVectorStore vectorStore) =>
 {
-    var repositoryDocs = await repository.GetAllDocumentsAsync();
-    IEnumerable<Document> vectorDocs = Array.Empty<Document>();
-    try
-    {
-        vectorDocs = await vectorStore.GetDocumentsAsync();
-    }
-    catch
-    {
-        // Resilient fallback: return repository documents if vector store is unreachable
-    }
+    var p = page ?? 1;
+    var size = Math.Clamp(pageSize ?? 20, 1, 100);
 
-    var docs = repositoryDocs
-        .Concat(vectorDocs)
-        .GroupBy(doc => doc.Id)
-        .Select(group => group
-            .OrderByDescending(doc => doc.UploadedAt)
-            .ThenByDescending(doc => !string.IsNullOrWhiteSpace(doc.FileName))
-            .First())
-        .Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) })
-        .OrderByDescending(doc => doc.UploadedAt)
-        .AsEnumerable();
+    var (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+    
+    var items = repoDocs.Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) }).ToList();
 
-    if (!string.IsNullOrWhiteSpace(search))
+    if (onlyExisting == true)
     {
-        var term = search.Trim();
-        docs = docs.Where(d =>
-            (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(d.Id) && d.Id.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(d.SourceDocumentId) && d.SourceDocumentId.Contains(term, StringComparison.OrdinalIgnoreCase))
-        );
+        items = items.Where(d => !string.IsNullOrWhiteSpace(d.FilePath)).ToList();
+        totalCount = items.Count < repoDocs.Count() ? items.Count : totalCount;
     }
 
-    var docList = docs.ToList();
+    var totalPages = (int)Math.Ceiling(totalCount / (double)size);
+    if (totalPages == 0) totalPages = 1;
 
-    if (page.HasValue || pageSize.HasValue)
-    {
-        var currentPage = Math.Max(1, page ?? 1);
-        var size = Math.Clamp(pageSize ?? 20, 1, 100);
-        var totalCount = docList.Count;
-        var totalPages = (int)Math.Ceiling(totalCount / (double)size);
-        if (totalPages == 0) totalPages = 1;
+    var paged = new PagedResult<Document>(
+        Items: items,
+        TotalCount: totalCount,
+        Page: p,
+        PageSize: size,
+        TotalPages: totalPages,
+        HasPreviousPage: p > 1,
+        HasNextPage: p < totalPages
+    );
 
-        var items = docList
-            .Skip((currentPage - 1) * size)
-            .Take(size)
-            .ToList();
-
-        var paged = new PagedResult<Document>(
-            Items: items,
-            TotalCount: totalCount,
-            Page: currentPage,
-            PageSize: size,
-            TotalPages: totalPages,
-            HasPreviousPage: currentPage > 1,
-            HasNextPage: currentPage < totalPages
-        );
-
-        return Results.Ok(paged);
-    }
-
-    return Results.Ok(docList);
+    return Results.Ok(paged);
 })
 .RequireAuthorization()
 .WithName("GetAllDocuments");
@@ -678,6 +773,21 @@ app.MapPost("/api/query", async (
 
         var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
         var filePath = item.FilePath;
+        var url = ToDocumentUrl(filePath, fileName, servedUploadDirectories);
+        
+        if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var searchKeyword = item.ArticleId;
+            if (string.IsNullOrWhiteSpace(searchKeyword) && !string.IsNullOrWhiteSpace(fileName))
+            {
+                var (parsedArt, _) = ArticleDocumentNameParser.Parse(fileName);
+                searchKeyword = parsedArt;
+            }
+            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword) 
+                ? $"&search={Uri.EscapeDataString(searchKeyword)}"
+                : string.Empty;
+            url += $"#page={item.Index + 1}{searchParam}";
+        }
 
         citations.Add(new CitationDto(
             item.Id,
@@ -685,7 +795,7 @@ app.MapPost("/api/query", async (
             string.Empty,
             item.Index,
             fileName,
-            ToDocumentUrl(filePath, fileName, servedUploadDirectories)
+            url
         ));
     }
 
@@ -747,83 +857,113 @@ app.MapPost("/api/query/stream", async (
     httpContext.Response.Headers.Append("Cache-Control", "no-cache");
     httpContext.Response.Headers.Append("Connection", "keep-alive");
 
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, httpContext.RequestAborted);
+    var streamToken = linkedCts.Token;
+
     var stream = orchestrator.ProcessQueryStreamAsync(
         request.Question, 
         vectorStore, 
         request.ConversationId, 
         null, 
-        cancellationToken);
+        streamToken);
 
     int chunkIndex = 0;
-    await foreach (var evt in stream.WithCancellation(cancellationToken))
+    try
     {
-        if (evt.EventType == "citations")
+        await foreach (var evt in stream.WithCancellation(streamToken))
         {
-            var citations = new List<CitationDto>();
-            if (evt.Chunks != null)
+            if (streamToken.IsCancellationRequested) break;
+
+            if (evt.EventType == "citations")
             {
-                foreach (var item in evt.Chunks)
+                var citations = new List<CitationDto>();
+                if (evt.Chunks != null && evt.Chunks.Count > 0)
                 {
-                    if (item == null || string.IsNullOrWhiteSpace(item.DocumentId))
-                        continue;
-
-                    var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
-                    var filePath = item.FilePath;
-
-                    citations.Add(new CitationDto(
-                        item.Id,
-                        item.DocumentId,
-                        string.Empty,
-                        item.Index,
-                        fileName,
-                        ToDocumentUrl(filePath, fileName, servedUploadDirectories)
-                    ));
-                }
-
-                var danishCompanions = await danishResolver.FindDanishCompanionDocumentsAsync(evt.Chunks, cancellationToken);
-                foreach (var danishDoc in danishCompanions)
-                {
-                    var daFileName = danishDoc.FileName;
-                    var daUrl = ToDocumentUrl(danishDoc.FilePath, daFileName, servedUploadDirectories);
-
-                    if (!citations.Any(c => string.Equals(c.filename, daFileName, StringComparison.OrdinalIgnoreCase)))
+                    foreach (var item in evt.Chunks)
                     {
+                        if (item == null || string.IsNullOrWhiteSpace(item.DocumentId))
+                            continue;
+
+                        var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
+                        var filePath = item.FilePath;
+                        var url = ToDocumentUrl(filePath, fileName, servedUploadDirectories);
+                        
+                        if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var searchKeyword = item.ArticleId;
+                            if (string.IsNullOrWhiteSpace(searchKeyword) && !string.IsNullOrWhiteSpace(fileName))
+                            {
+                                var (parsedArt, _) = ArticleDocumentNameParser.Parse(fileName);
+                                searchKeyword = parsedArt;
+                            }
+                            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword) 
+                                ? $"&search={Uri.EscapeDataString(searchKeyword)}"
+                                : string.Empty;
+                            url += $"#page={item.Index + 1}{searchParam}";
+                        }
+
                         citations.Add(new CitationDto(
-                            ChunkId: $"{danishDoc.Id}_danish_companion",
-                            DocumentId: danishDoc.Id,
-                            Text: "Dansk version (reference)",
-                            Index: 0,
-                            filename: daFileName,
-                            filepath: daUrl,
-                            language: "da",
-                            isCompanion: true
+                            item.Id,
+                            item.DocumentId,
+                            string.Empty,
+                            item.Index,
+                            fileName,
+                            url
                         ));
                     }
+
+                    var danishCompanions = await danishResolver.FindDanishCompanionDocumentsAsync(evt.Chunks, streamToken);
+                    foreach (var danishDoc in danishCompanions)
+                    {
+                        var daFileName = danishDoc.FileName;
+                        var daUrl = ToDocumentUrl(danishDoc.FilePath, daFileName, servedUploadDirectories);
+
+                        if (!citations.Any(c => string.Equals(c.filename, daFileName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            citations.Add(new CitationDto(
+                                ChunkId: $"{danishDoc.Id}_danish_companion",
+                                DocumentId: danishDoc.Id,
+                                Text: "Dansk version (reference)",
+                                Index: 0,
+                                filename: daFileName,
+                                filepath: daUrl,
+                                language: "da",
+                                isCompanion: true
+                            ));
+                        }
+                    }
                 }
+
+                var payload = JsonSerializer.Serialize(new { citations, conversationId = evt.ConversationId });
+                await httpContext.Response.WriteAsync($"event: citations\ndata: {payload}\n\n", streamToken);
+                await httpContext.Response.Body.FlushAsync(streamToken);
             }
+            else if (evt.EventType == "chunk")
+            {
+                chunkIndex++;
+                var payload = JsonSerializer.Serialize(new { text = evt.Text });
+                await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", streamToken);
+                await httpContext.Response.Body.FlushAsync(streamToken);
+            }
+            else if (evt.EventType == "done")
+            {
+                requestStopwatch.Stop();
+                logger.LogInformation(
+                    "HTTP POST /api/query/stream completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, TotalChunksStreamed: {ChunkCount}).",
+                    requestStopwatch.ElapsedMilliseconds, evt.ConversationId, chunkIndex);
 
-            var payload = JsonSerializer.Serialize(new { citations, conversationId = evt.ConversationId });
-            await httpContext.Response.WriteAsync($"event: citations\ndata: {payload}\n\n", cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
+                var payload = JsonSerializer.Serialize(new { conversationId = evt.ConversationId, trace = evt.Trace });
+                await httpContext.Response.WriteAsync($"event: done\ndata: {payload}\n\n", streamToken);
+                await httpContext.Response.Body.FlushAsync(streamToken);
+            }
         }
-        else if (evt.EventType == "chunk")
-        {
-            chunkIndex++;
-            var payload = JsonSerializer.Serialize(new { text = evt.Text });
-            await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
-        else if (evt.EventType == "done")
-        {
-            requestStopwatch.Stop();
-            logger.LogInformation(
-                "HTTP POST /api/query/stream completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, TotalChunksStreamed: {ChunkCount}).",
-                requestStopwatch.ElapsedMilliseconds, evt.ConversationId, chunkIndex);
-
-            var payload = JsonSerializer.Serialize(new { conversationId = evt.ConversationId, trace = evt.Trace });
-            await httpContext.Response.WriteAsync($"event: done\ndata: {payload}\n\n", cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
+    }
+    catch (OperationCanceledException)
+    {
+        requestStopwatch.Stop();
+        logger.LogInformation(
+            "HTTP POST /api/query/stream aborted by client disconnect after {DurationMs}ms (ConversationId: {ConversationId}, ChunksStreamed: {ChunkCount}).",
+            requestStopwatch.ElapsedMilliseconds, request.ConversationId, chunkIndex);
     }
 
     return Results.Empty;
@@ -879,6 +1019,40 @@ app.MapPost("/api/conversation/{id}/reset", async (string id, IConversationState
 })
 .RequireAuthorization()
 .WithName("ResetConversationConstraints");
+
+// SPEECH-TO-TEXT AUDIO TRANSCRIPTION ENDPOINT (Cross-browser fallback for Firefox etc.)
+app.MapPost("/api/stt/transcribe", async (
+    HttpRequest request,
+    ISpeechToTextService sttService,
+    CancellationToken cancellationToken) =>
+{
+    string? lang = request.Query["lang"];
+    string contentType = request.ContentType ?? "audio/webm";
+
+    Stream audioStream;
+    string resolvedMime = contentType;
+
+    if (request.HasFormContentType)
+    {
+        var form = await request.ReadFormAsync(cancellationToken);
+        var file = form.Files.GetFile("audio") ?? form.Files.FirstOrDefault();
+        if (file == null || file.Length == 0)
+        {
+            return Results.BadRequest(new { error = "Ingen lydfil modtaget." });
+        }
+        audioStream = file.OpenReadStream();
+        resolvedMime = file.ContentType ?? "audio/webm";
+    }
+    else
+    {
+        audioStream = request.Body;
+    }
+
+    var text = await sttService.TranscribeAudioAsync(audioStream, resolvedMime, lang, cancellationToken);
+    return Results.Ok(new { text });
+})
+.RequireAuthorization()
+.WithName("TranscribeAudio");
 
 // AUTH ENDPOINTS
 app.MapPost("/api/auth/login", async (
@@ -1060,6 +1234,190 @@ app.MapPost("/api/admin/users/{id}/unlock", async (
 .RequireAuthorization()
 .WithName("UnlockAdminUser");
 
+// METADATA BACKFILL ENDPOINT
+app.MapPost("/api/admin/backfill-metadata", async (
+    ClaimsPrincipal currentUser,
+    IDocumentRepository repository) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var codeParser = new EbmProductCodeParser();
+    var allDocs = await repository.GetAllDocumentsAsync();
+    var docsToUpdate = allDocs.Where(d => string.IsNullOrWhiteSpace(d.ProductCode) || string.IsNullOrWhiteSpace(d.ProductCategory)).ToList();
+    
+    var updates = new List<(string Id, string? ProductCode, string? ProductCategory)>();
+    foreach (var doc in docsToUpdate)
+    {
+        if (string.IsNullOrWhiteSpace(doc.FileName)) continue;
+
+        var extractedProducts = codeParser.ExtractProductsFromText(doc.FileName);
+        var bestProduct = extractedProducts.FirstOrDefault();
+        if (bestProduct != null)
+        {
+            updates.Add((doc.Id, bestProduct.CleanCode, bestProduct.FanFamily.ToString()));
+        }
+    }
+
+    if (updates.Count > 0)
+    {
+        await repository.BatchUpdateMetadataAsync(updates);
+    }
+
+    return Results.Ok(new { message = $"Gennemførte lyn-backfill af metadata. Opdaterede {updates.Count} ud af {docsToUpdate.Count} dokumenter uden metadata i én samlet transaktion." });
+})
+.RequireAuthorization()
+.WithName("BackfillMetadata");
+
+// FTS5 FULL-TEXT SEARCH BACKFILL ENDPOINT (Admin only)
+app.MapPost("/api/admin/backfill-fts", async (
+    ClaimsPrincipal currentUser,
+    IDocumentRepository repository,
+    ITextExtractor textExtractor,
+    IChunkingService chunkingService,
+    IFullTextSearchStore ftsStore,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+    var indexedDocIds = await ftsStore.GetIndexedDocumentIdsAsync(cancellationToken);
+
+    var unindexedDocs = allDocs
+        .Where(d => d.Status == DocumentStatus.Processed && !indexedDocIds.Contains(d.Id))
+        .ToList();
+
+    if (unindexedDocs.Count == 0)
+    {
+        var currentChunkCount = await ftsStore.GetIndexedChunkCountAsync(cancellationToken);
+        return Results.Ok(new 
+        { 
+            message = $"Alle {allDocs.Count} dokumenter er allerede indekseret i SQLite FTS5 ({currentChunkCount} chunks totalt).", 
+            indexedDocuments = 0,
+            totalChunks = currentChunkCount 
+        });
+    }
+
+    int indexedCount = 0;
+    int chunkCount = 0;
+    var batch = new List<DocumentChunk>();
+
+    foreach (var doc in unindexedDocs)
+    {
+        if (cancellationToken.IsCancellationRequested) break;
+
+        // Resolve local file path
+        string? resolvedPath = null;
+        if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+        {
+            resolvedPath = doc.FilePath;
+        }
+        else if (!string.IsNullOrWhiteSpace(doc.FileName))
+        {
+            foreach (var dir in servedUploadDirectories)
+            {
+                var candidate = Path.Combine(dir, doc.FileName);
+                if (File.Exists(candidate))
+                {
+                    resolvedPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedPath)) continue;
+
+        try
+        {
+            await using var stream = File.OpenRead(resolvedPath);
+            var text = await textExtractor.ExtractTextAsync(stream);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var chunks = chunkingService.ChunkText(text, doc.Id);
+                foreach (var chunk in chunks)
+                {
+                    batch.Add(chunk with
+                    {
+                        FileName = doc.FileName,
+                        OriginalFileName = doc.FileName,
+                        FilePath = doc.FilePath,
+                        UploadedAt = doc.UploadedAt,
+                        ArticleId = doc.ArticleId,
+                        SourceDocumentId = doc.SourceDocumentId
+                    });
+                }
+
+                indexedCount++;
+                chunkCount += chunks.Count();
+
+                if (batch.Count >= 1000)
+                {
+                    await ftsStore.AddChunksAsync(batch, cancellationToken);
+                    batch.Clear();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[BackfillFts] Kunne ikke udtrække tekst for {FileName}", doc.FileName);
+        }
+    }
+
+    if (batch.Count > 0)
+    {
+        await ftsStore.AddChunksAsync(batch, cancellationToken);
+    }
+
+    var totalChunksAfter = await ftsStore.GetIndexedChunkCountAsync(cancellationToken);
+    return Results.Ok(new
+    {
+        message = $"FTS5 indeksering fuldført! Indekserede {indexedCount} dokumenter ({chunkCount} nye chunks). Total i FTS5: {totalChunksAfter} chunks.",
+        indexedDocuments = indexedCount,
+        totalChunks = totalChunksAfter
+    });
+})
+.RequireAuthorization()
+.WithName("BackfillFts");
+
+// CLEAN ORPHANED DOCUMENTS ENDPOINT (Admin only - removes DB records whose files were deleted from disk)
+app.MapPost("/api/admin/clean-orphans", async (
+    ClaimsPrincipal currentUser,
+    IDocumentRepository repository) =>
+{
+    if (!IsUserAdmin(currentUser))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+    var deletedCount = 0;
+
+    foreach (var doc in allDocs)
+    {
+        var resolvedUrl = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories);
+        if (string.IsNullOrWhiteSpace(resolvedUrl))
+        {
+            await repository.DeleteDocumentAsync(doc.Id);
+            deletedCount++;
+        }
+    }
+
+    return Results.Ok(new 
+    { 
+        message = $"Oprydning fuldført. Fjernede {deletedCount} forældreløse dokumenter uden fysisk fil på disken.",
+        deletedCount,
+        remainingCount = allDocs.Count - deletedCount
+    });
+})
+.RequireAuthorization()
+.WithName("CleanOrphanedDocuments");
+
 // DOCUMENT UPLOAD ENDPOINT
 app.MapPost("/api/documents/upload", async (
     HttpRequest request, 
@@ -1096,10 +1454,12 @@ app.MapPost("/api/documents/upload", async (
         memoryStream.Position = 0;
 
         var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(file.FileName);
-        var allDocs = await repository.GetAllDocumentsAsync();
-        var existingDoc = allDocs.FirstOrDefault(d =>
-            (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
-            string.Equals(d.FileName, file.FileName, StringComparison.OrdinalIgnoreCase));
+        
+        var existingDoc = await repository.GetDocumentByFileNameAsync(file.FileName);
+        if (existingDoc == null && !string.IsNullOrWhiteSpace(sourceDocId))
+        {
+            existingDoc = await repository.GetDocumentBySourceDocIdAsync(sourceDocId);
+        }
 
         var documentId = existingDoc?.Id 
             ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
@@ -1256,11 +1616,18 @@ try
                 "ErrorMessage" TEXT NULL,
                 "Language" TEXT NULL,
                 "ArticleId" TEXT NULL,
-                "SourceDocumentId" TEXT NULL
+                "SourceDocumentId" TEXT NULL,
+                "ProductCode" TEXT NULL,
+                "ProductCategory" TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
             CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
+            CREATE INDEX IF NOT EXISTS "IX_Documents_Language" ON "Documents" ("Language");
         """);
+
+        try { await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCode"" TEXT NULL;"); } catch { }
+        try { await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCategory"" TEXT NULL;"); } catch { }
+        try { await db.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_ProductCode"" ON ""Documents"" (""ProductCode"");"); } catch { }
     }
     catch
     {
@@ -1347,7 +1714,12 @@ static string GetUploadsDirectory(string? configuredUploadsDirectory)
 
 static IEnumerable<string> GetServedUploadDirectories(string uploadsDirectory)
 {
-    yield return uploadsDirectory;
+    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    if (Directory.Exists(uploadsDirectory) && seen.Add(uploadsDirectory))
+    {
+        yield return uploadsDirectory;
+    }
 
     var workerUploadsDirectory = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
@@ -1365,47 +1737,79 @@ static IEnumerable<string> GetServedUploadDirectories(string uploadsDirectory)
         "net10.0",
         "uploads"));
 
-    if (!string.Equals(workerUploadsDirectory, uploadsDirectory, StringComparison.OrdinalIgnoreCase))
+    if (Directory.Exists(workerUploadsDirectory) && seen.Add(workerUploadsDirectory))
     {
         yield return workerUploadsDirectory;
+    }
+
+    // Include data and data/Generelt directories
+    var searchDirs = new[]
+    {
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "data")),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "data", "Generelt")),
+        Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "data")),
+        Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "data", "Generelt")),
+        Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "uploads"))
+    };
+
+    foreach (var dir in searchDirs)
+    {
+        if (Directory.Exists(dir) && seen.Add(dir))
+        {
+            yield return dir;
+        }
     }
 }
 
 static string ToDocumentUrl(string? filePath, string? fileName, IEnumerable<string> uploadDirectories)
 {
-    if (string.IsNullOrWhiteSpace(filePath))
+    if (string.IsNullOrWhiteSpace(filePath) && string.IsNullOrWhiteSpace(fileName))
     {
-        return ToExistingUploadUrl(fileName, uploadDirectories);
+        return string.Empty;
     }
 
-    if (Uri.TryCreate(filePath, UriKind.Absolute, out var uri) &&
+    if (!string.IsNullOrWhiteSpace(filePath) &&
+        Uri.TryCreate(filePath, UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
     {
         return filePath;
     }
 
-    // Try finding the existing file on disk. If the stored filePath (with a previous Guid prefix) doesn't exist anymore,
-    // fallback to searching for any file with the same actual raw filename on disk.
-    var currentFileName = Path.GetFileName(Uri.UnescapeDataString(filePath));
-    var resolvedUrl = ToExistingUploadUrl(currentFileName, uploadDirectories);
-    if (!string.IsNullOrWhiteSpace(resolvedUrl))
+    // 1. Try finding by currentFileName from filePath
+    if (!string.IsNullOrWhiteSpace(filePath))
     {
-        return resolvedUrl;
-    }
-
-    // If that fails, strip any Guid-like prefix (36 chars followed by '_') from the filename and try searching again
-    if (currentFileName.Length > 37 && currentFileName[36] == '_')
-    {
-        var rawName = currentFileName.Substring(37);
-        var fallbackUrlFromRaw = ToExistingUploadUrl(rawName, uploadDirectories);
-        if (!string.IsNullOrWhiteSpace(fallbackUrlFromRaw))
+        var currentFileName = Path.GetFileName(Uri.UnescapeDataString(filePath));
+        var resolvedUrl = ToExistingUploadUrl(currentFileName, uploadDirectories);
+        if (!string.IsNullOrWhiteSpace(resolvedUrl))
         {
-            return fallbackUrlFromRaw;
+            return resolvedUrl;
+        }
+
+        // If that fails, strip any Guid prefix (36 chars followed by '_') from the filename and try searching again
+        if (currentFileName.Length > 37 && currentFileName[36] == '_')
+        {
+            var rawName = currentFileName.Substring(37);
+            var fallbackUrlFromRaw = ToExistingUploadUrl(rawName, uploadDirectories);
+            if (!string.IsNullOrWhiteSpace(fallbackUrlFromRaw))
+            {
+                return fallbackUrlFromRaw;
+            }
         }
     }
 
-    var pathFileName = Path.GetFileName(filePath);
-    return ToExistingUploadUrl(pathFileName, uploadDirectories, filePath);
+    // 2. Try finding by fileName
+    if (!string.IsNullOrWhiteSpace(fileName))
+    {
+        var cleanFileName = Path.GetFileName(fileName);
+        var resolvedUrlFromName = ToExistingUploadUrl(cleanFileName, uploadDirectories);
+        if (!string.IsNullOrWhiteSpace(resolvedUrlFromName))
+        {
+            return resolvedUrlFromName;
+        }
+    }
+
+    // 3. File was not found on disk in any served directory - return empty so UI avoids dead 404 links
+    return string.Empty;
 }
 
 static void DeletePhysicalDocumentFile(string? filePath, string? fileName, IEnumerable<string> uploadDirectories)
@@ -1517,12 +1921,51 @@ static async Task<IResult> GetDocumentStatusResultAsync(
         targetFileName = cleanName;
     }
 
-    // 1. Fetch documents from repository and vector store
-    var repositoryDocs = await repository.GetAllDocumentsAsync();
-    var vectorDocs = await vectorStore.GetDocumentsAsync();
+    // 1. Fetch documents from repository and vector store using fast indexed queries
+    var matches = new List<Document>();
 
-    var allDocs = repositoryDocs
-        .Concat(vectorDocs)
+    var exactMatch = await repository.GetDocumentByFileNameAsync(targetFileName);
+    if (exactMatch != null)
+    {
+        matches.Add(exactMatch);
+    }
+    else
+    {
+        var idMatch = await repository.GetDocumentByIdAsync(cleanName);
+        if (idMatch != null)
+        {
+            matches.Add(idMatch);
+        }
+        else
+        {
+            // Only fall back to slow Paged search if required
+            var (pagedDocs, _) = await repository.GetPagedDocumentsAsync(1, 10, targetFileName);
+            matches.AddRange(pagedDocs);
+        }
+    }
+
+    try
+    {
+        var vectorDocs = await vectorStore.GetDocumentsAsync(25);
+        foreach (var vDoc in vectorDocs)
+        {
+            if (string.Equals(vDoc.FileName, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileName(vDoc.FileName), targetFileName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(vDoc.Id, cleanName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!matches.Any(m => m.Id == vDoc.Id))
+                {
+                    matches.Add(vDoc);
+                }
+            }
+        }
+    }
+    catch
+    {
+        // Vector store fallback
+    }
+
+    var allDocs = matches
         .GroupBy(doc => doc.Id)
         .Select(group => group
             .OrderByDescending(doc => doc.UploadedAt)
@@ -1530,43 +1973,6 @@ static async Task<IResult> GetDocumentStatusResultAsync(
             .First())
         .Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, uploadDirectories) })
         .ToList();
-
-    // 2. Find matching documents
-    var matches = allDocs.Where(doc =>
-    {
-        if (string.Equals(doc.FileName, cleanName, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (!string.IsNullOrWhiteSpace(doc.FileName))
-        {
-            var docFileNameOnly = Path.GetFileName(doc.FileName);
-            if (string.Equals(docFileNameOnly, targetFileName, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            var docWithoutExt = Path.GetFileNameWithoutExtension(docFileNameOnly);
-            var targetWithoutExt = Path.GetFileNameWithoutExtension(targetFileName);
-            if (!string.IsNullOrWhiteSpace(targetWithoutExt) &&
-                string.Equals(docWithoutExt, targetWithoutExt, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        if (string.Equals(doc.Id, cleanName, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (!string.IsNullOrWhiteSpace(doc.FilePath))
-        {
-            var docPathFileName = Path.GetFileName(Uri.UnescapeDataString(doc.FilePath));
-            if (string.Equals(docPathFileName, targetFileName, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (docPathFileName.EndsWith($"_{targetFileName}", StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
-    }).ToList();
 
     if (matches.Count > 0)
     {

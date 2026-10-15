@@ -67,90 +67,279 @@
     </header>
 
     <!-- Main Content -->
-    <main class="container mx-auto px-6 py-8 flex-1 max-w-5xl space-y-8">
+    <main class="container mx-auto px-6 py-8 flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-        <!-- Top Section: Create User Card -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6">
-            <h2 class="text-base font-semibold text-slate-900 flex items-center mb-1">
-                <i class="fa-solid fa-user-plus text-brand-600 mr-2 text-sm"></i>
-                Opret ny bruger
-            </h2>
-            <p class="text-xs text-slate-400 mb-5">Tilføj nye medarbejdere med adgang til portalen.</p>
-
-            <!-- Status Banner -->
-            <div id="create-status" class="hidden mb-4 p-3 rounded-lg text-xs"></div>
-
-            <form id="create-user-form" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                <div>
-                    <label for="new-email" class="block text-xs font-medium text-slate-600 mb-1">Email adresse</label>
-                    <input 
-                        type="email" 
-                        id="new-email" 
-                        required 
-                        placeholder="bruger@ebmpabst.dk" 
-                        class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
-                </div>
-                <div>
-                    <label for="new-password" class="block text-xs font-medium text-slate-600 mb-1">Adgangskode (min. 6 tegn)</label>
-                    <input 
-                        type="password" 
-                        id="new-password" 
-                        required 
-                        minlength="6"
-                        placeholder="••••••••" 
-                        class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
-                </div>
-                <div>
-                    <button 
-                        type="submit" 
-                        id="create-btn"
-                        class="w-full bg-brand-600 hover:bg-brand-500 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm flex items-center justify-center space-x-2 cursor-pointer">
-                        <i class="fa-solid fa-plus text-xs"></i>
-                        <span>Opret bruger</span>
+        <!-- Venstre side: Systemstatus & Helbred Panel (1/3 bredde) -->
+        <div class="space-y-6 lg:col-span-1">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col lg:sticky lg:top-8">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                    <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                        <i class="fa-solid fa-heart-pulse text-emerald-500 mr-2 text-sm"></i>
+                        Systemstatus
+                    </h2>
+                    <button onclick="fetchSystemHealth()" class="text-slate-400 hover:text-brand-600 transition p-1.5 rounded hover:bg-slate-100 text-xs" title="Opdater status">
+                        <i id="health-refresh-icon" class="fa-solid fa-rotate"></i>
                     </button>
                 </div>
-            </form>
+
+                <div id="system-health-panel" class="space-y-4">
+                    <div class="flex items-center justify-center py-8">
+                        <div class="w-7 h-7 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex justify-between items-center">
+                    <span id="health-last-updated">Indlæser status...</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span> Online
+                    </span>
+                </div>
+            </div>
         </div>
 
-        <!-- Users Table Card -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
-            <div class="p-6 border-b border-slate-100 flex justify-between items-center">
-                <div>
-                    <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                        <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
-                        Eksisterende brugere
-                    </h2>
-                    <p class="text-xs text-slate-400 mt-0.5">Oversigt over alle registrerede konti.</p>
-                </div>
-                <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
-                    <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
-                </button>
+        <!-- Højre side: Opret bruger & Brugerliste (2/3 bredde) -->
+        <div class="lg:col-span-2 space-y-6">
+
+            <!-- Top Section: Create User Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6">
+                <h2 class="text-base font-semibold text-slate-900 flex items-center mb-1">
+                    <i class="fa-solid fa-user-plus text-brand-600 mr-2 text-sm"></i>
+                    Opret ny bruger
+                </h2>
+                <p class="text-xs text-slate-400 mb-5">Tilføj nye medarbejdere med adgang til portalen.</p>
+
+                <!-- Status Banner -->
+                <div id="create-status" class="hidden mb-4 p-3 rounded-lg text-xs"></div>
+
+                <form id="create-user-form" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div>
+                        <label for="new-email" class="block text-xs font-medium text-slate-600 mb-1">Email adresse</label>
+                        <input 
+                            type="email" 
+                            id="new-email" 
+                            required 
+                            placeholder="bruger@ebmpabst.dk" 
+                            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                    </div>
+                    <div>
+                        <label for="new-password" class="block text-xs font-medium text-slate-600 mb-1">Adgangskode (min. 6 tegn)</label>
+                        <input 
+                            type="password" 
+                            id="new-password" 
+                            required 
+                            minlength="6"
+                            placeholder="••••••••" 
+                            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                    </div>
+                    <div>
+                        <button 
+                            type="submit" 
+                            id="create-btn"
+                            class="w-full bg-brand-600 hover:bg-brand-500 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm flex items-center justify-center space-x-2 cursor-pointer">
+                            <i class="fa-solid fa-plus text-xs"></i>
+                            <span>Opret bruger</span>
+                        </button>
+                    </div>
+                </form>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm text-slate-600">
-                    <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        <tr>
-                            <th class="px-6 py-3">Bruger / Email</th>
-                            <th class="px-6 py-3">Status</th>
-                            <th class="px-6 py-3 text-right">Handlinger</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-table-body" class="divide-y divide-slate-100">
-                        <tr>
-                            <td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">
-                                <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser brugere...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <!-- Users Table Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                            <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
+                            Eksisterende brugere
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Oversigt over alle registrerede konti.</p>
+                    </div>
+                    <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
+                        <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-slate-600">
+                        <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-6 py-3">Bruger / Email</th>
+                                <th class="px-6 py-3">Status</th>
+                                <th class="px-6 py-3 text-right">Handlinger</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">
+                                    <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser brugere...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+
         </div>
 
     </main>
 
     <script>
-        document.addEventListener('DOMContentLoaded', fetchUsers);
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchUsers();
+            fetchSystemHealth();
+        });
+
+        async function fetchSystemHealth() {
+            const panel = document.getElementById('system-health-panel');
+            const updatedEl = document.getElementById('health-last-updated');
+            const refreshIcon = document.getElementById('health-refresh-icon');
+            if (refreshIcon) refreshIcon.classList.add('animate-spin');
+
+            try {
+                const res = await fetch('/health');
+                if (!res.ok) throw new Error('Kunne ikke hente systemstatus');
+                const data = await res.json();
+
+                const dbDocsFormatted = (data.databaseDocumentsCount !== undefined && data.databaseDocumentsCount !== null)
+                    ? Number(data.databaseDocumentsCount).toLocaleString('da-DK')
+                    : 'Ukendt';
+
+                panel.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Status</span>
+                            <div class="flex items-center space-x-1.5 text-emerald-600 font-bold text-xs">
+                                <i class="fa-solid fa-circle-check text-[10px]"></i>
+                                <span>${escapeHtml(data.status || 'Online')}</span>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Hukommelse</span>
+                            <div class="text-slate-800 font-bold text-xs">
+                                ${escapeHtml(data.memoryUsageMb || 'N/A')} MB
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Dokumenter</span>
+                            <div class="text-brand-600 font-bold text-xs">
+                                ${dbDocsFormatted}
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Oppetid</span>
+                            <div class="text-slate-800 font-bold text-xs truncate" title="${escapeHtml(data.uptime || '')}">
+                                ${escapeHtml(data.uptime || 'N/A')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-200/80 space-y-2 text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500 font-medium">AI Provider:</span>
+                            <span class="font-bold text-slate-700">${escapeHtml(data.llmProvider || 'Gemini')}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500 font-medium">Gemini Model:</span>
+                            <span class="font-bold text-slate-700 text-[11px]">${escapeHtml(data.geminiModel || 'gemini-3.6-flash')}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500 font-medium">Vektor DB:</span>
+                            <span class="font-bold text-emerald-600 flex items-center gap-1.5 text-[11px]">
+                                <i class="fa-solid fa-circle text-[7px]"></i> Qdrant Online
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500 font-medium">FTS5 BM25 Chunks:</span>
+                            <span class="font-bold text-brand-600 text-[11px]">${data.ftsChunksCount !== undefined ? Number(data.ftsChunksCount).toLocaleString('da-DK') : '0'}</span>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 space-y-2">
+                        <button onclick="triggerBackfillMetadata(this)" class="w-full bg-slate-100 hover:bg-brand-50 text-slate-700 hover:text-brand-700 border border-slate-200 hover:border-brand-300 py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-arrows-spin text-xs"></i>
+                            <span>Synkroniser metadata</span>
+                        </button>
+                        <button onclick="triggerBackfillFts(this)" class="w-full bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-300 py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2" title="Indekser alle dokumenttekster i SQLite FTS5 for lynhurtig fuldtekstsøgning">
+                            <i class="fa-solid fa-magnifying-glass-plus text-xs text-emerald-600"></i>
+                            <span>Indekser FTS5 søgning</span>
+                        </button>
+                        <button onclick="triggerCleanOrphans(this)" class="w-full bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-300 py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2" title="Fjerner databaserecords for filer der ikke længere findes på disken">
+                            <i class="fa-solid fa-broom text-xs text-rose-500"></i>
+                            <span>Rens forældreløse dokumenter</span>
+                        </button>
+                    </div>
+                `;
+
+                if (updatedEl) {
+                    updatedEl.textContent = 'Opdateret ' + new Date().toLocaleTimeString('da-DK');
+                }
+            } catch (err) {
+                panel.innerHTML = `
+                    <div class="text-center py-4 text-red-500 text-xs">
+                        <i class="fa-solid fa-triangle-exclamation text-xl mb-1.5 block"></i>
+                        Kunne ikke hente systemstatus: ${escapeHtml(err.message)}
+                    </div>
+                `;
+            } finally {
+                if (refreshIcon) setTimeout(() => refreshIcon.classList.remove('animate-spin'), 300);
+            }
+        }
+
+        async function triggerCleanOrphans(btn) {
+            if (!confirm('Vil du fjerne alle databaserecords for dokumenter, hvis fysiske fil mangler på disken?')) return;
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-xs text-rose-500"></i><span>Rydder op...</span>';
+
+            try {
+                const res = await fetch('/api/admin/clean-orphans', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'Oprydning gennemført!');
+                fetchSystemHealth();
+            } catch (e) {
+                alert('Fejl under oprydning: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
+        }
+
+        async function triggerBackfillFts(btn) {
+            if (!confirm('Vil du opdatere/indekserer alle dokumenters fuldtekst i SQLite FTS5 søgeindekset?')) return;
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-xs text-emerald-600"></i><span>Indekserer FTS5...</span>';
+
+            try {
+                const res = await fetch('/api/admin/backfill-fts', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'FTS5 fuldtekst indeksering gennemført!');
+                fetchSystemHealth();
+            } catch (e) {
+                alert('Fejl under FTS5 indeksering: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
+        }
+
+        async function triggerBackfillMetadata(btn) {
+            if (!confirm('Vil du køre metadata synkronisering på alle dokumenter?')) return;
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-xs"></i><span>Synkroniserer...</span>';
+
+            try {
+                const res = await fetch('/api/admin/backfill-metadata', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'Synkronisering gennemført!');
+                fetchSystemHealth();
+            } catch (e) {
+                alert('Fejl under synkronisering: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
+        }
 
         async function fetchUsers() {
             const tbody = document.getElementById('users-table-body');
@@ -289,14 +478,13 @@
             window.location.href = '/login.html';
         }
 
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str
+        function escapeHtml(value) {
+            return String(value ?? '')
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
+                .replace(/'/g, '&#39;');
         }
     </script>
 </body>

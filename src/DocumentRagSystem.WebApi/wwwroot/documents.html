@@ -79,22 +79,22 @@
                 </h2>
                 
                 <form id="upload-form" onsubmit="handleUploadSubmit(event)" class="space-y-4">
-                    <div class="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-lg p-4 transition text-center cursor-pointer relative" id="drop-zone">
-                        <input type="file" id="file-input" name="file" accept=".pdf" class="hidden" onchange="updateFileName(this)">
+                    <div class="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-lg p-5 transition text-center cursor-pointer relative bg-slate-50/50 hover:bg-brand-50/30" id="drop-zone">
+                        <input type="file" id="file-input" name="file" accept=".pdf" multiple class="hidden" onchange="updateFiles(this)">
                         <label for="file-input" class="cursor-pointer space-y-2 block">
-                            <i class="fa-solid fa-file-pdf text-3xl text-slate-400"></i>
-                            <span class="block text-sm text-slate-600 font-medium" id="file-label">Træk fil hertil eller klik for at vælge</span>
-                            <span class="block text-xs text-slate-400">Kun PDF filer understøttes</span>
+                            <i class="fa-solid fa-cloud-arrow-up text-3xl text-brand-500"></i>
+                            <span class="block text-sm text-slate-700 font-semibold" id="file-label">Træk en eller flere PDF-filer hertil</span>
+                            <span class="block text-xs text-slate-400">eller klik for at vælge fra computeren (understøtter batch-upload)</span>
                         </label>
                     </div>
 
                     <div class="flex items-center space-x-2 text-sm text-slate-600">
-                        <input type="checkbox" id="background-upload" class="rounded text-brand-500 focus:ring-brand-500">
-                        <label for="background-upload">Behandl asynkront i baggrunden</label>
+                        <input type="checkbox" id="background-upload" class="rounded text-brand-500 focus:ring-brand-500" checked>
+                        <label for="background-upload" class="cursor-pointer">Behandl asynkront i baggrunden (anbefalet ved flere filer)</label>
                     </div>
 
-                    <button type="submit" id="upload-btn" class="w-full bg-brand-500 hover:bg-brand-600 text-white rounded-md py-2.5 text-sm font-medium transition shadow-sm flex items-center justify-center">
-                        <i class="fa-solid fa-cloud-arrow-up mr-2"></i>
+                    <button type="submit" id="upload-btn" class="w-full bg-brand-500 hover:bg-brand-600 text-white rounded-lg py-2.5 text-sm font-semibold transition shadow-sm flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
                         <span>Upload og behandl</span>
                     </button>
                 </form>
@@ -136,14 +136,22 @@
 
                 <!-- Søgning og sideindstillinger -->
                 <div class="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
-                    <div class="relative flex-1">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                        <input type="text" id="doc-search" placeholder="Søg i filnavn, artikel ID..." 
-                               class="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-700 bg-slate-50/50" 
-                               oninput="onSearchInput(this.value)">
-                        <button id="clear-search-btn" onclick="clearSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs hidden">
-                            <i class="fa-solid fa-xmark"></i>
-                        </button>
+                    <div class="flex items-center gap-2 flex-1">
+                        <div class="relative flex-1">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                            <input type="text" id="doc-search" placeholder="Søg i filnavn, artikel ID..." 
+                                   class="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-700 bg-slate-50/50" 
+                                   oninput="onSearchInput(this.value)">
+                            <button id="clear-search-btn" onclick="clearSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs hidden">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <select id="doc-category" onchange="onCategoryChange(this.value)" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500 shrink-0">
+                            <option value="">Alle kategorier</option>
+                            <option value="Axial">Aksial</option>
+                            <option value="Centrifugal">Centrifugal / RadiPac</option>
+                            <option value="CompactOrSpecial">Kompakt / Special</option>
+                        </select>
                     </div>
                     <div class="flex items-center space-x-2 text-xs text-slate-500 shrink-0">
                         <span>Vis:</span>
@@ -186,11 +194,46 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchDocuments();
             checkAdminNav();
+            initDropZone();
         });
+
+        function initDropZone() {
+            const dropZone = document.getElementById('drop-zone');
+            if (!dropZone) return;
+
+            ['dragenter', 'dragover'].forEach(name => {
+                dropZone.addEventListener(name, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('border-brand-500', 'bg-brand-50/70');
+                });
+            });
+
+            ['dragleave', 'drop'].forEach(name => {
+                dropZone.addEventListener(name, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('border-brand-500', 'bg-brand-50/70');
+                });
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                if (dt && dt.files && dt.files.length > 0) {
+                    const fileInput = document.getElementById('file-input');
+                    fileInput.files = dt.files;
+                    updateFiles(fileInput);
+                }
+            });
+        }
 
         async function checkAdminNav() {
             try {
                 const res = await fetch('/api/auth/me');
+                if (res.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
                 if (res.ok) {
                     const data = await res.json();
                     if (data.isAdmin) {
@@ -260,14 +303,18 @@
             return `Ikke engelsk (${name})`;
         }
 
-        function updateFileName(input) {
+        function updateFiles(input) {
             const label = document.getElementById('file-label');
             if (input.files && input.files.length > 0) {
-                label.textContent = input.files[0].name;
+                if (input.files.length === 1) {
+                    label.textContent = input.files[0].name;
+                } else {
+                    label.textContent = `${input.files.length} PDF-filer valgt (${input.files[0].name}, ...)`;
+                }
                 label.className = "block text-sm text-brand-600 font-semibold truncate";
             } else {
-                label.textContent = "Træk fil hertil eller klik for at vælge";
-                label.className = "block text-sm text-slate-600 font-medium";
+                label.textContent = "Træk en eller flere PDF-filer hertil";
+                label.className = "block text-sm text-slate-700 font-semibold";
             }
         }
 
@@ -279,77 +326,84 @@
             const statusDiv = document.getElementById('upload-status');
 
             if (!fileInput.files || fileInput.files.length === 0) {
-                alert('Vælg venligst en PDF fil først');
+                alert('Vælg venligst mindst én PDF-fil først');
                 return;
             }
 
-            const file = fileInput.files[0];
-            const formData = new FormData();
-            formData.append('file', file);
+            const files = Array.from(fileInput.files);
+            const total = files.length;
 
             uploadBtn.disabled = true;
             statusDiv.classList.remove('hidden', 'bg-red-50', 'text-red-700', 'bg-green-50', 'text-green-700', 'bg-blue-50', 'text-blue-700');
             statusDiv.classList.add('bg-blue-50', 'text-blue-700');
             statusDiv.classList.remove('hidden');
-            statusDiv.textContent = 'Uploader og behandler dokument...';
 
-            let url = '/api/documents/upload';
-            if (bgUpload) {
-                url += '?background=true';
-            }
+            let successCount = 0;
+            let failCount = 0;
 
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    body: formData
-                });
+            for (let i = 0; i < total; i++) {
+                const file = files[i];
+                const pct = Math.round(((i + 1) / total) * 100);
+                statusDiv.textContent = `Uploader fil ${i + 1} af ${total}: ${file.name} (${pct}%)...`;
 
-                if (!response.ok) {
-                    let errMsg = 'Fejl under upload af fil';
-                    try {
-                        const errObj = await response.json();
-                        errMsg = errObj.error || errObj.message || errObj.Detail || JSON.stringify(errObj);
-                    } catch {
-                        errMsg = await response.text();
-                    }
-                    throw new Error(errMsg);
-                }
+                const formData = new FormData();
+                formData.append('file', file);
 
-                const result = await response.json();
-
-                statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
-                statusDiv.classList.add('bg-green-50', 'text-green-700');
-                
+                let url = '/api/documents/upload';
                 if (bgUpload) {
-                    statusDiv.textContent = 'Dokument uploadet! Det behandles nu i baggrunden.';
-                } else if (result.status === 'Skipped' || result.status === 4) {
-                    statusDiv.textContent = `Dokument gemt! Sproget er detekteret som '${result.language || 'ikke-engelsk'}'. Vektorindeksering sprunget over (kun engelske dokumenter indekseres).`;
-                } else {
-                    statusDiv.textContent = 'Dokumentet blev uploadet og behandlet successfully!';
+                    url += '?background=true';
                 }
 
-                fileInput.value = '';
-                document.getElementById('file-label').textContent = "Træk fil hertil eller klik for at vælge";
-                document.getElementById('file-label').className = "block text-sm text-slate-600 font-medium";
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        body: formData
+                    });
 
-                // Genindlæs dokumentlisten
-                fetchDocuments();
-            } catch (error) {
-                console.error('Upload fejl:', error);
-                statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
-                statusDiv.classList.add('bg-red-50', 'text-red-700');
-                statusDiv.textContent = `Fejl: ${error.message}`;
-            } finally {
-                uploadBtn.disabled = false;
+                    if (!response.ok) {
+                        failCount++;
+                    } else {
+                        successCount++;
+                    }
+                } catch (error) {
+                    console.error('Upload fejl for fil:', file.name, error);
+                    failCount++;
+                }
             }
+
+            statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
+            if (failCount === 0) {
+                statusDiv.classList.add('bg-green-50', 'text-green-700');
+                statusDiv.textContent = total === 1
+                    ? 'Dokumentet blev uploadet og behandlet!'
+                    : `Alle ${successCount} filer blev uploadet og sendt til behandling!`;
+            } else {
+                statusDiv.classList.add('bg-amber-50', 'text-amber-800');
+                statusDiv.textContent = `Upload afsluttet: ${successCount} lykkedes, ${failCount} fejlede.`;
+            }
+
+            fileInput.value = '';
+            document.getElementById('file-label').textContent = "Træk en eller flere PDF-filer hertil";
+            document.getElementById('file-label').className = "block text-sm text-slate-700 font-semibold";
+            uploadBtn.disabled = false;
+
+            // Genindlæs dokumentlisten
+            fetchDocuments();
         }
 
         let currentPage = 1;
         let pageSize = 20;
         let searchQuery = '';
+        let selectedCategory = '';
         let totalPages = 1;
         let totalCount = 0;
         let searchDebounceTimer = null;
+
+        function onCategoryChange(val) {
+            selectedCategory = val || '';
+            currentPage = 1;
+            fetchDocuments();
+        }
 
         function onSearchInput(value) {
             clearTimeout(searchDebounceTimer);
@@ -397,21 +451,40 @@
             try {
                 const params = new URLSearchParams({
                     page: currentPage,
-                    pageSize: pageSize
+                    pageSize: pageSize,
+                    onlyExisting: 'true'
                 });
                 if (searchQuery) {
                     params.append('search', searchQuery);
                 }
+                if (selectedCategory) {
+                    params.append('category', selectedCategory);
+                }
 
                 const response = await fetch(`/api/documents?${params.toString()}`);
-                if (!response.ok) throw new Error('Netværksforbindelsen var ikke ok');
+                if (response.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (!response.ok) {
+                    let errMsg = 'Netværksforbindelsen var ikke ok';
+                    try {
+                        const errObj = await response.json();
+                        errMsg = errObj.error || errObj.message || errObj.detail || errObj.title || JSON.stringify(errObj);
+                    } catch {
+                        try { errMsg = await response.text(); } catch {}
+                    }
+                    throw new Error(errMsg || `HTTP ${response.status}`);
+                }
                 
                 const data = await response.json();
                 const isPaged = data && !Array.isArray(data) && Array.isArray(data.items);
-                const docs = isPaged ? data.items : (Array.isArray(data) ? data : []);
+                const rawDocs = isPaged ? data.items : (Array.isArray(data) ? data : []);
+                // Ensure only documents with actual existing physical files on disk are shown
+                const docs = rawDocs.filter(doc => isDocumentUrl(doc.FilePath || doc.filePath));
 
-                totalCount = isPaged ? data.totalCount : docs.length;
-                totalPages = isPaged ? data.totalPages : 1;
+                totalCount = docs.length < rawDocs.length ? docs.length : (isPaged ? data.totalCount : docs.length);
+                totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
                 currentPage = isPaged ? data.page : 1;
 
                 if (countBadge) {
@@ -425,7 +498,7 @@
                     listContainer.innerHTML = `
                         <div class="text-center py-12 text-slate-400 text-sm">
                             <i class="fa-solid fa-folder-open text-3xl mb-3 block"></i>
-                            ${searchQuery ? 'Ingen dokumenter matchede din søgning.' : 'Ingen dokumenter indlæst endnu.'}
+                            ${searchQuery || selectedCategory ? 'Ingen tilgængelige dokumenter på serveren matchede søgningen/kategorien.' : 'Ingen dokumenter indlæst endnu.'}
                         </div>`;
                     if (paginationContainer) paginationContainer.classList.add('hidden');
                     return;
@@ -454,13 +527,17 @@
 
                     const date = formatDanishDate(doc.uploadedAt);
                     const fileName = escapeHtml(doc.fileName || 'Uden navn');
-                    const documentLink = isDocumentUrl(doc.FilePath || doc.filePath)
+                    const hasPhysicalFile = isDocumentUrl(doc.FilePath || doc.filePath);
+                    const documentLink = hasPhysicalFile
                         ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-700 hover:text-brand-800 hover:underline truncate text-sm flex-1 font-semibold" title="${fileName}">
                                ${fileName}
                            </a>`
-                        : `<span class="font-medium text-slate-900 truncate text-sm flex-1 font-semibold" title="${fileName}">
-                               ${fileName}
-                           </span>`;
+                        : `<div class="flex items-center space-x-2 truncate flex-1">
+                               <span class="font-medium text-slate-700 truncate text-sm font-semibold" title="${fileName}">
+                                   ${fileName}
+                               </span>
+                               <span class="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-md shrink-0" title="Denne fil findes ikke i serverens uploads-mappe">Fil mangler på disk</span>
+                           </div>`;
 
                     listContainer.innerHTML += `
                         <div class="p-4 bg-slate-50 border border-slate-200/60 rounded-xl hover:border-slate-300 transition duration-150 shadow-sm">
@@ -498,7 +575,7 @@
                 listContainer.innerHTML = `
                     <div class="text-center py-12 text-red-500 text-sm">
                         <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 block"></i>
-                        Kunne ikke indlæse dokumenter.
+                        <span>Kunne ikke indlæse dokumenter: ${escapeHtml(error.message)}</span>
                     </div>`;
                 if (paginationContainer) paginationContainer.classList.add('hidden');
             } finally {

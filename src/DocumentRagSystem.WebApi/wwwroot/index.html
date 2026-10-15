@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Marked for real-time Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Chart.js for interactive curves and comparison charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -70,6 +72,22 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+        
+        /* Print Styles for PDF Export */
+        @media print {
+            body { background: white; color: black; font-size: 11pt; }
+            header, footer, #query-form, .chat-history-item, #chat-list-container, button[onclick="startNewChat()"], button[onclick="clearAllConversations()"], button[title="Udskriv samtale til PDF"] { display: none !important; }
+            main { display: block !important; padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+            .lg\:col-span-1 { display: none !important; }
+            .lg\:col-span-2 { width: 100% !important; border: none !important; box-shadow: none !important; }
+            .bg-white { box-shadow: none !important; border: none !important; }
+            #chat-scroll-container { overflow: visible !important; height: auto !important; padding: 0 !important; }
+            .rounded-xl, .rounded-lg, .rounded-2xl { border-radius: 0 !important; }
+            button, a { text-decoration: none !important; }
+            .break-inside-avoid { break-inside: avoid; }
+            .html-content { font-size: 10pt !important; }
+            @page { margin: 1.5cm; }
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
@@ -115,7 +133,7 @@
 
         <!-- Venstre side: Samtalehistorik (1/3 bredde) -->
         <div class="space-y-6 lg:col-span-1">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col h-[750px]">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col lg:sticky lg:top-8 max-h-[calc(100vh-5rem)]">
                 <div class="flex items-center justify-between border-b border-slate-100 pb-3">
                     <h2 class="text-lg font-semibold text-slate-900 flex items-center">
                         <i class="fa-solid fa-clock-rotate-left text-brand-500 mr-2"></i>
@@ -130,7 +148,7 @@
                     </button>
                 </div>
 
-                <div class="flex-1 overflow-y-auto space-y-1.5 py-3 pr-1 min-h-[300px]" id="chat-list-container">
+                <div class="flex-1 overflow-y-auto space-y-1.5 py-3 pr-1 min-h-[200px]" id="chat-list-container">
                     <!-- Dynamic Chat History Items Inserted Here -->
                 </div>
 
@@ -145,15 +163,21 @@
 
         <!-- Højre side: Chat Assistent (2/3 bredde) -->
         <div class="lg:col-span-2 space-y-6">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 flex flex-col h-[750px] overflow-hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 flex flex-col min-h-[600px]">
                 
                 <!-- Info banner & Filter panel -->
-                <div class="p-4 border-b border-slate-100 bg-slate-50/50 space-y-3 flex-shrink-0">
+                <div class="p-4 border-b border-slate-100 bg-slate-50/50 space-y-3">
                     <div class="bg-brand-50 rounded-lg border border-brand-100/80 p-3">
-                        <h3 class="text-brand-900 font-semibold mb-1 flex items-center text-xs">
-                            <i class="fa-solid fa-circle-info mr-1.5 text-brand-600"></i>
-                            Hvordan spørger man?
-                        </h3>
+                        <div class="flex items-center justify-between mb-1">
+                            <h3 class="text-brand-900 font-semibold flex items-center text-xs">
+                                <i class="fa-solid fa-circle-info mr-1.5 text-brand-600"></i>
+                                Hvordan spørger man?
+                            </h3>
+                            <button onclick="window.print()" class="text-[11px] font-medium text-brand-600 hover:text-brand-800 transition flex items-center space-x-1 px-1.5 py-0.5 hover:bg-brand-100 rounded" title="Udskriv samtale til PDF">
+                                <i class="fa-solid fa-file-pdf"></i>
+                                <span>Eksporter til PDF</span>
+                            </button>
+                        </div>
                         <p class="text-[11px] text-brand-700 leading-relaxed">
                             Stil spørgsmål om driftsgrænser, tekniske specifikationer eller specifikke funktioner fra dine uploadede tekniske datablade. Chatten henter relevante tekstafsnit, formulerer et præcist svar og henviser til kilderne.
                         </p>
@@ -195,8 +219,8 @@
                     </div>
                 </div>
 
-                <!-- Scrollable Chat Log Container -->
-                <div class="flex-1 overflow-y-auto p-6 space-y-6" id="chat-scroll-container">
+                <!-- Chat Log Container (natural growth, no inner scrollbar) -->
+                <div class="p-6 space-y-6" id="chat-scroll-container">
                     <!-- Samtaleloggen -->
                     <div id="chat-conversation" class="space-y-6">
                         <!-- Loaded dynamically via JavaScript -->
@@ -217,13 +241,26 @@
                 </div>
 
                 <!-- Bottom Input Form -->
-                <div class="p-4 bg-white border-t border-slate-200/80 flex-shrink-0">
-                    <form id="query-form" onsubmit="handleQuerySubmit(event)" class="relative flex items-center">
-                        <input type="text" id="query-input" required autocomplete="off" placeholder="Stil et spørgsmål, f.eks. Hvad er driftsspændingen for ventilatoren?"
-                            class="w-full pl-4 pr-12 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm transition placeholder-slate-400 text-sm text-slate-900 bg-slate-50/50">
-                        <button type="submit" id="submit-btn" class="absolute right-2 bg-brand-500 hover:bg-brand-600 text-white rounded-lg p-2 text-sm font-medium transition shadow-sm flex items-center justify-center" title="Send besked">
-                            <i class="fa-solid fa-paper-plane text-xs"></i>
-                        </button>
+                <div class="p-4 bg-white/95 backdrop-blur-xs border-t border-slate-200/80 sticky bottom-0 z-10 rounded-b-xl shadow-xs">
+                    <form id="query-form" onsubmit="handleQuerySubmit(event)" class="relative flex items-end">
+                        <textarea id="query-input" required rows="2" placeholder="Stil et spørgsmål (Enter for at sende, Shift+Enter for ny linje)..."
+                            oninput="autoExpandTextarea(this)" onkeydown="handleTextareaKeydown(event)"
+                            class="w-full pl-4 pr-24 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm transition placeholder-slate-400 text-sm text-slate-900 bg-slate-50/50 resize-none max-h-48 overflow-y-auto leading-relaxed"></textarea>
+                        <div class="absolute right-2.5 bottom-2.5 flex items-center space-x-1.5">
+                            <div id="voice-wave-container" class="hidden items-center space-x-0.5 px-2 py-1.5 bg-red-50 border border-red-200 rounded-lg">
+                                <span class="w-1 h-2 bg-red-500 rounded-full transition-all duration-75 wave-bar"></span>
+                                <span class="w-1 h-3 bg-red-600 rounded-full transition-all duration-75 wave-bar"></span>
+                                <span class="w-1 h-1.5 bg-red-500 rounded-full transition-all duration-75 wave-bar"></span>
+                                <span class="w-1 h-4 bg-red-600 rounded-full transition-all duration-75 wave-bar"></span>
+                                <span class="w-1 h-2.5 bg-red-500 rounded-full transition-all duration-75 wave-bar"></span>
+                            </div>
+                            <button type="button" id="mic-btn" onclick="toggleVoiceInput()" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-brand-600 hover:bg-brand-50 transition border border-transparent hover:border-brand-200" title="Indtal spørgsmål (Tale-til-tekst)">
+                                <i class="fa-solid fa-microphone text-sm"></i>
+                            </button>
+                            <button type="submit" id="submit-btn" class="w-8 h-8 bg-brand-500 hover:bg-brand-600 text-white rounded-lg flex items-center justify-center transition shadow-sm" title="Send besked (Enter)">
+                                <i class="fa-solid fa-paper-plane text-xs"></i>
+                            </button>
+                        </div>
                     </form>
                     <p class="text-[10px] text-slate-400 text-center mt-2 font-medium">Svarene er baseret på de uploadede PDF-datablade og AI-udtræk.</p>
                 </div>
@@ -232,6 +269,40 @@
         </div>
 
     </main>
+
+    <!-- PDF Flyout Modal -->
+    <div id="pdf-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 lg:p-10 transition-opacity">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-slate-200">
+            <div class="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200/80 shrink-0">
+                <div class="flex items-center space-x-3 truncate">
+                    <i class="fa-regular fa-file-pdf text-red-500 text-lg"></i>
+                    <h3 id="pdf-modal-title" class="font-semibold text-slate-800 text-sm truncate">Dokument</h3>
+                </div>
+                <div class="flex items-center space-x-1.5">
+                    <button id="pdf-modal-copy-btn" onclick="copyPdfDirectLink(this)" class="text-slate-500 hover:text-brand-600 transition px-2 py-1 rounded-lg hover:bg-slate-200/50 flex items-center space-x-1 text-xs font-medium" title="Kopier direkte link med sidetal og nøgleord">
+                        <i class="fa-solid fa-link text-xs"></i>
+                        <span id="pdf-modal-copy-label">Del link</span>
+                    </button>
+                    <a id="pdf-modal-direct-download" href="#" download class="text-slate-500 hover:text-brand-600 transition px-2 py-1 rounded-lg hover:bg-slate-200/50 flex items-center space-x-1 text-xs font-medium" title="Download PDF direkte">
+                        <i class="fa-solid fa-download text-xs"></i>
+                        <span>Download</span>
+                    </a>
+                    <a id="pdf-modal-download" href="#" target="_blank" class="text-slate-400 hover:text-brand-600 transition p-1.5 rounded hover:bg-slate-200/50" title="Åbn i ny fane">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </a>
+                    <button onclick="closePdfModal()" class="text-slate-400 hover:text-red-600 transition p-1.5 rounded hover:bg-slate-200/50 ml-1" title="Luk">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 bg-slate-200/50 relative">
+                <div id="pdf-modal-loader" class="absolute inset-0 flex items-center justify-center">
+                    <div class="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
+                </div>
+                <iframe id="pdf-modal-iframe" src="about:blank" class="w-full h-full border-none opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); document.getElementById('pdf-modal-loader').classList.add('hidden');"></iframe>
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
     <footer class="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 text-center text-sm mt-auto">
@@ -249,6 +320,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             initConversations();
             checkAdminNav();
+            initVoiceInput();
         });
 
         async function checkAdminNav() {
@@ -291,6 +363,22 @@
             if (stored) {
                 try {
                     conversations = JSON.parse(stored);
+                    let migrated = false;
+                    // Automatically restore full, unabbreviated titles if previously shortened
+                    conversations.forEach(c => {
+                        if (c.messages && c.messages.length > 0) {
+                            const firstUser = c.messages.find(m => m.role === 'user');
+                            if (firstUser && firstUser.text) {
+                                if (c.title === 'Ny chat' || c.title.endsWith('...') || c.title.length < firstUser.text.length) {
+                                    c.title = firstUser.text;
+                                    migrated = true;
+                                }
+                            }
+                        }
+                    });
+                    if (migrated) {
+                        saveConversations();
+                    }
                 } catch (e) {
                     console.error('Kunne ikke hente samtalehistorik:', e);
                     conversations = [];
@@ -498,10 +586,16 @@
                     <div class="bg-brand-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
                         <i class="fa-solid fa-robot text-lg"></i>
                     </div>
-                    <div class="space-y-1">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">System</span>
+                    <div class="space-y-3 w-full">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">System</span>
                         <div class="text-slate-700 text-sm leading-relaxed">
-                            Hej! Jeg er klar til at besvare dine spørgsmål baseret på de uploadede PDF datablade. Hvad vil du gerne vide i dag?
+                            Hej! Jeg er din intelligente tekniske assistent for ebm-papst ventilatorer. Hvad vil du gerne have hjælp til i dag?
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            <button onclick="applySuggestion('Hvilke ventilatorer findes der i kataloget?')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Hvilke ventilatorer findes der?</button>
+                            <button onclick="applySuggestion('Er K3G560PC0401 kompatibel med 400V?')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Tjek kompatibilitet (400V)</button>
+                            <button onclick="applySuggestion('Sammenlign specifikationerne for K3G560PC0401 og K3G560PB0103')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Sammenlign to modeller</button>
+                            <button onclick="applySuggestion('Beregn årlig energibesparelse og tilbagebetalingstid hvis vi udskifter 5 stk gamle AC blæsere med 250W forbrug med nye EC modeller. Drifttiden er 8000 timer årligt og prisen er 2 kr/kWh.')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Beregn energibesparelse</button>
                         </div>
                     </div>
                 </div>
@@ -528,16 +622,43 @@
                             ? `<span class="text-[10px] text-slate-400 font-medium">Genereret på ${escapeHtml(msg.duration)} sekunder</span>`
                             : '';
 
+                        const hasEcReplacement = (msg.text && (msg.text.includes('Moderne EC-erstatning') || msg.text.includes('GreenTech EC'))) ||
+                                                 (msg.html && (msg.html.includes('Moderne EC-erstatning') || msg.html.includes('GreenTech EC')));
+
+                        const ecBadgeHtml = hasEcReplacement ? `
+                            <div class="mb-3.5 p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/90 rounded-xl flex items-center justify-between text-xs text-emerald-900 shadow-xs">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                                        <i class="fa-solid fa-leaf"></i>
+                                    </div>
+                                    <div>
+                                        <div class="flex items-center space-x-2">
+                                            <span class="font-bold text-emerald-950">Moderne EC-erstatning findes</span>
+                                            <span class="text-[9px] font-bold bg-emerald-200/70 text-emerald-800 px-1.5 py-0.5 rounded-full uppercase tracking-wider">GreenTech EC</span>
+                                        </div>
+                                        <span class="block text-[11px] text-emerald-700 mt-0.5">Denne ældre AC-model kan erstattes med en energieffektiv GreenTech EC-ventilator (typisk 30-50% energibesparelse og trinløs styring).</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : '';
+
                         chatLog.innerHTML += `
                             <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-white border border-slate-200/80 shadow-sm">
                                 <div class="bg-amber-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
-                                    <i class="fa-solid fa-sparkles text-lg"></i>
+                                    <i class="fa-solid fa-robot text-lg"></i>
                                 </div>
-                                <div class="space-y-1 flex-1 overflow-x-auto">
+                                <div class="space-y-1 flex-1 min-w-0">
                                     <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
                                         <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">Svar</span>
-                                        ${durationBadge}
+                                        <div class="flex items-center space-x-2">
+                                            ${durationBadge}
+                                            <button onclick="copyMessageText(this)" class="text-slate-400 hover:text-brand-600 transition p-1 rounded hover:bg-slate-100 flex items-center space-x-1 text-xs" title="Kopier svar til udklipsholder">
+                                                <i class="fa-regular fa-copy text-xs"></i>
+                                                <span class="text-[11px] font-medium copy-label">Kopier</span>
+                                            </button>
+                                        </div>
                                     </div>
+                                    ${ecBadgeHtml}
                                     <div class="text-slate-700 html-content leading-relaxed text-[15px]">
                                         ${msg.html}
                                     </div>
@@ -549,14 +670,28 @@
                 });
             }
 
+            // Make table columns interactive and sortable
+            makeTablesSortable(chatLog);
+
             // Scroll down
             scrollToBottom();
         }
 
-        // Scroll chat container to bottom
-        function scrollToBottom(behavior = 'auto') {
-            const container = document.getElementById('chat-scroll-container');
-            container.scrollTo({ top: container.scrollHeight, behavior: behavior });
+        let userHasScrolledUp = false;
+        window.addEventListener('scroll', () => {
+            const scrollPos = window.innerHeight + window.scrollY;
+            const scrollMax = document.documentElement.scrollHeight || document.body.scrollHeight;
+            userHasScrolledUp = (scrollMax - scrollPos) > 160;
+        });
+
+        // Scroll page to bottom (only auto-scrolls if user is already near bottom, unless force=true)
+        function scrollToBottom(behavior = 'auto', force = false) {
+            if (!userHasScrolledUp || force) {
+                window.scrollTo({
+                    top: document.documentElement.scrollHeight || document.body.scrollHeight,
+                    behavior: behavior
+                });
+            }
         }
 
         // Render list of chats in sidebar
@@ -569,16 +704,16 @@
                 const activeClasses = isActive ? 'bg-slate-200 text-slate-900 font-semibold' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-900';
 
                 const item = document.createElement('div');
-                item.className = `chat-history-item group flex items-center justify-between px-3 py-3 rounded-lg text-sm font-medium transition cursor-pointer ${activeClasses}`;
+                item.className = `chat-history-item group flex items-start justify-between px-3 py-2.5 rounded-lg text-sm transition cursor-pointer ${activeClasses}`;
                 item.setAttribute('data-id', chat.id);
                 item.onclick = () => loadConversation(chat.id);
 
                 item.innerHTML = `
-                    <div class="flex items-center space-x-3 min-w-0 flex-1">
-                        <i class="fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-sm shrink-0"></i>
-                        <span class="truncate block pr-2">${escapeHtml(chat.title)}</span>
+                    <div class="flex items-start space-x-2.5 min-w-0 flex-1 pr-1.5">
+                        <i class="fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-xs shrink-0 mt-1"></i>
+                        <span class="block text-xs leading-relaxed break-words text-slate-700" title="${escapeHtml(chat.title)}">${escapeHtml(chat.title)}</span>
                     </div>
-                    <button onclick="deleteConversation('${chat.id}', event)" class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-slate-300 text-slate-400 hover:text-red-600 transition shrink-0" title="Slet samtale">
+                    <button onclick="deleteConversation('${chat.id}', event)" class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-slate-300 text-slate-400 hover:text-red-600 transition shrink-0 self-center" title="Slet samtale">
                         <i class="fa-regular fa-trash-can text-xs"></i>
                     </button>
                 `;
@@ -676,7 +811,7 @@
             uniqueCitationsMap.forEach((cit) => {
                 const fileName = escapeHtml(cit.filename || cit.documentId);
                 const citationLink = isDocumentUrl(cit.filepath)
-                    ? `<a href="${escapeHtml(cit.filepath)}" target="_blank" rel="noopener noreferrer" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm">
+                    ? `<a href="#" onclick="openPdfModal('${escapeHtml(cit.filepath)}', '${fileName}'); return false;" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm">
                            ${fileName}
                        </a>`
                     : `<span class="font-semibold text-slate-700 text-sm">${fileName}</span>`;
@@ -747,7 +882,7 @@
 
             // Auto rename conversation title if it was named "Ny chat"
             if (activeChat.title === 'Ny chat') {
-                activeChat.title = question.length > 35 ? question.substring(0, 35) + '...' : question;
+                activeChat.title = question;
             }
 
             // Create streaming assistant message entry immediately
@@ -765,7 +900,8 @@
 
             submitBtn.disabled = true;
             queryInput.value = '';
-            scrollToBottom('smooth');
+            queryInput.style.height = 'auto';
+            scrollToBottom('smooth', true);
 
             const startTime = performance.now();
             let rawAccumulatedText = '';
@@ -899,6 +1035,579 @@
                 await fetch('/api/auth/logout', { method: 'POST' });
             } catch {}
             window.location.href = '/login.html';
+        }
+
+        // Apply suggestion chip text directly into the chat
+        function applySuggestion(text) {
+            const queryInput = document.getElementById('query-input');
+            if (queryInput) {
+                queryInput.value = text;
+                autoExpandTextarea(queryInput);
+                const form = document.getElementById('query-form');
+                if (form) {
+                    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                }
+            }
+        }
+
+        function autoExpandTextarea(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.max(Math.min(el.scrollHeight, 180), 56) + 'px';
+        }
+
+        function handleTextareaKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                const form = document.getElementById('query-form');
+                if (form) {
+                    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                }
+            }
+        }
+
+        function copyMessageText(btn) {
+            const msgCard = btn.closest('.flex-1');
+            if (!msgCard) return;
+            const contentEl = msgCard.querySelector('.html-content');
+            if (!contentEl) return;
+            const textToCopy = contentEl.innerText || contentEl.textContent || '';
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const label = btn.querySelector('.copy-label');
+                const icon = btn.querySelector('i');
+                if (label) label.textContent = 'Kopieret!';
+                if (icon) icon.className = 'fa-solid fa-check text-xs text-emerald-600';
+                setTimeout(() => {
+                    if (label) label.textContent = 'Kopier';
+                    if (icon) icon.className = 'fa-regular fa-copy text-xs';
+                }, 2000);
+            }).catch(e => console.error('Kopiering mislykkedes:', e));
+        }
+
+        let currentModalPdfUrl = '';
+        function openPdfModal(url, title) {
+            currentModalPdfUrl = url;
+            const modal = document.getElementById('pdf-modal');
+            const iframe = document.getElementById('pdf-modal-iframe');
+            const titleEl = document.getElementById('pdf-modal-title');
+            const downloadBtn = document.getElementById('pdf-modal-download');
+            const directDownload = document.getElementById('pdf-modal-direct-download');
+            const loader = document.getElementById('pdf-modal-loader');
+
+            const cleanTitle = title || 'Dokument';
+            if (titleEl) titleEl.textContent = cleanTitle;
+            if (downloadBtn) downloadBtn.href = url;
+            if (directDownload) {
+                directDownload.href = url.split('#')[0];
+                directDownload.download = cleanTitle.endsWith('.pdf') ? cleanTitle : (cleanTitle + '.pdf');
+            }
+            
+            iframe.classList.add('opacity-0');
+            if (loader) loader.classList.remove('hidden');
+            
+            iframe.src = url;
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function copyPdfDirectLink(btn) {
+            if (!currentModalPdfUrl) return;
+            const fullUrl = new URL(currentModalPdfUrl, window.location.origin).href;
+            navigator.clipboard.writeText(fullUrl).then(() => {
+                const label = document.getElementById('pdf-modal-copy-label');
+                if (label) {
+                    const orig = label.textContent;
+                    label.textContent = 'Kopieret!';
+                    setTimeout(() => label.textContent = orig, 2000);
+                }
+            }).catch(() => {
+                prompt('Kopier linket herunder:', fullUrl);
+            });
+        }
+
+        function closePdfModal() {
+            const modal = document.getElementById('pdf-modal');
+            const iframe = document.getElementById('pdf-modal-iframe');
+            modal.classList.add('hidden');
+            iframe.src = 'about:blank';
+            document.body.style.overflow = '';
+        }
+
+        function makeTablesSortable(container) {
+            if (!container) return;
+            const tables = container.querySelectorAll('.html-content table');
+            tables.forEach(table => {
+                if (table.dataset.sortableInitialized) return;
+                table.dataset.sortableInitialized = 'true';
+
+                const headers = table.querySelectorAll('thead th');
+                if (!headers || headers.length === 0) return;
+
+                headers.forEach((th, colIdx) => {
+                    th.classList.add('cursor-pointer', 'select-none', 'hover:bg-slate-200/70', 'transition-colors');
+                    th.title = 'Klik for at sortere kolonne';
+                    
+                    const indicator = document.createElement('span');
+                    indicator.className = 'sort-icon ml-1.5 text-slate-400 text-[10px] inline-block';
+                    indicator.innerHTML = '&#8597;';
+                    th.appendChild(indicator);
+
+                    let asc = true;
+                    th.onclick = () => {
+                        const tbody = table.querySelector('tbody');
+                        if (!tbody) return;
+                        const rows = Array.from(tbody.querySelectorAll('tr'));
+                        
+                        rows.sort((rowA, rowB) => {
+                            const cellA = (rowA.children[colIdx]?.innerText || '').trim();
+                            const cellB = (rowB.children[colIdx]?.innerText || '').trim();
+
+                            const numA = parseFloat(cellA.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+                            const numB = parseFloat(cellB.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+
+                            if (!isNaN(numA) && !isNaN(numB)) {
+                                return asc ? numA - numB : numB - numA;
+                            }
+                            return asc ? cellA.localeCompare(cellB, 'da') : cellB.localeCompare(cellA, 'da');
+                        });
+
+                        asc = !asc;
+                        headers.forEach(h => {
+                            const icon = h.querySelector('.sort-icon');
+                            if (icon) icon.innerHTML = '&#8597;';
+                        });
+                        indicator.innerHTML = asc ? '&#9660;' : '&#9650;';
+
+                        rows.forEach(r => tbody.appendChild(r));
+                    };
+                });
+
+                // Check if table has numeric columns for interactive charting
+                injectChartToggle(table);
+            });
+        }
+
+        function injectChartToggle(table) {
+            if (table.dataset.chartInitialized) return;
+            table.dataset.chartInitialized = 'true';
+
+            const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.replace('⇅', '').trim());
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            if (headers.length < 2 || rows.length < 2) return;
+
+            // Find columns that have numeric data
+            const numericColIndices = [];
+            for (let c = 1; c < headers.length; c++) {
+                let numericCount = 0;
+                rows.forEach(r => {
+                    const text = (r.children[c]?.innerText || '').trim();
+                    const num = parseFloat(text.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+                    if (!isNaN(num)) numericCount++;
+                });
+                if (numericCount >= rows.length * 0.6) {
+                    numericColIndices.push(c);
+                }
+            }
+
+            if (numericColIndices.length === 0) return;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-chart-toggle-wrapper my-3';
+
+            const toggleBar = document.createElement('div');
+            toggleBar.className = 'flex items-center justify-between mb-2 text-xs';
+            toggleBar.innerHTML = `
+                <div class="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-lg">
+                    <button type="button" class="btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition">
+                        <i class="fa-solid fa-table mr-1 text-[10px]"></i> Tabel
+                    </button>
+                    <button type="button" class="btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition">
+                        <i class="fa-solid fa-chart-column mr-1 text-[10px]"></i> Graf
+                    </button>
+                </div>
+                <button type="button" class="btn-export-csv px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200/80 transition flex items-center space-x-1.5 shadow-2xs" title="Download tabel som Excel/CSV fil">
+                    <i class="fa-solid fa-file-excel text-emerald-600 text-xs"></i>
+                    <span>Eksporter Excel/CSV</span>
+                </button>
+            `;
+
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-container hidden bg-white p-4 rounded-xl border border-slate-200/80 mb-3';
+            const canvas = document.createElement('canvas');
+            canvas.style.maxHeight = '280px';
+            chartContainer.appendChild(canvas);
+
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(toggleBar);
+            wrapper.appendChild(table);
+            wrapper.appendChild(chartContainer);
+
+            let chartInstance = null;
+
+            const btnTable = toggleBar.querySelector('.btn-show-table');
+            const btnChart = toggleBar.querySelector('.btn-show-chart');
+            const btnExportCsv = toggleBar.querySelector('.btn-export-csv');
+
+            if (btnExportCsv) {
+                btnExportCsv.onclick = () => exportTableToCsv(table);
+            }
+
+            btnTable.onclick = () => {
+                table.classList.remove('hidden');
+                chartContainer.classList.add('hidden');
+                btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
+                btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
+            };
+
+            btnChart.onclick = () => {
+                table.classList.add('hidden');
+                chartContainer.classList.remove('hidden');
+                btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
+                btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
+
+                if (!chartInstance && typeof Chart !== 'undefined') {
+                    const rowLabels = rows.map(r => (r.children[0]?.innerText || '').trim());
+                    const colors = ['#0284c7', '#f59e0b', '#10b981', '#6366f1', '#ec4899'];
+
+                    const datasets = numericColIndices.map((colIdx, i) => {
+                        const colName = headers[colIdx];
+                        const data = rows.map(r => {
+                            const val = (r.children[colIdx]?.innerText || '').trim();
+                            const num = parseFloat(val.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+                            return isNaN(num) ? 0 : num;
+                        });
+                        return {
+                            label: colName,
+                            data: data,
+                            backgroundColor: colors[i % colors.length] + 'cc',
+                            borderColor: colors[i % colors.length],
+                            borderWidth: 1.5,
+                            borderRadius: 6
+                        };
+                    });
+
+                    chartInstance = new Chart(canvas, {
+                        type: 'bar',
+                        data: {
+                            labels: rowLabels,
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+                            },
+                            scales: {
+                                y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
+                                x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                            }
+                        }
+                    });
+                }
+            };
+        }
+
+        function exportTableToCsv(table, fileName = 'ebm_sammenligning.csv') {
+            const rows = Array.from(table.querySelectorAll('tr'));
+            if (!rows.length) return;
+
+            const csvRows = [];
+            rows.forEach(row => {
+                const cells = Array.from(row.querySelectorAll('th, td')).map(cell => {
+                    let text = cell.innerText.replace('⇅', '').replace('▲', '').replace('▼', '').trim();
+                    text = text.replace(/"/g, '""');
+                    return `"${text}"`;
+                });
+                csvRows.push(cells.join(';'));
+            });
+
+            const csvContent = '\uFEFF' + csvRows.join('\r\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        let audioContext = null;
+        let analyser = null;
+        let animFrameId = null;
+
+        function startAudioVisualizer(stream) {
+            const waveContainer = document.getElementById('voice-wave-container');
+            if (waveContainer) waveContainer.classList.remove('hidden');
+
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx || !stream) return;
+
+                audioContext = new AudioCtx();
+                const source = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 32;
+                source.connect(analyser);
+
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                const bars = document.querySelectorAll('.wave-bar');
+
+                function updateBars() {
+                    if (!isRecording) return;
+                    analyser.getByteFrequencyData(dataArray);
+
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                    const avg = sum / dataArray.length;
+
+                    bars.forEach((bar, idx) => {
+                        const val = dataArray[idx % dataArray.length] || avg;
+                        const heightPx = Math.max(4, Math.min(20, Math.round((val / 255) * 20)));
+                        bar.style.height = heightPx + 'px';
+                    });
+
+                    animFrameId = requestAnimationFrame(updateBars);
+                }
+                updateBars();
+            } catch (err) {
+                console.warn('Audio visualizer kunne ikke startes:', err);
+            }
+        }
+
+        function stopAudioVisualizer() {
+            const waveContainer = document.getElementById('voice-wave-container');
+            if (waveContainer) waveContainer.classList.add('hidden');
+
+            if (animFrameId) {
+                cancelAnimationFrame(animFrameId);
+                animFrameId = null;
+            }
+            if (audioContext) {
+                try { audioContext.close(); } catch {}
+                audioContext = null;
+            }
+            const bars = document.querySelectorAll('.wave-bar');
+            bars.forEach(b => b.style.height = '');
+        }
+
+        function getPageSpeechLanguage() {
+            const htmlLang = (document.documentElement.lang || 'da').toLowerCase().trim();
+            if (htmlLang.startsWith('en')) return 'en-US';
+            if (htmlLang.startsWith('de')) return 'de-DE';
+            if (htmlLang.startsWith('sv')) return 'sv-SE';
+            if (htmlLang.startsWith('no')) return 'nb-NO';
+            return 'da-DK'; // Standardfallback er altid sidens eget sprog (Dansk)
+        }
+
+        const voiceLang = getPageSpeechLanguage();
+        let recognition = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let mediaStream = null;
+        let isRecording = false;
+
+        function hasNativeSpeechRecognition() {
+            return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+        }
+
+        function initVoiceInput() {
+            if (!hasNativeSpeechRecognition()) {
+                return;
+            }
+
+            try {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = voiceLang;
+                recognition.continuous = false;
+                recognition.interimResults = true;
+
+                const micBtn = document.getElementById('mic-btn');
+                const queryInput = document.getElementById('query-input');
+
+                recognition.onstart = () => {
+                    isRecording = true;
+                    const waveContainer = document.getElementById('voice-wave-container');
+                    if (waveContainer) waveContainer.classList.remove('hidden');
+                    if (micBtn) {
+                        micBtn.className = 'w-8 h-8 rounded-lg flex items-center justify-center bg-red-500 text-white animate-pulse shadow-md border border-red-600 transition';
+                        micBtn.title = 'Lytter... Klik for at stoppe';
+                    }
+                    if (queryInput) queryInput.placeholder = 'Lytter... Tal nu...';
+                };
+
+                recognition.onresult = (event) => {
+                    let transcript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        transcript += event.results[i][0].transcript;
+                    }
+                    if (queryInput && transcript) {
+                        queryInput.value = transcript;
+                        autoExpandTextarea(queryInput);
+                    }
+                };
+
+                recognition.onerror = (event) => {
+                    console.warn('Tale-genkendelse fejl, falder tilbage til MediaRecorder hvis nødvendigt:', event.error);
+                    stopVoiceInput();
+                };
+
+                recognition.onend = () => {
+                    stopVoiceInput();
+                };
+            } catch (err) {
+                console.warn('Kunne ikke initialisere Web Speech recognition, bruger MediaRecorder fallback:', err);
+                recognition = null;
+            }
+        }
+
+        async function toggleVoiceInput() {
+            if (isRecording) {
+                stopVoiceInput();
+                return;
+            }
+
+            if (hasNativeSpeechRecognition()) {
+                if (!recognition) initVoiceInput();
+                if (recognition) {
+                    try {
+                        recognition.lang = voiceLang;
+                        recognition.start();
+                        return;
+                    } catch (e) {
+                        console.warn('SpeechRecognition.start fejlede, bruger MediaRecorder fallback:', e);
+                    }
+                }
+            }
+
+            // Firefox & MediaRecorder Fallback
+            await startMediaRecorderVoiceInput();
+        }
+
+        async function startMediaRecorderVoiceInput() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Mikrofonadgang understøttes ikke i denne browser eller i denne kontekst (kræver HTTPS eller localhost).');
+                return;
+            }
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioChunks = [];
+
+                let options = {};
+                if (typeof MediaRecorder.isTypeSupported === 'function') {
+                    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                        options = { mimeType: 'audio/webm;codecs=opus' };
+                    } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                        options = { mimeType: 'audio/ogg;codecs=opus' };
+                    }
+                }
+
+                mediaRecorder = new MediaRecorder(mediaStream, options);
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        audioChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                    audioChunks = [];
+                    if (mediaStream) {
+                        mediaStream.getTracks().forEach(t => t.stop());
+                        mediaStream = null;
+                    }
+
+                    if (audioBlob.size > 100) {
+                        await sendAudioForTranscription(audioBlob);
+                    }
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                startAudioVisualizer(mediaStream);
+
+                const micBtn = document.getElementById('mic-btn');
+                const queryInput = document.getElementById('query-input');
+
+                if (micBtn) {
+                    micBtn.className = 'w-8 h-8 rounded-lg flex items-center justify-center bg-red-500 text-white animate-pulse shadow-md border border-red-600 transition';
+                    micBtn.title = 'Optager... Klik for at transskribere';
+                }
+                if (queryInput) {
+                    queryInput.placeholder = 'Optager... Tal nu...';
+                }
+            } catch (err) {
+                console.error('Mikrofon fejl i MediaRecorder:', err);
+                alert('Kunne ikke få adgang til mikrofonen. Tjek venligst mikrofontilladelser i din browser.');
+                stopVoiceInput();
+            }
+        }
+
+        function stopVoiceInput() {
+            if (recognition && isRecording) {
+                try { recognition.stop(); } catch {}
+            }
+
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                try { mediaRecorder.stop(); } catch {}
+            }
+
+            isRecording = false;
+            stopAudioVisualizer();
+
+            const micBtn = document.getElementById('mic-btn');
+            const queryInput = document.getElementById('query-input');
+
+            if (micBtn) {
+                micBtn.className = 'w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-brand-600 hover:bg-brand-50 transition border border-transparent hover:border-brand-200';
+                micBtn.title = 'Indtal spørgsmål (Tale-til-tekst)';
+            }
+            if (queryInput) {
+                queryInput.placeholder = 'Stil et spørgsmål (Enter for at sende, Shift+Enter for ny linje)...';
+            }
+        }
+
+        async function sendAudioForTranscription(audioBlob) {
+            const micBtn = document.getElementById('mic-btn');
+            const queryInput = document.getElementById('query-input');
+
+            if (micBtn) {
+                micBtn.disabled = true;
+                micBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-xs text-brand-600"></i>';
+                micBtn.title = 'Transskriberer tale...';
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'speech.' + (audioBlob.type.includes('ogg') ? 'ogg' : 'webm'));
+
+                const lang = currentVoiceLang || getPageSpeechLanguage();
+                const res = await fetch(`/api/stt/transcribe?lang=${encodeURIComponent(lang)}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.text && queryInput) {
+                        queryInput.value = data.text;
+                        autoExpandTextarea(queryInput);
+                    }
+                } else {
+                    console.warn('Transskriberingsfejl fra server:', res.status);
+                }
+            } catch (err) {
+                console.error('Kunne ikke sende lyd til transskribering:', err);
+            } finally {
+                if (micBtn) {
+                    micBtn.disabled = false;
+                    micBtn.innerHTML = '<i class="fa-solid fa-microphone text-sm"></i>';
+                    stopVoiceInput();
+                }
+            }
         }
     </script>
 </body>

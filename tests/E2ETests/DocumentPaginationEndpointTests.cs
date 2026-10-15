@@ -71,7 +71,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
-    public async Task GetDocuments_WithoutPagingParams_ReturnsRawArray()
+    public async Task GetDocuments_WithoutPagingParams_ReturnsDefaultPagedResult()
     {
         // Arrange
         await SeedDocumentsAsync(5);
@@ -83,9 +83,12 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var docs = await response.Content.ReadFromJsonAsync<List<Document>>();
-        docs.Should().NotBeNull();
-        docs!.Count.Should().BeGreaterThanOrEqualTo(5);
+        var pagedResult = await response.Content.ReadFromJsonAsync<PagedResult<Document>>();
+        pagedResult.Should().NotBeNull();
+        pagedResult!.Items.Should().NotBeNull();
+        pagedResult.Items.Count().Should().BeGreaterThanOrEqualTo(5);
+        pagedResult.Page.Should().Be(1);
+        pagedResult.PageSize.Should().Be(20);
     }
 
     [Fact]
