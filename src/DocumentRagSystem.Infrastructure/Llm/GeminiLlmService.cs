@@ -118,7 +118,7 @@ public class GeminiLlmService : ILlmService
         sb.AppendLine("The user has asked a question in <query> and technical documentation excerpts are provided in <answers>.");
         sb.AppendLine("### INSTRUCTIONS");
         sb.AppendLine("- Answer the user's question in <query> based on the information in <answers>.");
-        sb.AppendLine("- CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS answer in the EXACT same language as the user's question in <query> (e.g. if the user asks in English, answer in English; if the user asks in Danish, answer in Danish; if in German, answer in German). NEVER reply in a different language.");
+        sb.AppendLine("- CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS answer in the EXACT same language as the user's question in <query> (e.g. if the user asks in English, answer in English; if the user asks in Danish, answer in Danish; if in German, answer in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like \"K3G560PC0401\" or \"230V\"), you MUST answer in the language of the application page itself: Danish (Dansk).");
         sb.AppendLine("### CONSTRAINTS");
         sb.AppendLine("- Use ONLY the information in <answers> to answer the question in <query>.");
         sb.AppendLine("- No preamble, meta-commentary, or conversational filler.");

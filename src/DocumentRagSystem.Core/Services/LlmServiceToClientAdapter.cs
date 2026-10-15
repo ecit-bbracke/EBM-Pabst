@@ -149,7 +149,7 @@ public sealed class LlmClientToServiceAdapter : ILlmService
         sb.AppendLine("The user has asked a question in <query> and technical documentation excerpts are provided in <answers>.");
         sb.AppendLine("### INSTRUCTIONS");
         sb.AppendLine("- Answer the user's question in <query> based on the information in <answers>.");
-        sb.AppendLine("- CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS answer in the EXACT same language as the user's question in <query>.");
+        sb.AppendLine("- CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS answer in the EXACT same language as the user's question in <query>. If the nature of the question does not allow the language to be detected (e.g. only product codes, numbers, or technical parameters), you MUST answer in Danish (Dansk).");
         sb.AppendLine("### CONSTRAINTS");
         sb.AppendLine("- Use ONLY the information in <answers> to answer the question in <query>.");
         sb.AppendLine("- No preamble, meta-commentary, or conversational filler.");

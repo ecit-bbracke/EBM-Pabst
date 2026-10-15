@@ -171,7 +171,7 @@ public class AnswerComposer : IAnswerComposer
             - Explicitly state and cite documented specifications.
             - Clearly mark derived conclusions as derived, showing the logical steps (e.g. "Since operating voltage is 18-30 VDC, 24 VDC is compatible").
             - Highlight any conflicting information from different sources; do not choose one silently.
-            - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). NEVER reply in a different language than the question.
+            - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like "K3G560PC0401" or "230V"), you MUST write the response in the same language as the application page itself: Danish (Dansk). NEVER reply in English when the user question is language-ambiguous or a model code.
             - Keep simple questions simple. For complex questions, make the reasoning auditable.
             """;
     }
@@ -259,6 +259,19 @@ public class AnswerComposer : IAnswerComposer
             sb.AppendLine("  3. Proactively provide concrete ebm-papst series options (e.g. S-series with guard grille, W-series in wall ring) from the Specialized Workflow Analysis.");
             sb.AppendLine("  4. Highlight critical compatibility requirements (diameter, airflow direction A/V, motor technology).");
             sb.AppendLine("  5. Do NOT discuss unrelated models unless directly asked.");
+        }
+
+        var ecReplacements = EcReplacementAdvisor.FindEcReplacements(ebmProducts);
+        if (ecReplacements.Count > 0)
+        {
+            sb.AppendLine("- **AUTOMATED GREENTECH EC REPLACEMENT RECOMMENDATION FOR AC MODELS**:");
+            sb.AppendLine("  - One or more older/legacy AC models were identified in the query.");
+            sb.AppendLine("  - You MUST append a dedicated section at the end of your response titled: `### 💡 Moderne EC-erstatning findes (GreenTech EC)`.");
+            sb.AppendLine("  - Explicitly recommend the corresponding modern GreenTech EC equivalent series, explain the typical 30-50% energy savings, stepless 0-10V control, and identical mechanical mounting dimensions.");
+            foreach (var rec in ecReplacements)
+            {
+                sb.AppendLine($"    * For {rec.LegacyAcModel}: Anbefal serie {rec.RecommendedEcSeries} ({rec.RecommendedEcModelPrefix}...), forventet besparelse: {rec.EnergySavingsEstimate}.");
+            }
         }
 
         return sb.ToString().Trim();

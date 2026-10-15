@@ -443,11 +443,11 @@ public sealed class GeminiLlmClient : ILlmClient
     {
         if (!requireJson)
         {
-            if (prompt.Contains("### CONTEXT") || prompt.Contains("<answers>"))
+            if (prompt.Contains("### CONTEXT") || prompt.Contains("<answers>") || prompt.Contains("Answer Composer") || prompt.Contains("Retrieved Context") || prompt.Contains("Context Chunks"))
             {
-                return $"[Local Mock Response] Based on the retrieved context chunks:\n\nThis is a mock answer generated locally for the prompt.";
+                return "Baseret på de tilgængelige datablade og tekniske kilder, kunne et fyldestgørende svar ikke genereres, da der ikke er konfigureret en aktiv forbindelse til sprogmodellen (Gemini API-nøgle mangler eller er ikke tilgængelig).";
             }
-            return $"[Local Mock Completion] Response for prompt:\n{prompt.Substring(0, Math.Min(prompt.Length, 100))}...";
+            return $"[Lokal Mock-tilstand] Svar for forespørgsel:\n{prompt.Substring(0, Math.Min(prompt.Length, 100))}...";
         }
 
         var promptLower = prompt.ToLowerInvariant();

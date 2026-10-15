@@ -18,7 +18,9 @@ public class GeminiEmbeddingService : IEmbeddingService
     private readonly string _model;
     private readonly int _fallbackDimensions = 768;
     private readonly ILogger<GeminiEmbeddingService>? _logger;
-    private static readonly ConcurrentDictionary<string, float[]> _embeddingCache = new(StringComparer.Ordinal);
+    private sealed record CacheEntry(float[] Vector, DateTime LastAccessed);
+    private static readonly ConcurrentDictionary<string, CacheEntry> _embeddingCache = new(StringComparer.Ordinal);
+    private const int MaxCacheEntries = 10000;
 
     public GeminiEmbeddingService(
         string? apiKey, 
@@ -46,13 +48,14 @@ public class GeminiEmbeddingService : IEmbeddingService
         var trimmedText = text.Trim();
         var stopwatch = Stopwatch.StartNew();
 
-        if (_embeddingCache.TryGetValue(trimmedText, out var cachedVector))
+        if (_embeddingCache.TryGetValue(trimmedText, out var entry))
         {
             stopwatch.Stop();
             _logger?.LogDebug(
                 "[GeminiEmbedding] Cache hit for text ({Length} chars) in {DurationMs}ms.",
                 trimmedText.Length, stopwatch.ElapsedMilliseconds);
-            return cachedVector;
+            _embeddingCache[trimmedText] = entry with { LastAccessed = DateTime.UtcNow };
+            return entry.Vector;
         }
 
         var textPreview = trimmedText.Length <= 80 ? trimmedText : $"{trimmedText.Substring(0, 77)}...";
@@ -60,7 +63,7 @@ public class GeminiEmbeddingService : IEmbeddingService
         if (_httpClient == null || string.IsNullOrWhiteSpace(_apiKey))
         {
             var mock = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-            _embeddingCache.TryAdd(trimmedText, mock);
+            StoreInCache(trimmedText, mock);
             stopwatch.Stop();
             _logger?.LogDebug(
                 "[GeminiEmbedding] Generated mock embedding in {DurationMs}ms for text: \"{TextPreview}\".",
@@ -95,7 +98,7 @@ public class GeminiEmbeddingService : IEmbeddingService
                     response.StatusCode, stopwatch.ElapsedMilliseconds, errorContent);
                 Console.WriteLine($"Gemini API error (Status {response.StatusCode}): {errorContent}. Falling back to deterministic mock.");
                 var fallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-                _embeddingCache.TryAdd(trimmedText, fallback);
+                StoreInCache(trimmedText, fallback);
                 return fallback;
             }
 
@@ -107,7 +110,7 @@ public class GeminiEmbeddingService : IEmbeddingService
                 var values = valuesProp.EnumerateArray()
                                         .Select(v => (float)v.GetDouble())
                                         .ToArray();
-                _embeddingCache.TryAdd(trimmedText, values);
+                StoreInCache(trimmedText, values);
                 _logger?.LogInformation(
                     "[GeminiEmbedding] Generated embedding with model {Model} in {DurationMs}ms (Dimensions: {Dimensions}, Text: \"{TextPreview}\").",
                     _model, stopwatch.ElapsedMilliseconds, values.Length, textPreview);
@@ -119,7 +122,7 @@ public class GeminiEmbeddingService : IEmbeddingService
                 stopwatch.ElapsedMilliseconds);
             Console.WriteLine("Failed to parse Gemini response. Falling back to deterministic mock.");
             var parsedFallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-            _embeddingCache.TryAdd(trimmedText, parsedFallback);
+            StoreInCache(trimmedText, parsedFallback);
             return parsedFallback;
         }
         catch (Exception ex)
@@ -130,9 +133,26 @@ public class GeminiEmbeddingService : IEmbeddingService
                 stopwatch.ElapsedMilliseconds, ex.Message);
             Console.WriteLine($"Gemini Embedding error: {ex.Message}. Falling back to deterministic mock.");
             var exFallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-            _embeddingCache.TryAdd(trimmedText, exFallback);
+            StoreInCache(trimmedText, exFallback);
             return exFallback;
         }
+    }
+
+    private static void StoreInCache(string key, float[] vector)
+    {
+        if (_embeddingCache.Count >= MaxCacheEntries)
+        {
+            var keysToRemove = _embeddingCache
+                .OrderBy(kv => kv.Value.LastAccessed)
+                .Take(1000)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var k in keysToRemove)
+            {
+                _embeddingCache.TryRemove(k, out _);
+            }
+        }
+        _embeddingCache[key] = new CacheEntry(vector, DateTime.UtcNow);
     }
 
     private static float[] GenerateDeterministicMockEmbedding(string text, int dimensions)
