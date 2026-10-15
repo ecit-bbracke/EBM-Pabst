@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -43,6 +44,16 @@ public interface ITechnicalRagOrchestrator
 
 public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 {
+    private sealed record QueryCacheEntry(
+        string Answer,
+        List<DocumentChunk> Chunks,
+        ExecutionTrace Trace,
+        DateTime CachedAt
+    );
+    private static readonly ConcurrentDictionary<string, QueryCacheEntry> _queryResponseCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
+    private const int MaxCacheSize = 5000;
+
     private readonly IInputGovernor _inputGovernor;
     private readonly IWorkflowRouter _workflowRouter;
     private readonly IEvidenceEvaluator _evidenceEvaluator;
@@ -53,6 +64,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private readonly IConversationalQueryRefiner _queryRefiner;
     private readonly IConversationStateStore _stateStore;
     private readonly IContextExpander _contextExpander;
+    private readonly IDocumentRepository? _documentRepository;
+    private readonly IFullTextSearchStore? _ftsStore;
     private readonly ILogger<TechnicalRagOrchestrator>? _logger;
 
     // Workflow executors dictionary
@@ -73,7 +86,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IConversationStateStore? stateStore = null,
         IDocumentRepository? documentRepository = null,
         IContextExpander? contextExpander = null,
-        ILogger<TechnicalRagOrchestrator>? logger = null
+        ILogger<TechnicalRagOrchestrator>? logger = null,
+        IFullTextSearchStore? ftsStore = null
     )
     {
         _inputGovernor = inputGovernor ?? throw new ArgumentNullException(nameof(inputGovernor));
@@ -84,7 +98,9 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
         _llmService = new LlmClientToServiceAdapter(llmClient);
         _contextExpander = contextExpander ?? new ContextExpander();
+        _documentRepository = documentRepository;
         _logger = logger;
+        _ftsStore = ftsStore;
 
         var parser = ebmParser ?? new EbmProductCodeParser();
         _queryRefiner = queryRefiner ?? new ConversationalQueryRefiner(llmClient, parser);
@@ -99,7 +115,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             { WorkflowType.Calculation, new CalculationWorkflowExecutor(_llmService) },
             { WorkflowType.Design, new DesignWorkflowExecutor(_llmService) },
             { WorkflowType.Clarification, new ClarificationWorkflowExecutor(_llmService) },
-            { WorkflowType.Overview, new OverviewWorkflowExecutor(_llmService, parser, documentRepository) }
+            { WorkflowType.Overview, new OverviewWorkflowExecutor(_llmService, parser, documentRepository) },
+            { WorkflowType.Greeting, new GreetingWorkflowExecutor(_llmService) }
         };
     }
 
@@ -115,7 +132,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         IConversationStateStore? stateStore = null,
         IDocumentRepository? documentRepository = null,
         IContextExpander? contextExpander = null,
-        ILogger<TechnicalRagOrchestrator>? logger = null
+        ILogger<TechnicalRagOrchestrator>? logger = null,
+        IFullTextSearchStore? ftsStore = null
     )
         : this(
             inputGovernor,
@@ -129,7 +147,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             stateStore,
             documentRepository,
             contextExpander,
-            logger)
+            logger,
+            ftsStore)
     {
     }
 
@@ -256,6 +275,16 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             return (clarificationDraft, new List<DocumentChunk>(), clarificationTrace);
         }
 
+        bool canUseCache = (currentState.ActiveConstraints == null || currentState.ActiveConstraints.Count == 0) &&
+                           !refinement.ClarificationRequired;
+        var cacheKey = effectiveQuestion.Trim().ToLowerInvariant();
+
+        if (canUseCache && _queryResponseCache.TryGetValue(cacheKey, out var cachedEntry) && (DateTime.UtcNow - cachedEntry.CachedAt) < CacheTtl)
+        {
+            _logger?.LogInformation("[Orchestrator] Instant query cache hit for: \"{EffectiveQuestion}\"", effectiveQuestion);
+            return (cachedEntry.Answer, cachedEntry.Chunks, cachedEntry.Trace);
+        }
+
         var conversationContext = new ConversationContext(
             ActiveEntities: refinement.ActiveEntities,
             ActiveConstraints: refinement.ActiveConstraints,
@@ -268,11 +297,20 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 4. Start Input Governor and Initial Vector Search in Parallel
         stageStopwatch.Restart();
         var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
-        var initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
-
         var govResult = await govResultTask;
         timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
         _logger?.LogInformation("[Orchestrator] Input governor completed in {DurationMs}ms (Intent: {Intent}, Confidence: {Confidence}).", timings["InputGovernor"], govResult.Intent, govResult.Confidence);
+
+        Task<IEnumerable<DocumentChunk>> initialSearchTask;
+        if ((govResult.ParsedEbmProducts != null && govResult.ParsedEbmProducts.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        {
+            var codes = govResult.ParsedEbmProducts?.Select(p => p.CleanCode).Distinct().ToList() ?? new List<string>();
+            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, codes, vectorStore, _documentRepository);
+        }
+        else
+        {
+            initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
+        }
 
         // 5. Workflow Router
         var workflowType = _workflowRouter.RouteWorkflow(govResult);
@@ -302,7 +340,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 7. Iterative Retrieval & Evidence Evaluation Loop
         stageStopwatch.Restart();
         int iterations = 0;
-        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison);
+        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison || workflowType == WorkflowType.Greeting);
 
         if (isDomainWorkflow)
         {
@@ -388,7 +426,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 8. Answer Composer
         stageStopwatch.Restart();
-        string composedAnswer = (workflowType == WorkflowType.Overview)
+        string composedAnswer = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting)
             ? currentDraft
             : await _answerComposer.ComposeAnswerAsync(effectiveQuestion, govResult, evidenceClaims, allChunks, currentDraft, workflowData);
         timings["AnswerComposition"] = stageStopwatch.ElapsedMilliseconds;
@@ -400,69 +438,76 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         OutputGovernorResult? govOutputResult = null;
         string finalAnswer = composedAnswer;
 
-        while (regenAttempts < MaxRegenerationAttempts)
+        if (workflowType == WorkflowType.Greeting)
         {
-            var govTimer = Stopwatch.StartNew();
-            govOutputResult = await _outputGovernor.ValidateOutputAsync(effectiveQuestion, finalAnswer, allChunks);
-            govTimer.Stop();
-            timings[$"OutputGovernorValidation_Attempt{regenAttempts + 1}"] = govTimer.ElapsedMilliseconds;
-
-            if (govOutputResult.Approved || govOutputResult.Action == "APPROVE")
+            govOutputResult = new OutputGovernorResult(Approved: true, Issues: new List<OutputGovernorIssue>(), Action: "APPROVE");
+        }
+        else
+        {
+            while (regenAttempts < MaxRegenerationAttempts)
             {
-                break;
+                var govTimer = Stopwatch.StartNew();
+                govOutputResult = await _outputGovernor.ValidateOutputAsync(effectiveQuestion, finalAnswer, allChunks);
+                govTimer.Stop();
+                timings[$"OutputGovernorValidation_Attempt{regenAttempts + 1}"] = govTimer.ElapsedMilliseconds;
+
+                if (govOutputResult.Approved || govOutputResult.Action == "APPROVE")
+                {
+                    break;
+                }
+
+                if (govOutputResult.Action == "REQUEST_CLARIFICATION")
+                {
+                    var clarifyPrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question (or in Danish if the language cannot be detected) asking them to clarify or provide additional details/model numbers.";
+                    var clarifyTimer = Stopwatch.StartNew();
+                    _logger?.LogInformation("[Orchestrator] Executing OutputGovernor clarification prompt.\nPrompt:\n{Prompt}", clarifyPrompt);
+                    var clarifyRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(clarifyPrompt, requireJson: false));
+                    finalAnswer = clarifyRes.Content;
+                    clarifyTimer.Stop();
+                    promptTraces.Add(new PromptTrace("OutputGovernor", "RequestClarification", clarifyPrompt, finalAnswer, clarifyTimer.ElapsedMilliseconds, clarifyRes.Metadata.Model, clarifyRes.Metadata));
+                    break;
+                }
+
+                regenAttempts++;
+
+                if (regenAttempts >= MaxRegenerationAttempts && govOutputResult.Action == "FAIL_SAFE")
+                {
+                    var failSafePrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question (or in Danish if the language cannot be detected) explaining that the available search results contain conflicting or insufficient data to provide a safe verified answer, and advise them to contact technical support.";
+                    var failSafeTimer = Stopwatch.StartNew();
+                    _logger?.LogInformation("[Orchestrator] Executing OutputGovernor fail-safe prompt.\nPrompt:\n{Prompt}", failSafePrompt);
+                    var failSafeRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(failSafePrompt, requireJson: false));
+                    finalAnswer = failSafeRes.Content;
+                    failSafeTimer.Stop();
+                    promptTraces.Add(new PromptTrace("OutputGovernor", "FailSafe", failSafePrompt, finalAnswer, failSafeTimer.ElapsedMilliseconds, failSafeRes.Metadata.Model, failSafeRes.Metadata));
+                    break;
+                }
+
+                // Otherwise, regenerate with Output Governor feedback
+                var issues = govOutputResult.Issues ?? new List<OutputGovernorIssue>();
+                var issuesList = issues.Count > 0
+                    ? string.Join("\n", issues.Select(i => $"- [{i.Type}] {i.Claim} ({i.Severity})"))
+                    : "Ensure the answer only makes claims strictly verified by the retrieved context chunks or ebm-papst domain rules.";
+
+                var regenPrompt = $$"""
+                    You are the Answer Composer. Your previous response was rejected by the Output Governor due to the following issues:
+                    {{issuesList}}
+
+                    Please rewrite the response, resolving all these issues. Ensure every claim is fully supported by the retrieved documentation or domain rules. If information is not found in the context, clearly explain that it is not specified rather than making assumptions.
+                    CRITICAL LANGUAGE REQUIREMENT: You MUST write the ENTIRE response in the EXACT same language as the user's question. If the nature of the question does not allow the language to be detected (e.g. only product codes, numbers, or technical parameters), you MUST write in the application's language: Danish (Dansk).
+
+                    Original Question: {{effectiveQuestion}}
+                    Retrieved Context:
+                    {{string.Join("\n\n", allChunks.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"))}}
+                    """;
+
+                var regenTimer = Stopwatch.StartNew();
+                _logger?.LogInformation("[Orchestrator] Executing regeneration prompt (Attempt {Attempt}).\nPrompt:\n{Prompt}", regenAttempts, regenPrompt);
+                var regenRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(regenPrompt, requireJson: false));
+                finalAnswer = regenRes.Content;
+                regenTimer.Stop();
+                timings[$"Regeneration_Attempt{regenAttempts}"] = regenTimer.ElapsedMilliseconds;
+                promptTraces.Add(new PromptTrace("OutputGovernor", $"Regeneration_Attempt{regenAttempts}", regenPrompt, finalAnswer, regenTimer.ElapsedMilliseconds, regenRes.Metadata.Model, regenRes.Metadata));
             }
-
-            if (govOutputResult.Action == "REQUEST_CLARIFICATION")
-            {
-                var clarifyPrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question asking them to clarify or provide additional details/model numbers.";
-                var clarifyTimer = Stopwatch.StartNew();
-                _logger?.LogInformation("[Orchestrator] Executing OutputGovernor clarification prompt.\nPrompt:\n{Prompt}", clarifyPrompt);
-                var clarifyRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(clarifyPrompt, requireJson: false));
-                finalAnswer = clarifyRes.Content;
-                clarifyTimer.Stop();
-                promptTraces.Add(new PromptTrace("OutputGovernor", "RequestClarification", clarifyPrompt, finalAnswer, clarifyTimer.ElapsedMilliseconds, clarifyRes.Metadata.Model, clarifyRes.Metadata));
-                break;
-            }
-
-            regenAttempts++;
-
-            if (regenAttempts >= MaxRegenerationAttempts && govOutputResult.Action == "FAIL_SAFE")
-            {
-                var failSafePrompt = $"The user asked: '{effectiveQuestion}'. Please formulate a polite response in the EXACT same language as the user's question explaining that the available search results contain conflicting or insufficient data to provide a safe verified answer, and advise them to contact technical support.";
-                var failSafeTimer = Stopwatch.StartNew();
-                _logger?.LogInformation("[Orchestrator] Executing OutputGovernor fail-safe prompt.\nPrompt:\n{Prompt}", failSafePrompt);
-                var failSafeRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(failSafePrompt, requireJson: false));
-                finalAnswer = failSafeRes.Content;
-                failSafeTimer.Stop();
-                promptTraces.Add(new PromptTrace("OutputGovernor", "FailSafe", failSafePrompt, finalAnswer, failSafeTimer.ElapsedMilliseconds, failSafeRes.Metadata.Model, failSafeRes.Metadata));
-                break;
-            }
-
-            // Otherwise, regenerate with Output Governor feedback
-            var issues = govOutputResult.Issues ?? new List<OutputGovernorIssue>();
-            var issuesList = issues.Count > 0
-                ? string.Join("\n", issues.Select(i => $"- [{i.Type}] {i.Claim} ({i.Severity})"))
-                : "Ensure the answer only makes claims strictly verified by the retrieved context chunks or ebm-papst domain rules.";
-
-            var regenPrompt = $$"""
-                You are the Answer Composer. Your previous response was rejected by the Output Governor due to the following issues:
-                {{issuesList}}
-
-                Please rewrite the response, resolving all these issues. Ensure every claim is fully supported by the retrieved documentation or domain rules. If information is not found in the context, clearly explain that it is not specified rather than making assumptions.
-                CRITICAL LANGUAGE REQUIREMENT: You MUST write the ENTIRE response in the EXACT same language as the user's question.
-
-                Original Question: {{effectiveQuestion}}
-                Retrieved Context:
-                {{string.Join("\n\n", allChunks.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"))}}
-                """;
-
-            var regenTimer = Stopwatch.StartNew();
-            _logger?.LogInformation("[Orchestrator] Executing regeneration prompt (Attempt {Attempt}).\nPrompt:\n{Prompt}", regenAttempts, regenPrompt);
-            var regenRes = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(regenPrompt, requireJson: false));
-            finalAnswer = regenRes.Content;
-            regenTimer.Stop();
-            timings[$"Regeneration_Attempt{regenAttempts}"] = regenTimer.ElapsedMilliseconds;
-            promptTraces.Add(new PromptTrace("OutputGovernor", $"Regeneration_Attempt{regenAttempts}", regenPrompt, finalAnswer, regenTimer.ElapsedMilliseconds, regenRes.Metadata.Model, regenRes.Metadata));
         }
         timings["OutputGovernorTotal"] = stageStopwatch.ElapsedMilliseconds;
         _logger?.LogInformation("[Orchestrator] Output governor and validation loop completed in {DurationMs}ms (Action: {Action}, RegenAttempts: {RegenAttempts}).", timings["OutputGovernorTotal"], govOutputResult?.Action, regenAttempts);
@@ -495,6 +540,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             TotalDurationMs: totalStopwatch.ElapsedMilliseconds,
             PromptTraces: promptTraces
         );
+
+        if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
+        {
+            CacheQueryResult(cacheKey, finalAnswer, allChunks, trace);
+        }
 
         return (finalAnswer, allChunks, trace);
     }
@@ -586,6 +636,19 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             yield break;
         }
 
+        bool canUseCache = (currentState.ActiveConstraints == null || currentState.ActiveConstraints.Count == 0) &&
+                           !refinement.ClarificationRequired;
+        var cacheKey = effectiveQuestion.Trim().ToLowerInvariant();
+
+        if (canUseCache && _queryResponseCache.TryGetValue(cacheKey, out var cachedEntry) && (DateTime.UtcNow - cachedEntry.CachedAt) < CacheTtl)
+        {
+            _logger?.LogInformation("[Orchestrator] Instant query cache hit for streaming: \"{EffectiveQuestion}\"", effectiveQuestion);
+            yield return new OrchestrationStreamEvent("citations", null, cachedEntry.Chunks, effectiveConvId);
+            yield return new OrchestrationStreamEvent("chunk", cachedEntry.Answer);
+            yield return new OrchestrationStreamEvent("done", null, cachedEntry.Chunks, effectiveConvId, cachedEntry.Trace);
+            yield break;
+        }
+
         var conversationContext = new ConversationContext(
             ActiveEntities: refinement.ActiveEntities,
             ActiveConstraints: refinement.ActiveConstraints,
@@ -598,10 +661,19 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 4. Start Input Governor and Initial Vector Search in Parallel
         stageStopwatch.Restart();
         var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
-        var initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
-
         var govResult = await govResultTask;
         timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
+
+        Task<IEnumerable<DocumentChunk>> initialSearchTask;
+        if ((govResult.ParsedEbmProducts != null && govResult.ParsedEbmProducts.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        {
+            var codes = govResult.ParsedEbmProducts?.Select(p => p.CleanCode).Distinct().ToList() ?? new List<string>();
+            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, codes, vectorStore, _documentRepository);
+        }
+        else
+        {
+            initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
+        }
 
         // 5. Workflow Router
         var workflowType = _workflowRouter.RouteWorkflow(govResult);
@@ -626,7 +698,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 7. Evidence evaluation
         stageStopwatch.Restart();
-        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison);
+        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison || workflowType == WorkflowType.Greeting);
         List<EvidenceClaim> evidenceClaims;
 
         if (isDomainWorkflow)
@@ -650,7 +722,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         bool firstChunk = false;
         var answerSb = new StringBuilder();
 
-        if (workflowType == WorkflowType.Overview)
+        if (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting)
         {
             answerSb.Append(draftResponse);
             yield return new OrchestrationStreamEvent("chunk", draftResponse);
@@ -703,7 +775,29 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             PromptTraces: promptTraces
         );
 
+        if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
+        {
+            CacheQueryResult(cacheKey, finalAnswer, allChunks, trace);
+        }
+
         yield return new OrchestrationStreamEvent("done", null, allChunks, effectiveConvId, trace);
+    }
+
+    private static void CacheQueryResult(string key, string answer, List<DocumentChunk> chunks, ExecutionTrace trace)
+    {
+        if (_queryResponseCache.Count >= MaxCacheSize)
+        {
+            var oldKeys = _queryResponseCache
+                .OrderBy(kv => kv.Value.CachedAt)
+                .Take(500)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var k in oldKeys)
+            {
+                _queryResponseCache.TryRemove(k, out _);
+            }
+        }
+        _queryResponseCache[key] = new QueryCacheEntry(answer, chunks, trace, DateTime.UtcNow);
     }
 
     private void LogTimingSummary(
@@ -987,7 +1081,42 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         return facts;
     }
 
-    private static List<EvidenceClaim> ExtractDomainEvidenceClaims(object? workflowData, InputGovernorResult? govResult)
+    private async Task<IEnumerable<DocumentChunk>> PerformHybridSearchAsync(string query, List<string> productCodes, IVectorStore vectorStore, IDocumentRepository repository)
+    {
+        var semanticSearchTask = vectorStore.SearchAsync(query);
+        var exactDocsTask = repository.GetDocumentsByArticleIdsAsync(productCodes);
+        var bm25SearchTask = _ftsStore != null
+            ? _ftsStore.SearchAsync(query, limit: 15)
+            : Task.FromResult<IEnumerable<DocumentChunk>>(Enumerable.Empty<DocumentChunk>());
+
+        await Task.WhenAll(semanticSearchTask, exactDocsTask, bm25SearchTask);
+
+        var vectorChunks = semanticSearchTask.Result.ToList();
+        var bm25Chunks = bm25SearchTask.Result.ToList();
+
+        // 1. Fuse Semantic Vector Search and SQLite FTS5 BM25 Search using Reciprocal Rank Fusion (RRF)
+        var fusedChunks = ReciprocalRankFusion.Fuse(vectorChunks, bm25Chunks, k: 60, maxResults: 15);
+
+        // 2. Pin deterministic product code matches to the top
+        var exactDocs = exactDocsTask.Result.ToList();
+        if (exactDocs.Count > 0)
+        {
+            var firstDocChunksTask = exactDocs.Select(doc => vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1, 2, 3 }));
+            var exactChunksArrays = await Task.WhenAll(firstDocChunksTask);
+            var exactChunks = exactChunksArrays.SelectMany(x => x).ToList();
+
+            for (int i = exactChunks.Count - 1; i >= 0; i--)
+            {
+                var chunk = exactChunks[i];
+                fusedChunks.RemoveAll(c => c.Id == chunk.Id);
+                fusedChunks.Insert(0, chunk);
+            }
+        }
+
+        return fusedChunks;
+    }
+
+    private List<EvidenceClaim> ExtractDomainEvidenceClaims(object? workflowData, InputGovernorResult govResult)
     {
         var claims = new List<EvidenceClaim>();
 

@@ -65,6 +65,7 @@ Classify the user's technical question into ONE intent:
 - CALCULATION (formulas/math)
 - OVERVIEW (catalog/inventory/list of models)
 - CLARIFICATION (needs clarification)
+- GREETING (greetings, pleasantries, questions about assistant capabilities)
 
 Output JSON:
 {
@@ -257,6 +258,25 @@ Output JSON:
         result = null!;
         var text = combinedText.Trim();
 
+        // 0. Greeting intent (greetings / conversational pleasantries / bot capability questions without product codes)
+        if (extractedProducts.Count == 0 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count == 0))
+        {
+            if (IsGreetingQuery(text))
+            {
+                result = new InputGovernorResult(
+                    Intent: "GREETING",
+                    Confidence: 1.0,
+                    Entities: new List<EntityInfo>(),
+                    RequestedAttributes: new List<string>(),
+                    Constraints: new List<string>(),
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    ParsedEbmProducts: new List<EbmProductInfo>()
+                );
+                return true;
+            }
+        }
+
         // 1. Overview intent (asking for available ventilators/fans/catalog/inventory)
         if (extractedProducts.Count == 0 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count == 0))
         {
@@ -369,6 +389,32 @@ Output JSON:
                lower.Contains("hvad har vi af ventilatorer") ||
                lower.Contains("oversigt over ventilatorer");
     }
+
+    private static bool IsGreetingQuery(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var clean = text.Trim().TrimEnd('?', '!', '.', ',', ';', ':').Trim().ToLowerInvariant();
+
+        if (clean is "hejsa" or "hej" or "hallo" or "dav" or "davs" or "goddag" or "godmorgen" or "godaften" or
+                     "god dag" or "god morgen" or "god aften" or "hva så" or "hvad så" or
+                     "hi" or "hello" or "hey" or "good morning" or "good afternoon" or "good evening" or "howdy" or "greetings" or
+                     "yo" or "morn" or "mojn" or
+                     "tak" or "mange tak" or "tusind tak" or "thanks" or "thank you" or "thx" or
+                     "hvem er du" or "who are you" or "hvad kan du" or "hvad kan du hjælpe med" or "what can you do" or "what can you help with" or "help")
+        {
+            return true;
+        }
+
+        if (clean.Length <= 25 &&
+            (clean.StartsWith("hejsa") || clean.StartsWith("hej ") || clean.StartsWith("hallo ") ||
+             clean.StartsWith("hi ") || clean.StartsWith("hello ") || clean.StartsWith("hey ") ||
+             clean.StartsWith("goddag") || clean.StartsWith("godmorgen") || clean.StartsWith("godaften")))
+        {
+            return true;
+        }
+
+        return false;
+    }
 }
 
 public enum WorkflowType
@@ -380,7 +426,8 @@ public enum WorkflowType
     Calculation,
     Design,
     Clarification,
-    Overview
+    Overview,
+    Greeting
 }
 
 public interface IWorkflowRouter
@@ -394,6 +441,7 @@ public class WorkflowRouter : IWorkflowRouter
     {
         return governorResult.Intent.ToUpperInvariant() switch
         {
+            "GREETING" => WorkflowType.Greeting,
             "SPEC_LOOKUP" => WorkflowType.SimpleRag,
             "PROCEDURE" => WorkflowType.SimpleRag,
             "COMPARISON" => WorkflowType.Comparison,

@@ -699,7 +699,7 @@ public class CalculationWorkflowExecutor : IWorkflowExecutor
             - Inputs (with source document references)
             - Step-by-step math
             - Final result
-            - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the response and explanations in the EXACT same language as the user's question.
+            - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the response and explanations in the EXACT same language as the user's question. If the language cannot be detected (e.g. only numbers, formulas, or product codes), write in Danish (Dansk).
 
             Context chunks:
             {{string.Join("\n\n", chunks.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"))}}
@@ -750,7 +750,7 @@ public class ClarificationWorkflowExecutor : IWorkflowExecutor
         Task<IEnumerable<DocumentChunk>>? initialSearchTask = null
     )
     {
-        var prompt = $"The user asked: '{question}'. This is incomplete or unclear. Clarification reason: '{governorResult.ClarificationReason}'. Please ask the user to clarify or provide the missing details. CRITICAL LANGUAGE REQUIREMENT: You MUST formulate your response in the EXACT same language as the user's question.";
+        var prompt = $"The user asked: '{question}'. This is incomplete or unclear. Clarification reason: '{governorResult.ClarificationReason}'. Please ask the user to clarify or provide the missing details. CRITICAL LANGUAGE REQUIREMENT: You MUST formulate your response in the EXACT same language as the user's question (or in Danish if the language cannot be detected).";
         var answer = await _llmService.GenerateCompletionAsync(prompt, requireJson: false);
         return (answer, new List<DocumentChunk>(), null);
     }
@@ -889,12 +889,17 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
 
             foreach (var (category, items) in catalogResult.Categories)
             {
-                draftSb.AppendLine($"#### {category}");
-                foreach (var item in items)
+                draftSb.AppendLine($"#### {category} ({items.Count} modeller)");
+                var displayItems = items.Take(15).ToList();
+                foreach (var item in displayItems)
                 {
                     var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
                     var airflowStr = !string.IsNullOrWhiteSpace(item.Airflow) ? $", {item.Airflow}" : "";
                     draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{airflowStr} *(Kilde: {item.DocumentSource})*");
+                }
+                if (items.Count > 15)
+                {
+                    draftSb.AppendLine($"- *... og {items.Count - 15} yderligere modeller i denne kategori.*");
                 }
                 draftSb.AppendLine();
             }
@@ -912,12 +917,17 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
 
             foreach (var (category, items) in catalogResult.Categories)
             {
-                draftSb.AppendLine($"#### {category}");
-                foreach (var item in items)
+                draftSb.AppendLine($"#### {category} ({items.Count} models)");
+                var displayItems = items.Take(15).ToList();
+                foreach (var item in displayItems)
                 {
                     var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
                     var airflowStr = !string.IsNullOrWhiteSpace(item.Airflow) ? $", {item.Airflow}" : "";
                     draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{airflowStr} *(Source: {item.DocumentSource})*");
+                }
+                if (items.Count > 15)
+                {
+                    draftSb.AppendLine($"- *... and {items.Count - 15} additional models in this category.*");
                 }
                 draftSb.AppendLine();
             }
@@ -931,5 +941,60 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
 
         var structuredDraft = draftSb.ToString().Trim();
         return (structuredDraft, sampleChunks, catalogResult);
+    }
+}
+
+public class GreetingWorkflowExecutor : IWorkflowExecutor
+{
+    private readonly ILlmService? _llmService;
+
+    public GreetingWorkflowExecutor(ILlmService? llmService = null)
+    {
+        _llmService = llmService;
+    }
+
+    public Task<(string DraftResponse, List<DocumentChunk> ContextChunks, object? WorkflowData)> ExecuteAsync(
+        string question,
+        InputGovernorResult governorResult,
+        IVectorStore vectorStore,
+        Task<IEnumerable<DocumentChunk>>? initialSearchTask = null
+    )
+    {
+        var q = question.Trim().ToLowerInvariant();
+        bool isDanish = q.Contains("hej") || q.Contains("dav") || q.Contains("god") || q.Contains("hva") || q.Contains("tak") || q.Contains("hvem") || q.Contains("hjælp") || q.Contains("mojn");
+
+        string response;
+        if (isDanish)
+        {
+            if (q.Contains("tak"))
+            {
+                response = "Selv tak! Sig endelig til hvis du har flere spørgsmål til ebm-papst ventilatorer eller datablade.";
+            }
+            else if (q.Contains("hvem er du") || q.Contains("hvad kan du") || q.Contains("hjælp"))
+            {
+                response = "Jeg er din intelligente tekniske assistent for ebm-papst ventilatorer og datablade. Jeg kan hjælpe dig med at finde tekniske specifikationer (spænding, luftmængde, dimensioner), sammenligne to modeller, finde erstatningsventilatorer eller udføre tekniske beregninger. Hvad vil du gerne have hjælp til?";
+            }
+            else
+            {
+                response = "Hej! Jeg er klar til at besvare dine spørgsmål baseret på de tilgængelige ebm-papst datablade. Du kan spørge om specifikke modeller, sammenligne ventilatorer, finde erstatningsprodukter eller lave beregninger. Hvad kan jeg hjælpe dig med i dag?";
+            }
+        }
+        else
+        {
+            if (q.Contains("thank"))
+            {
+                response = "You're welcome! Let me know if you need any more help with ebm-papst fans, models, or datasheets.";
+            }
+            else if (q.Contains("who are you") || q.Contains("what can you do") || q.Contains("help"))
+            {
+                response = "I am your technical assistant for ebm-papst datasheets and ventilation systems. I can help you look up technical specifications (voltage, airflow, dimensions), compare fan models, find replacements, or perform engineering calculations. How can I help you today?";
+            }
+            else
+            {
+                response = "Hello! I am ready to answer your questions based on the available ebm-papst datasheets. You can ask about specific models, compare fans, look for replacement products, or run calculations. What can I help you with today?";
+            }
+        }
+
+        return Task.FromResult((response, new List<DocumentChunk>(), (object?)null));
     }
 }

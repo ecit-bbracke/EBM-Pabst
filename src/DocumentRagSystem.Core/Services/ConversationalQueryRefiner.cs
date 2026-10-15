@@ -60,7 +60,7 @@ Rules:
 3. MODIFIES: replaces old constraint with new one.
 4. NEW_TOPIC: new subject.
 5. RESET: start over.
-6. Keep effective_question in the exact same language as latest user message.
+6. Keep effective_question in the exact same language as latest user message (if language cannot be detected, use Danish).
 """;
 
     public async Task<QueryRefinementResult> RefineQueryAsync(
