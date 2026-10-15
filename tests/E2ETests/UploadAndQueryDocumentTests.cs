@@ -189,7 +189,7 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     public async Task UploadPdf_WhenNonEnglish_SavesFile_AndSkipsEmbedding()
     {
         // Arrange
-        var testDataPath = GetTestDataPath("sample.pdf");
+        var testDataPath = GetTestDataPath("sample_da.pdf");
         Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
 
         var pdfContent = await File.ReadAllBytesAsync(testDataPath);
@@ -273,5 +273,42 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.NotNull(danishCitation);
         Assert.Equal("da", danishCitation.language);
         Assert.True(danishCitation.isCompanion);
+    }
+
+    [Fact]
+    public async Task GetUploadFile_ResolvesDocumentWithout404()
+    {
+        // 1. Upload a compact sample document
+        var testDataPath = Path.Combine(AppContext.BaseDirectory, "TestData", "sample.pdf");
+        if (!File.Exists(testDataPath))
+        {
+            testDataPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "TestData", "sample.pdf");
+        }
+        var pdfContent = await File.ReadAllBytesAsync(testDataPath);
+
+        using var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(pdfContent);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        content.Add(fileContent, "file", "9694300352_4114N_2H6PU_PDB_EN.pdf");
+
+        var uploadResponse = await _client.PostAsync("/api/documents/upload", content);
+        uploadResponse.EnsureSuccessStatusCode();
+
+        // 2. Query /api/documents with category=CompactOrSpecial to get the served FilePath URL
+        var docsResponse = await _client.GetAsync("/api/documents?category=CompactOrSpecial");
+        docsResponse.EnsureSuccessStatusCode();
+        var paged = await docsResponse.Content.ReadFromJsonAsync<PagedResult<Document>>();
+        Assert.NotNull(paged);
+        Assert.NotEmpty(paged.Items);
+
+        var targetDoc = paged.Items.First(d => d.FileName.Contains("4114"));
+        Assert.NotNull(targetDoc.FilePath);
+
+        // 3. Act: Request the FilePath directly via GET /uploads/...
+        var downloadResponse = await _client.GetAsync(targetDoc.FilePath);
+
+        // 4. Assert: Must be 200 OK, NOT 404!
+        Assert.Equal(System.Net.HttpStatusCode.OK, downloadResponse.StatusCode);
+        Assert.Equal("application/pdf", downloadResponse.Content.Headers.ContentType?.MediaType);
     }
 }

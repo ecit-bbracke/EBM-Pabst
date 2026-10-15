@@ -126,7 +126,7 @@ public class DocumentProcessorTests
         mockEmbeddingService.Verify(x => x.GenerateEmbeddingAsync(It.IsAny<string>()), Times.Never);
         mockVectorStore.Verify(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()), Times.Never);
         mockChunkingService.Verify(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(result.Id, DocumentStatus.Skipped, It.IsAny<string>(), "da"), Times.Once);
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(result.Id, DocumentStatus.Skipped, It.IsAny<string>(), "da", It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]

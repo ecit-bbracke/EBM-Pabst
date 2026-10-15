@@ -10,12 +10,13 @@ using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.Infrastructure.VectorStores;
 using DocumentRagSystem.Infrastructure.Data;
+using DocumentRagSystem.Infrastructure.Configuration;
 using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 // Register Core & Infrastructure Services
-var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
+var geminiApiKey = AppConfigurationHelper.GetGeminiApiKey(builder.Configuration);
 var geminiEmbeddingModel = builder.Configuration["Gemini:EmbeddingModel"] ?? "gemini-embedding-001";
 
 var qdrantConnString = builder.Configuration["Qdrant:ConnectionString"] ?? "http://localhost:6334";

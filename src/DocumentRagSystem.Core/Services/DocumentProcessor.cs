@@ -13,6 +13,7 @@ public class DocumentProcessor : IDocumentProcessor
     private readonly IChunkingService _chunkingService;
     private readonly IEmbeddingService? _embeddingService;
     private readonly IVectorStore? _vectorStore;
+    private readonly IFullTextSearchStore? _ftsStore;
     private readonly IDocumentRepository? _documentRepository;
     private readonly ILanguageDetector _languageDetector;
     private readonly ILogger<DocumentProcessor>? _logger;
@@ -21,7 +22,7 @@ public class DocumentProcessor : IDocumentProcessor
     public DocumentProcessor(
         ITextExtractor textExtractor,
         IChunkingService chunkingService)
-        : this(textExtractor, chunkingService, null, null, null, null, null)
+        : this(textExtractor, chunkingService, null, null, null, null, null, null)
     {
     }
 
@@ -32,7 +33,7 @@ public class DocumentProcessor : IDocumentProcessor
         IEmbeddingService? embeddingService,
         IVectorStore? vectorStore,
         IDocumentRepository? documentRepository)
-        : this(textExtractor, chunkingService, embeddingService, vectorStore, documentRepository, null, null)
+        : this(textExtractor, chunkingService, embeddingService, vectorStore, documentRepository, null, null, null)
     {
     }
 
@@ -44,7 +45,8 @@ public class DocumentProcessor : IDocumentProcessor
         IVectorStore? vectorStore,
         IDocumentRepository? documentRepository,
         ILanguageDetector? languageDetector,
-        ILogger<DocumentProcessor>? logger = null)
+        ILogger<DocumentProcessor>? logger = null,
+        IFullTextSearchStore? ftsStore = null)
     {
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _chunkingService = chunkingService ?? throw new ArgumentNullException(nameof(chunkingService));
@@ -53,6 +55,7 @@ public class DocumentProcessor : IDocumentProcessor
         _documentRepository = documentRepository;
         _languageDetector = languageDetector ?? new DefaultLanguageDetector();
         _logger = logger;
+        _ftsStore = ftsStore;
     }
 
     public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null)
@@ -123,20 +126,39 @@ public class DocumentProcessor : IDocumentProcessor
             }
         }
 
-        // 3. Delete old chunks from vector store if overwriting
-        if (existingDoc != null && _vectorStore != null)
+        // 3. Delete old chunks from vector store and FTS store if overwriting
+        if (existingDoc != null)
         {
-            try
+            if (_vectorStore != null)
             {
-                await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id);
-                if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId);
+                    await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id);
+                    if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to delete old chunks for document {DocumentId} during overwrite.", existingDoc.Id);
                 }
             }
-            catch (Exception ex)
+
+            if (_ftsStore != null)
             {
-                _logger?.LogWarning(ex, "Failed to delete old chunks for document {DocumentId} during overwrite.", existingDoc.Id);
+                try
+                {
+                    await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id);
+                    if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _ftsStore.DeleteChunksByDocumentIdAsync(targetDocumentId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to delete old FTS5 chunks for document {DocumentId} during overwrite.", existingDoc.Id);
+                }
             }
         }
 
@@ -172,6 +194,26 @@ public class DocumentProcessor : IDocumentProcessor
             using var readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
             var extractedText = await _textExtractor.ExtractTextAsync(readStream);
 
+            // Extract product model information for rich catalog queries
+            var ebmParser = new EbmProductCodeParser();
+            var extractedProducts = ebmParser.ExtractProductsFromText(fileName);
+            if (extractedProducts.Count == 0 && !string.IsNullOrWhiteSpace(extractedText))
+            {
+                extractedProducts = ebmParser.ExtractProductsFromText(extractedText.Substring(0, Math.Min(extractedText.Length, 3000)));
+            }
+            var bestProduct = extractedProducts.FirstOrDefault();
+            var productCode = bestProduct?.CleanCode;
+            var productCategory = bestProduct?.FanFamily.ToString();
+
+            if (!string.IsNullOrWhiteSpace(productCode) || !string.IsNullOrWhiteSpace(productCategory))
+            {
+                document = document with
+                {
+                    ProductCode = productCode,
+                    ProductCategory = productCategory
+                };
+            }
+
             if (string.IsNullOrWhiteSpace(extractedText))
             {
                 var message = $"Dokumentet '{fileName}' indeholder ingen digital tekst (f.eks. indscannet billede eller tegning uden OCR-lag) og kan ikke indekseres til AI-søgning.";
@@ -200,22 +242,37 @@ public class DocumentProcessor : IDocumentProcessor
             if (languageResult.IsEnglish)
             {
                 var chunks = _chunkingService.ChunkText(extractedText, targetDocumentId);
+                var chunksWithMetaList = new List<DocumentChunk>();
 
-                if (_embeddingService != null && _vectorStore != null)
+                foreach (var chunk in chunks)
                 {
-                    foreach (var chunk in chunks)
+                    var chunkWithDocumentMetadata = chunk with
                     {
-                        var chunkWithDocumentMetadata = chunk with
-                        {
-                            FileName = document.FileName,
-                            OriginalFileName = document.FileName,
-                            FilePath = document.FilePath,
-                            UploadedAt = document.UploadedAt,
-                            ArticleId = document.ArticleId,
-                            SourceDocumentId = document.SourceDocumentId
-                        };
+                        FileName = document.FileName,
+                        OriginalFileName = document.FileName,
+                        FilePath = document.FilePath,
+                        UploadedAt = document.UploadedAt,
+                        ArticleId = document.ArticleId,
+                        SourceDocumentId = document.SourceDocumentId
+                    };
+                    chunksWithMetaList.Add(chunkWithDocumentMetadata);
+
+                    if (_embeddingService != null && _vectorStore != null)
+                    {
                         var embedding = await _embeddingService.GenerateEmbeddingAsync(chunk.Text);
                         await _vectorStore.AddChunkAsync(chunkWithDocumentMetadata, embedding);
+                    }
+                }
+
+                if (_ftsStore != null && chunksWithMetaList.Count > 0)
+                {
+                    try
+                    {
+                        await _ftsStore.AddChunksAsync(chunksWithMetaList);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to index chunks into SQLite FTS5 for document {DocumentId}.", targetDocumentId);
                     }
                 }
 
@@ -227,7 +284,7 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_documentRepository != null)
                 {
-                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language);
+                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
             else
@@ -241,12 +298,14 @@ public class DocumentProcessor : IDocumentProcessor
                 {
                     Status = DocumentStatus.Skipped,
                     Language = languageResult.Language,
-                    ErrorMessage = message
+                    ErrorMessage = message,
+                    ProductCode = productCode,
+                    ProductCategory = productCategory
                 };
 
                 if (_documentRepository != null)
                 {
-                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language);
+                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
         }
