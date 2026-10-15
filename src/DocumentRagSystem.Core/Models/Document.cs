@@ -18,7 +18,9 @@ public record Document(
     string? ErrorMessage = null,
     string? Language = null,
     string? ArticleId = null,
-    string? SourceDocumentId = null
+    string? SourceDocumentId = null,
+    string? ProductCode = null,
+    string? ProductCategory = null
 );
 
 public record DocumentChunk(

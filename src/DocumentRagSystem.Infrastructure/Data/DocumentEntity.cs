@@ -13,4 +13,6 @@ public class DocumentEntity
     public string? Language { get; set; }
     public string? ArticleId { get; set; }
     public string? SourceDocumentId { get; set; }
+    public string? ProductCode { get; set; }
+    public string? ProductCategory { get; set; }
 }

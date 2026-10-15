@@ -114,6 +114,68 @@ public class SqliteDocumentRepositoryTests : IDisposable
         Assert.Null(afterDelete);
     }
 
+    [Fact]
+    public async Task GetPagedDocumentsAsync_OnLegacyDatabaseWithoutProductCode_MigratesAndSucceeds()
+    {
+        // Arrange: Create a database with the legacy schema (without ProductCode / ProductCategory)
+        var legacyDb = $"legacy_{Guid.NewGuid():N}.db";
+        try
+        {
+            var options = new DbContextOptionsBuilder<DocumentDbContext>()
+                .UseSqlite($"Data Source={legacyDb}")
+                .Options;
+
+            var factory = new TestDbContextFactory(options);
+            using (var ctx = factory.CreateDbContext())
+            {
+                ctx.Database.ExecuteSqlRaw("""
+                    CREATE TABLE "Documents" (
+                        "Id" TEXT NOT NULL CONSTRAINT "PK_Documents" PRIMARY KEY,
+                        "FileName" TEXT NOT NULL,
+                        "FilePath" TEXT NOT NULL,
+                        "UploadedAt" TEXT NOT NULL,
+                        "Status" TEXT NOT NULL,
+                        "ErrorMessage" TEXT NULL,
+                        "Language" TEXT NULL,
+                        "ArticleId" TEXT NULL,
+                        "SourceDocumentId" TEXT NULL
+                    );
+                    INSERT INTO "Documents" ("Id", "FileName", "FilePath", "UploadedAt", "Status")
+                    VALUES ('doc-legacy-1', 'test.pdf', '/path', '2026-01-01', 'Processed');
+                """);
+            }
+
+            // Act: Instantiate repository and call GetPagedDocumentsAsync
+            var repo = new SqliteDocumentRepository(factory);
+            var (items, total) = await repo.GetPagedDocumentsAsync(1, 10, null);
+
+            // Assert: Must not throw 'no such column: d.ProductCategory'
+            Assert.Equal(1, total);
+            Assert.Single(items);
+            Assert.Equal("doc-legacy-1", items.First().Id);
+        }
+        finally
+        {
+            try { File.Delete(legacyDb); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task MigrateLocalWebApiIdentityDbIfPresent()
+    {
+        var webApiDb = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "DocumentRagSystem.WebApi", "identity.db"));
+        if (File.Exists(webApiDb))
+        {
+            var options = new DbContextOptionsBuilder<DocumentDbContext>()
+                .UseSqlite($"Data Source={webApiDb}")
+                .Options;
+            var factory = new TestDbContextFactory(options);
+            var repo = new SqliteDocumentRepository(factory);
+            var (items, total) = await repo.GetPagedDocumentsAsync(1, 5, null);
+            Assert.NotNull(items);
+        }
+    }
+
     private class TestDbContextFactory : IDbContextFactory<DocumentDbContext>
     {
         private readonly DbContextOptions<DocumentDbContext> _options;
