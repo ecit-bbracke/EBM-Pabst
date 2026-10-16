@@ -22,6 +22,9 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host "========================================================" -ForegroundColor Red
 Write-Host " ADVARSEL: Nulstilling af alle data på serveren         " -ForegroundColor Yellow
 Write-Host " Server: $User@$HostName`:$Port ($RemoteDir)            " -ForegroundColor Yellow
@@ -42,16 +45,13 @@ if (-not $Force) {
     }
 }
 
-$sshCmd = "ssh -p $Port"
-if ($KeyFile -and (Test-Path $KeyFile)) {
-    $sshCmd += " -i `"$KeyFile`""
-}
 $sshTarget = "$User@$HostName"
 
 Write-Host "`n--> Forbinder til serveren og udfører oprydning..." -ForegroundColor Cyan
 
 $remoteCommands = @"
-echo '=== DISKPLADS FØR OPRYDNING ==='
+set -e
+echo '=== DISKPLADS FOER OPRYDNING ==='
 df -h /
 
 echo ''
@@ -60,11 +60,11 @@ cd $RemoteDir
 docker compose down -v
 
 echo ''
-echo '=== FRIGØR DOCKER DISKPLADS (PRUNE IMAGES OG CACHE) ==='
+echo '=== FRIGOER DOCKER DISKPLADS (PRUNE IMAGES OG CACHE) ==='
 docker system prune -af
 
 echo ''
-echo '=== TØMMER DOCKER LOGFILER ==='
+echo '=== TOEMMER DOCKER LOGFILER ==='
 sudo sh -c 'truncate -s 0 /var/lib/docker/containers/*/*-json.log' 2>/dev/null || true
 
 echo ''
@@ -81,8 +81,17 @@ docker compose ps
 "@
 
 $remoteScript = $remoteCommands.Replace("`r`n", "`n")
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($remoteScript)
+$base64 = [Convert]::ToBase64String($bytes)
+$cmd = "echo $base64 | base64 -d | bash"
 
-& ssh -p $Port $(if ($KeyFile) { "-i"; $KeyFile }) $sshTarget "bash -c '$remoteScript'"
+$sshArgs = @("-p", $Port)
+if ($KeyFile -and (Test-Path $KeyFile)) {
+    $sshArgs += @("-i", $KeyFile)
+}
+$sshArgs += @($sshTarget, $cmd)
+
+& ssh @sshArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Der opstod en fejl under udførelsen af oprydningskommandoerne på serveren."

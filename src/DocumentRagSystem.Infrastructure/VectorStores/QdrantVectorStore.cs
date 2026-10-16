@@ -164,10 +164,11 @@ public class QdrantVectorStore : IVectorStore
 
         await EnsureCollectionExistsAsync(embedding.Length);
 
+#pragma warning disable CS0612 // Vector.Data is obsolete in Qdrant.Client 1.18+ but required for Qdrant Server v1.10 compatibility
         var point = new PointStruct
         {
             Id = ToGuid(chunk.Id),
-            Vectors = embedding,
+            Vectors = new Vectors { Vector = new Vector { Data = { embedding } } },
             Payload =
             {
                 ["chunk_id"] = chunk.Id,
@@ -176,6 +177,7 @@ public class QdrantVectorStore : IVectorStore
                 ["index"] = chunk.Index
             }
         };
+#pragma warning restore CS0612
 
         if (!string.IsNullOrWhiteSpace(chunk.FileName))
         {
@@ -235,8 +237,9 @@ public class QdrantVectorStore : IVectorStore
         }
         else
         {
-            // If no embedding service, generate a mock or zero vector
+            // If no embedding service, generate a mock non-zero vector for Cosine metric compatibility
             queryEmbedding = new float[_embeddingSize > 0 ? _embeddingSize : 1536];
+            Array.Fill(queryEmbedding, 0.1f);
         }
         embeddingStopwatch.Stop();
 
