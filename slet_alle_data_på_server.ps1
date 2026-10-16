@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fjerner alle uploadede dokumenter, tømmer Qdrant og SQLite databaserne og rydder op i Docker på produktionsserveren for at frigøre diskplads.
 .DESCRIPTION
