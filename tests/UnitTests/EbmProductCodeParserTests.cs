@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Core.Services;
 using Xunit;

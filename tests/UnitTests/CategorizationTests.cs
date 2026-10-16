@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
@@ -249,6 +249,7 @@ public class CategorizationTests
         Assert.Equal(1.0, result.Confidence);
         if (expectedProductCode != null)
         {
+            Assert.NotNull(result.ParsedEbmProducts);
             Assert.Contains(result.ParsedEbmProducts, p => p.CleanCode == expectedProductCode);
         }
 

@@ -1,4 +1,4 @@
-﻿namespace DocumentRagSystem.Core.Interfaces;
+namespace DocumentRagSystem.Core.Interfaces;
 
 /// <summary>
 /// Architectural responsibilities / components in the RAG pipeline that may require different LLM providers.

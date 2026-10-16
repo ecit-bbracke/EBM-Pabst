@@ -1,4 +1,4 @@
-﻿name: CI Pipeline
+name: CI Pipeline
 
 on:
   push:
@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main, master, develop ]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   build-and-test:
@@ -32,8 +37,23 @@ jobs:
       - name: Restore Dependencies
         run: dotnet restore DocumentRagSystem.slnx
 
-      - name: Build Solution (Release)
-        run: dotnet build DocumentRagSystem.slnx -c Release --no-restore
+      # Gap 1: Code Formatting & Style Linting
+      - name: Verify Code Formatting
+        run: dotnet format DocumentRagSystem.slnx --verify-no-changes --verbosity normal
+
+      # Gap 3: Dependency Security Audit
+      - name: Audit NuGet Packages for Vulnerabilities
+        run: |
+          AUDIT_OUTPUT=$(dotnet list DocumentRagSystem.slnx package --vulnerable --include-transitive)
+          echo "$AUDIT_OUTPUT"
+          if echo "$AUDIT_OUTPUT" | grep -q "has the following vulnerable packages"; then
+            echo "::error::Vulnerable NuGet packages detected in the solution!"
+            exit 1
+          fi
+
+      # Gap 2: Compiler Warning Enforcement
+      - name: Build Solution (Release with Warnings as Errors)
+        run: dotnet build DocumentRagSystem.slnx -c Release --no-restore --warnaserror
 
       - name: Run Unit Tests
         run: >
@@ -63,7 +83,18 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory ./TestResults/E2ETests
 
-      - name: Upload Test Results
+      # Gap 4: PR Visibility - Test Results Reporting
+      - name: Publish Test Results Summary
+        uses: dorny/test-reporter@v1
+        if: always()
+        continue-on-error: true
+        with:
+          name: Test Results (.NET 10)
+          path: 'TestResults/**/*.trx'
+          reporter: dotnet-trx
+          fail-on-error: true
+
+      - name: Upload Test Results Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -71,7 +102,7 @@ jobs:
           path: TestResults/**/*.trx
           if-no-files-found: warn
 
-      - name: Upload Code Coverage
+      - name: Upload Code Coverage Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -79,8 +110,42 @@ jobs:
           path: TestResults/**/coverage.cobertura.xml
           if-no-files-found: warn
 
+      # Gap 4: Coverage Gating & PR Visibility
+      - name: Generate Code Coverage Report & Summary
+        if: always()
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.4.4
+        with:
+          reports: 'TestResults/**/coverage.cobertura.xml'
+          targetdir: 'coveragereport'
+          reporttypes: 'MarkdownSummaryGithub;Badges;TextSummary'
+          assemblyfilters: '-*.Tests;-*.UnitTests;-*.IntegrationTests;-*.E2ETests'
+          title: 'DocumentRagSystem Test Coverage'
+
+      - name: Publish Coverage to GitHub Step Summary
+        if: always()
+        run: |
+          if [ -f "coveragereport/SummaryGithub.md" ]; then
+            cat coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Enforce Coverage Threshold Gate
+        run: |
+          if [ -f "coveragereport/Summary.txt" ]; then
+            COVERAGE_INT=$(grep -oP 'Line coverage:\s+\K[0-9]+' coveragereport/Summary.txt | head -n 1 || echo "0")
+            echo "Total line coverage: ${COVERAGE_INT}%"
+            THRESHOLD=50
+            if [ "$COVERAGE_INT" -lt "$THRESHOLD" ]; then
+              echo "::error::Code coverage (${COVERAGE_INT}%) is below the minimum required threshold of ${THRESHOLD}%!"
+              exit 1
+            fi
+            echo "Code coverage threshold check passed (${COVERAGE_INT}% >= ${THRESHOLD}%)."
+          else
+            echo "::error::Coverage summary not found!"
+            exit 1
+          fi
+
   docker-build:
-    name: Docker Build & Validation
+    name: Docker Build & Security Scan
     runs-on: ubuntu-latest
 
     steps:
@@ -98,6 +163,7 @@ jobs:
         with:
           context: .
           file: src/DocumentRagSystem.WebApi/Dockerfile
+          load: true
           push: false
           tags: document-rag-system-api:ci
 
@@ -106,5 +172,25 @@ jobs:
         with:
           context: .
           file: src/DocumentRagSystem.Worker/Dockerfile
+          load: true
           push: false
           tags: document-rag-system-worker:ci
+
+      # Gap 3: Container Security & Vulnerability Scanning
+      - name: Scan WebApi Image for Vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: document-rag-system-api:ci
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Scan Worker Image for Vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: document-rag-system-worker:ci
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -24,7 +24,7 @@ public class PdfTextExtractor : ITextExtractor
 
             // Open the PDF document from stream using PdfPig
             using var document = PdfDocument.Open(pdfStream);
-            
+
             bool firstPage = true;
             foreach (var page in document.GetPages())
             {
@@ -191,7 +191,7 @@ public class PdfTextExtractor : ITextExtractor
             foreach (var row in rows)
             {
                 var rowCells = Enumerable.Repeat(string.Empty, columnCount).ToArray();
-                
+
                 // Group adjacent words horizontally inside the same cell
                 var sortedRowWords = row.OrderBy(w => w.BoundingBox.Left).ToList();
                 var mergedCells = new List<(double Left, string Text)>();
@@ -238,7 +238,7 @@ public class PdfTextExtractor : ITextExtractor
                             colIndex--;
                         }
                     }
-                    
+
                     if (string.IsNullOrEmpty(rowCells[colIndex]))
                         rowCells[colIndex] = cell.Text;
                     else
@@ -249,7 +249,8 @@ public class PdfTextExtractor : ITextExtractor
             }
 
             // 4. Segment lines dynamically to split actual tables from titles and single paragraphs
-            var rowSegments = markdownRows.Select(r => new {
+            var rowSegments = markdownRows.Select(r => new
+            {
                 Cells = r,
                 NonEmptyCount = r.Count(c => !string.IsNullOrWhiteSpace(c))
             }).ToList();
@@ -321,10 +322,10 @@ public class PdfTextExtractor : ITextExtractor
                         sb.AppendLine();
                         // Build structured markdown table for this contiguous block
                         sb.Append("| ").Append(string.Join(" | ", prunedBlockRows[0])).AppendLine(" |");
-                        
+
                         var separators = Enumerable.Repeat("---", blockColCount);
                         sb.Append("| ").Append(string.Join(" | ", separators)).AppendLine(" |");
-                        
+
                         for (int i = 1; i < prunedBlockRows.Count; i++)
                         {
                             sb.Append("| ").Append(string.Join(" | ", prunedBlockRows[i])).AppendLine(" |");

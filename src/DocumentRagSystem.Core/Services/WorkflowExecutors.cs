@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -494,7 +494,7 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
         if (ebmEval != null)
         {
             var existingChecks = compatibilityResult?.Checks ?? new List<CompatibilityCheck>();
-            
+
             foreach (var diff in ebmEval.Differences)
             {
                 if (!existingChecks.Any(c => string.Equals(c.Dimension, diff.Dimension, StringComparison.OrdinalIgnoreCase)))
@@ -509,8 +509,8 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 }
             }
 
-            var overallStatus = ebmEval.CriticalBlockers.Count > 0 
-                ? "INCOMPATIBLE" 
+            var overallStatus = ebmEval.CriticalBlockers.Count > 0
+                ? "INCOMPATIBLE"
                 : (compatibilityResult?.Status ?? "COMPATIBLE");
 
             var overallReason = ebmEval.CriticalBlockers.Count > 0

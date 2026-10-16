@@ -2,11 +2,31 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
+using DocumentRagSystem.Core.Interfaces;
+using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Core.Services;
+using DocumentRagSystem.Infrastructure.Configuration;
+using DocumentRagSystem.Infrastructure.Data;
+using DocumentRagSystem.Infrastructure.Embeddings;
+using DocumentRagSystem.Infrastructure.HealthChecks;
+using DocumentRagSystem.Infrastructure.Llm;
+using DocumentRagSystem.Infrastructure.Repositories;
+using DocumentRagSystem.Infrastructure.TextExtractors;
+using DocumentRagSystem.Infrastructure.VectorStores;
+using DocumentRagSystem.WebApi.Data;
+using DocumentRagSystem.WebApi.DTOs;
+using DocumentRagSystem.WebApi.Endpoints;
+using DocumentRagSystem.WebApi.HostedServices;
+using DocumentRagSystem.WebApi.Middleware;
 using FluentValidation;
+using Markdig;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,26 +34,6 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Markdig;
-using DocumentRagSystem.Core.Interfaces;
-using DocumentRagSystem.Core.Models;
-using DocumentRagSystem.Core.Services;
-using DocumentRagSystem.Infrastructure.TextExtractors;
-using DocumentRagSystem.Infrastructure.Embeddings;
-using DocumentRagSystem.Infrastructure.HealthChecks;
-using DocumentRagSystem.Infrastructure.Llm;
-using DocumentRagSystem.Infrastructure.Repositories;
-using DocumentRagSystem.Infrastructure.VectorStores;
-using DocumentRagSystem.WebApi.DTOs;
-using DocumentRagSystem.WebApi.HostedServices;
-using DocumentRagSystem.WebApi.Middleware;
-using DocumentRagSystem.Infrastructure.Data;
-using DocumentRagSystem.Infrastructure.Configuration;
-using DocumentRagSystem.WebApi.Data;
-using DocumentRagSystem.WebApi.Endpoints;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -122,8 +122,8 @@ builder.Services.AddAuthentication(options =>
 .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
     ApiKeyAuthenticationOptions.DefaultScheme, options =>
     {
-        options.ApiKey = builder.Configuration["Authentication:ApiKey"] 
-                         ?? Environment.GetEnvironmentVariable("API_KEY") 
+        options.ApiKey = builder.Configuration["Authentication:ApiKey"]
+                         ?? Environment.GetEnvironmentVariable("API_KEY")
                          ?? string.Empty;
     });
 
@@ -210,10 +210,10 @@ builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 
 // Set up Gemini embedding service
-builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp => 
+builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp =>
     new GeminiEmbeddingService(
-        geminiApiKey, 
-        geminiEmbeddingModel, 
+        geminiApiKey,
+        geminiEmbeddingModel,
         sp.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiClient"),
         sp.GetService<ILogger<GeminiEmbeddingService>>()));
 
@@ -252,16 +252,16 @@ builder.Services.AddSingleton<ILlmClient>(sp =>
     return resolver.Resolve(opts.DefaultProvider);
 });
 
-builder.Services.AddSingleton<ILlmService, GeminiLlmService>(sp => 
+builder.Services.AddSingleton<ILlmService, GeminiLlmService>(sp =>
     new GeminiLlmService(
         sp.GetRequiredService<ILlmClient>(),
         sp.GetService<ILogger<GeminiLlmService>>()));
 
 // Set up Qdrant Vector Store
-builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp => 
+builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
     new QdrantVectorStore(
-        qdrantConnString, 
-        qdrantCollection, 
+        qdrantConnString,
+        qdrantCollection,
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetService<ILogger<QdrantVectorStore>>()));
 
@@ -273,7 +273,7 @@ builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>(sp =>
 
 builder.Services.AddSingleton<IFullTextSearchStore, SqliteFtsStore>();
 
-builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
+builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
         sp.GetRequiredService<IChunkingService>(),
@@ -287,7 +287,7 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
 
 // Set up RAG Orchestrator Layer & ebm-papst Domain Services
 var conversationStorageDir = Path.Combine(AppContext.BaseDirectory, ".conversations");
-builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStore>(sp => 
+builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStore>(sp =>
     new FileConversationStateStore(conversationStorageDir));
 
 builder.Services.AddSingleton<IEbmProductCodeParser, EbmProductCodeParser>();
@@ -582,7 +582,7 @@ app.MapGet("/api/documents", async (
     var size = Math.Clamp(pageSize ?? 20, 1, 100);
 
     var (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
-    
+
     var items = repoDocs.Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) }).ToList();
 
     if (onlyExisting == true)
@@ -737,10 +737,10 @@ app.MapGet("/api/documents/{fileName}/status", async (
 
 // QUERY ENDPOINT WITH CITATIONS
 app.MapPost("/api/query", async (
-    QueryRequest request, 
+    QueryRequest request,
     IValidator<QueryRequest> validator,
-    IVectorStore vectorStore, 
-    ITechnicalRagOrchestrator orchestrator, 
+    IVectorStore vectorStore,
+    ITechnicalRagOrchestrator orchestrator,
     IDanishDocumentResolver danishResolver,
     ILogger<Program> logger
     ) =>
@@ -774,7 +774,7 @@ app.MapPost("/api/query", async (
         var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
         var filePath = item.FilePath;
         var url = ToDocumentUrl(filePath, fileName, servedUploadDirectories);
-        
+
         if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
         {
             var searchKeyword = item.ArticleId;
@@ -783,7 +783,7 @@ app.MapPost("/api/query", async (
                 var (parsedArt, _) = ArticleDocumentNameParser.Parse(fileName);
                 searchKeyword = parsedArt;
             }
-            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword) 
+            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword)
                 ? $"&search={Uri.EscapeDataString(searchKeyword)}"
                 : string.Empty;
             url += $"#page={item.Index + 1}{searchParam}";
@@ -861,10 +861,10 @@ app.MapPost("/api/query/stream", async (
     var streamToken = linkedCts.Token;
 
     var stream = orchestrator.ProcessQueryStreamAsync(
-        request.Question, 
-        vectorStore, 
-        request.ConversationId, 
-        null, 
+        request.Question,
+        vectorStore,
+        request.ConversationId,
+        null,
         streamToken);
 
     int chunkIndex = 0;
@@ -887,7 +887,7 @@ app.MapPost("/api/query/stream", async (
                         var fileName = FirstNonEmpty(item.FileName, item.DocumentId);
                         var filePath = item.FilePath;
                         var url = ToDocumentUrl(filePath, fileName, servedUploadDirectories);
-                        
+
                         if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
                         {
                             var searchKeyword = item.ArticleId;
@@ -896,7 +896,7 @@ app.MapPost("/api/query/stream", async (
                                 var (parsedArt, _) = ArticleDocumentNameParser.Parse(fileName);
                                 searchKeyword = parsedArt;
                             }
-                            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword) 
+                            var searchParam = !string.IsNullOrWhiteSpace(searchKeyword)
                                 ? $"&search={Uri.EscapeDataString(searchKeyword)}"
                                 : string.Empty;
                             url += $"#page={item.Index + 1}{searchParam}";
@@ -1005,8 +1005,8 @@ app.MapPost("/api/conversation/{id}/reset", async (string id, IConversationState
     var state = await stateStore.GetStateAsync(id);
     if (state != null)
     {
-        var resetState = state with 
-        { 
+        var resetState = state with
+        {
             ActiveConstraints = new List<ConversationConstraint>(),
             CandidateSet = null,
             TurnCount = state.TurnCount + 1,
@@ -1056,8 +1056,8 @@ app.MapPost("/api/stt/transcribe", async (
 
 // AUTH ENDPOINTS
 app.MapPost("/api/auth/login", async (
-    LoginRequest model, 
-    SignInManager<IdentityUser> signInManager, 
+    LoginRequest model,
+    SignInManager<IdentityUser> signInManager,
     UserManager<IdentityUser> userManager) =>
 {
     if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
@@ -1247,7 +1247,7 @@ app.MapPost("/api/admin/backfill-metadata", async (
     var codeParser = new EbmProductCodeParser();
     var allDocs = await repository.GetAllDocumentsAsync();
     var docsToUpdate = allDocs.Where(d => string.IsNullOrWhiteSpace(d.ProductCode) || string.IsNullOrWhiteSpace(d.ProductCategory)).ToList();
-    
+
     var updates = new List<(string Id, string? ProductCode, string? ProductCategory)>();
     foreach (var doc in docsToUpdate)
     {
@@ -1296,11 +1296,11 @@ app.MapPost("/api/admin/backfill-fts", async (
     if (unindexedDocs.Count == 0)
     {
         var currentChunkCount = await ftsStore.GetIndexedChunkCountAsync(cancellationToken);
-        return Results.Ok(new 
-        { 
-            message = $"Alle {allDocs.Count} dokumenter er allerede indekseret i SQLite FTS5 ({currentChunkCount} chunks totalt).", 
+        return Results.Ok(new
+        {
+            message = $"Alle {allDocs.Count} dokumenter er allerede indekseret i SQLite FTS5 ({currentChunkCount} chunks totalt).",
             indexedDocuments = 0,
-            totalChunks = currentChunkCount 
+            totalChunks = currentChunkCount
         });
     }
 
@@ -1408,8 +1408,8 @@ app.MapPost("/api/admin/clean-orphans", async (
         }
     }
 
-    return Results.Ok(new 
-    { 
+    return Results.Ok(new
+    {
         message = $"Oprydning fuldført. Fjernede {deletedCount} forældreløse dokumenter uden fysisk fil på disken.",
         deletedCount,
         remainingCount = allDocs.Count - deletedCount
@@ -1420,8 +1420,8 @@ app.MapPost("/api/admin/clean-orphans", async (
 
 // DOCUMENT UPLOAD ENDPOINT
 app.MapPost("/api/documents/upload", async (
-    HttpRequest request, 
-    IDocumentProcessor processor, 
+    HttpRequest request,
+    IDocumentProcessor processor,
     IDocumentQueue queue,
     IDocumentRepository repository,
     ILogger<Program> logger) =>
@@ -1448,20 +1448,20 @@ app.MapPost("/api/documents/upload", async (
     if (background)
     {
         logger.LogInformation("Uploading and queuing file for background processing: {FileName}", file.FileName);
-        
+
         var memoryStream = new MemoryStream();
         await file.CopyToAsync(memoryStream);
         memoryStream.Position = 0;
 
         var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(file.FileName);
-        
+
         var existingDoc = await repository.GetDocumentByFileNameAsync(file.FileName);
         if (existingDoc == null && !string.IsNullOrWhiteSpace(sourceDocId))
         {
             existingDoc = await repository.GetDocumentBySourceDocIdAsync(sourceDocId);
         }
 
-        var documentId = existingDoc?.Id 
+        var documentId = existingDoc?.Id
             ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
 
         var tempDocument = new Document(

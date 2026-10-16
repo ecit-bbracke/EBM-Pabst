@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using DocumentRagSystem.Core.Models;
 
 namespace DocumentRagSystem.Core.Interfaces;

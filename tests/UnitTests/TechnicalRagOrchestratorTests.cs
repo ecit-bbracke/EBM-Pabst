@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -109,7 +109,7 @@ public class TechnicalRagOrchestratorTests
     {
         // Arrange
         var mockLlm = new Mock<ILlmService>();
-        
+
         // 1. Input Governor mock response
         mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
             .ReturnsAsync("""
@@ -231,7 +231,7 @@ public class TechnicalRagOrchestratorTests
     {
         // Arrange
         var mockLlm = new Mock<ILlmService>();
-        
+
         // Input governor intent classification
         mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
             .ReturnsAsync("""

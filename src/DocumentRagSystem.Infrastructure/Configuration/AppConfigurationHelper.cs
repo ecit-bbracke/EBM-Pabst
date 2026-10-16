@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Configuration;
 
 namespace DocumentRagSystem.Infrastructure.Configuration;
 

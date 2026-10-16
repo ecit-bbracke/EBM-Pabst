@@ -77,6 +77,7 @@ public class GreetingWorkflowAndScalingTests
         Assert.NotNull(result);
         // Because a product was extracted, it did not take the pure greeting fast path
         Assert.Equal("SPEC_LOOKUP", result.Intent);
+        Assert.NotNull(result.ParsedEbmProducts);
         Assert.NotEmpty(result.ParsedEbmProducts);
     }
 
@@ -187,6 +188,7 @@ public class GreetingWorkflowAndScalingTests
         Assert.Contains(events, e => e.EventType == "citations" && (e.Chunks == null || e.Chunks.Count == 0));
         var chunkEvent = events.FirstOrDefault(e => e.EventType == "chunk");
         Assert.NotNull(chunkEvent);
+        Assert.NotNull(chunkEvent.Text);
         Assert.NotEmpty(chunkEvent.Text);
         Assert.Contains("Hej", chunkEvent.Text);
 

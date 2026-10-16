@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DocumentRagSystem.Infrastructure.Llm;
 

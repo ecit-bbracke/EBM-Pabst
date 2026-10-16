@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -17,7 +17,7 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
     private readonly ILogger<ConversationalQueryRefiner>? _logger;
 
     public ConversationalQueryRefiner(
-        ILlmClient llmClient, 
+        ILlmClient llmClient,
         IEbmProductCodeParser? ebmParser = null,
         ILogger<ConversationalQueryRefiner>? logger = null)
     {
@@ -35,7 +35,7 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
     }
 
     public ConversationalQueryRefiner(
-        ILlmService llmService, 
+        ILlmService llmService,
         IEbmProductCodeParser? ebmParser = null,
         ILogger<ConversationalQueryRefiner>? logger = null)
         : this(new LlmServiceToClientAdapter(llmService), ebmParser, logger)
@@ -75,11 +75,11 @@ Rules:
         var extractedProducts = _ebmParser.ExtractProductsFromText(userMessage);
 
         // If no prior conversation state or no active context, return clean single-turn refinement
-        bool hasPriorContext = conversationState != null && 
-            (conversationState.TurnCount > 0 || 
-             conversationState.ActiveEntities.Count > 0 || 
-             conversationState.ActiveConstraints.Count > 0 || 
-             conversationState.CandidateSet != null || 
+        bool hasPriorContext = conversationState != null &&
+            (conversationState.TurnCount > 0 ||
+             conversationState.ActiveEntities.Count > 0 ||
+             conversationState.ActiveConstraints.Count > 0 ||
+             conversationState.CandidateSet != null ||
              !string.IsNullOrWhiteSpace(conversationState.LastEffectiveQuestion));
 
         if (!hasPriorContext)
@@ -128,10 +128,10 @@ Rules:
         try
         {
             var req = LlmRequest.FromPrompt(
-                userPrompt, 
-                requireJson: true, 
-                systemInstruction: SystemInstruction, 
-                temperature: 0.0, 
+                userPrompt,
+                requireJson: true,
+                systemInstruction: SystemInstruction,
+                temperature: 0.0,
                 maxOutputTokens: 160);
 
             var structuredRes = await _llmClient.GenerateStructuredAsync<QueryRefinementResult>(req);
@@ -147,7 +147,7 @@ Rules:
                 var activeEntities = result.ActiveEntities ?? new List<ConversationEntity>();
                 foreach (var prod in extractedProducts)
                 {
-                    if (!activeEntities.Any(e => string.Equals(e.Name, prod.RawCode, StringComparison.OrdinalIgnoreCase) || 
+                    if (!activeEntities.Any(e => string.Equals(e.Name, prod.RawCode, StringComparison.OrdinalIgnoreCase) ||
                                                  string.Equals(e.Name, prod.CleanCode, StringComparison.OrdinalIgnoreCase)))
                     {
                         var entityType = prod.FanFamily switch

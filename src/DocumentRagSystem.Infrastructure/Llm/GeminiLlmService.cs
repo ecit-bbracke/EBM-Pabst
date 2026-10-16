@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
@@ -6,9 +6,9 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Infrastructure.Llm;
 
@@ -21,9 +21,9 @@ public class GeminiLlmService : ILlmService
     private readonly ILogger<GeminiLlmService>? _logger;
 
     public GeminiLlmService(
-        string? apiKey = null, 
-        string model = "gemini-3.6-flash", 
-        string? fastModel = null, 
+        string? apiKey = null,
+        string model = "gemini-3.6-flash",
+        string? fastModel = null,
         HttpClient? httpClient = null,
         ILogger<GeminiLlmService>? logger = null)
     {
@@ -82,8 +82,8 @@ public class GeminiLlmService : ILlmService
     }
 
     public async IAsyncEnumerable<string> StreamResponseAsync(
-        string query, 
-        IEnumerable<DocumentChunk> contextChunks, 
+        string query,
+        IEnumerable<DocumentChunk> contextChunks,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -98,7 +98,7 @@ public class GeminiLlmService : ILlmService
     }
 
     public async IAsyncEnumerable<string> StreamCompletionAsync(
-        string prompt, 
+        string prompt,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -129,7 +129,7 @@ public class GeminiLlmService : ILlmService
         {
             sb.AppendLine("<answers>");
             sb.AppendLine(chunk.Text);
-            sb.AppendLine("</answers>");            
+            sb.AppendLine("</answers>");
             sb.AppendLine();
         }
         sb.AppendLine();

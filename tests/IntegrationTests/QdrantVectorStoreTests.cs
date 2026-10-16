@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Models;
@@ -69,7 +69,7 @@ public class QdrantVectorStoreTests : IAsyncLifetime
 
         // Act
         await store.AddChunkAsync(chunk, embedding);
-        
+
         // SearchAsync internally uses query length to generate a matching mock embedding size
         var results = await store.SearchAsync("Sample", limit: 3);
 

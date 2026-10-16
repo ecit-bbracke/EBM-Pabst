@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
@@ -6,8 +6,8 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Infrastructure.Embeddings;
 
@@ -23,14 +23,14 @@ public class GeminiEmbeddingService : IEmbeddingService
     private const int MaxCacheEntries = 10000;
 
     public GeminiEmbeddingService(
-        string? apiKey, 
-        string model = "gemini-embedding-001", 
+        string? apiKey,
+        string model = "gemini-embedding-001",
         HttpClient? httpClient = null,
         ILogger<GeminiEmbeddingService>? logger = null)
     {
         _model = string.IsNullOrWhiteSpace(model) ? "gemini-embedding-001" : model;
         _logger = logger;
-        
+
         if (!string.IsNullOrWhiteSpace(apiKey) && apiKey != "YOUR_GEMINI_API_KEY")
         {
             _apiKey = apiKey;
@@ -74,7 +74,7 @@ public class GeminiEmbeddingService : IEmbeddingService
         try
         {
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:embedContent?key={_apiKey}";
-            
+
             var requestBody = new
             {
                 content = new
@@ -89,7 +89,7 @@ public class GeminiEmbeddingService : IEmbeddingService
 
             using var response = await _httpClient.PostAsJsonAsync(url, requestBody);
             stopwatch.Stop();
-            
+
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
@@ -103,8 +103,8 @@ public class GeminiEmbeddingService : IEmbeddingService
             }
 
             var jsonResult = await response.Content.ReadFromJsonAsync<JsonDocument>();
-            if (jsonResult != null && 
-                jsonResult.RootElement.TryGetProperty("embedding", out var embeddingProp) && 
+            if (jsonResult != null &&
+                jsonResult.RootElement.TryGetProperty("embedding", out var embeddingProp) &&
                 embeddingProp.TryGetProperty("values", out var valuesProp))
             {
                 var values = valuesProp.EnumerateArray()
@@ -160,7 +160,7 @@ public class GeminiEmbeddingService : IEmbeddingService
         var result = new float[dimensions];
         using var md5 = System.Security.Cryptography.MD5.Create();
         var hashBytes = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text));
-        
+
         for (int i = 0; i < dimensions; i++)
         {
             int hashVal = hashBytes[i % hashBytes.Length];

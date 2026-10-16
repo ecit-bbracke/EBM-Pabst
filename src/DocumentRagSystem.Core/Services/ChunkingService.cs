@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using DocumentRagSystem.Core.Interfaces;
@@ -107,7 +107,7 @@ public class ChunkingService : IChunkingService
         // Remove duplicate newlines and spaces to normalize layout
         var sb = new StringBuilder();
         string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-        
+
         foreach (var line in lines)
         {
             var trimmedLine = line.Trim();

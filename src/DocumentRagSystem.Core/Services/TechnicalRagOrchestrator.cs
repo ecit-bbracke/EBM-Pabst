@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -7,9 +7,9 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -324,7 +324,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var expandedContextChunks = await _contextExpander.ExpandContextAsync(contextChunks, vectorStore);
 
         timings["WorkflowExecution"] = stageStopwatch.ElapsedMilliseconds;
-        _logger?.LogInformation("[Orchestrator] Workflow execution ({Workflow}) completed in {DurationMs}ms (Initial Chunks: {InitialCount}, Expanded Chunks: {ChunkCount}).", 
+        _logger?.LogInformation("[Orchestrator] Workflow execution ({Workflow}) completed in {DurationMs}ms (Initial Chunks: {InitialCount}, Expanded Chunks: {ChunkCount}).",
             workflowType, timings["WorkflowExecution"], contextChunks.Count, expandedContextChunks.Count);
 
         retrievals.Add(new RetrievalTrace(
@@ -371,7 +371,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 // Perform targeted retrieval for the first missing/conflicting claim
                 var targetClaim = missingClaims[0];
                 var targetedQueryPrompt = $"Given the effective question '{effectiveQuestion}' and the missing or conflicting technical claim '{targetClaim.Claim}', write a single, precise keyword query to search a vector store for relevant documentation to resolve or support this claim.";
-                
+
                 var tqStopwatch = Stopwatch.StartNew();
                 _logger?.LogInformation("[Orchestrator] Executing targeted retrieval query prompt for missing claim: \"{Claim}\".\nPrompt:\n{Prompt}", targetClaim.Claim, targetedQueryPrompt);
                 var tqResult = await _llmClient.GenerateTextAsync(LlmRequest.FromPrompt(targetedQueryPrompt, requireJson: false));
@@ -838,8 +838,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             for (int i = 0; i < promptTraces.Count; i++)
             {
                 var p = promptTraces[i];
-                var preview = p.Prompt.Length <= 100 
-                    ? p.Prompt.Replace("\r", "").Replace("\n", " ") 
+                var preview = p.Prompt.Length <= 100
+                    ? p.Prompt.Replace("\r", "").Replace("\n", " ")
                     : p.Prompt.Substring(0, 97).Replace("\r", "").Replace("\n", " ") + "...";
                 sb.AppendLine($"  {i + 1}. [{p.Stage} / {p.PromptName}] {p.DurationMs:N0} ms ({p.Prompt.Length:N0} chars): \"{preview}\"");
             }
@@ -1081,10 +1081,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         return facts;
     }
 
-    private async Task<IEnumerable<DocumentChunk>> PerformHybridSearchAsync(string query, List<string> productCodes, IVectorStore vectorStore, IDocumentRepository repository)
+    private async Task<IEnumerable<DocumentChunk>> PerformHybridSearchAsync(string query, List<string> productCodes, IVectorStore vectorStore, IDocumentRepository? repository)
     {
         var semanticSearchTask = vectorStore.SearchAsync(query);
-        var exactDocsTask = repository.GetDocumentsByArticleIdsAsync(productCodes);
+        var exactDocsTask = repository != null
+            ? repository.GetDocumentsByArticleIdsAsync(productCodes)
+            : Task.FromResult<IEnumerable<Document>>(Enumerable.Empty<Document>());
         var bm25SearchTask = _ftsStore != null
             ? _ftsStore.SearchAsync(query, limit: 15)
             : Task.FromResult<IEnumerable<DocumentChunk>>(Enumerable.Empty<DocumentChunk>());

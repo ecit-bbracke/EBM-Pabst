@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
@@ -276,8 +276,8 @@ public class DocumentProcessor : IDocumentProcessor
                     }
                 }
 
-                document = document with 
-                { 
+                document = document with
+                {
                     Status = DocumentStatus.Processed,
                     Language = languageResult.Language
                 };

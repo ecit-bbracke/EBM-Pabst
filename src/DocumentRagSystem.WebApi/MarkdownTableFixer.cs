@@ -1,4 +1,4 @@
-﻿namespace DocumentRagSystem.WebApi
+namespace DocumentRagSystem.WebApi
 {
     using System;
     using System.Collections.Generic;

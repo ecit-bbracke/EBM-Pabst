@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -6,9 +6,9 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 using RagDocument = DocumentRagSystem.Core.Models.Document;
@@ -26,8 +26,8 @@ public class QdrantVectorStore : IVectorStore
     private int _embeddingSize;
 
     public QdrantVectorStore(
-        string connectionString, 
-        string collectionName, 
+        string connectionString,
+        string collectionName,
         IEmbeddingService? embeddingService = null,
         ILogger<QdrantVectorStore>? logger = null)
     {
@@ -81,10 +81,10 @@ public class QdrantVectorStore : IVectorStore
             if (!exists)
             {
                 await _client.CreateCollectionAsync(
-                    _collectionName, 
+                    _collectionName,
                     new VectorParams { Size = (ulong)vectorSize, Distance = Distance.Cosine }
                 );
-                
+
                 // Add full-text search index for payload text to support hybrid queries/filters
                 await _client.CreatePayloadIndexAsync(
                     _collectionName,
@@ -98,7 +98,7 @@ public class QdrantVectorStore : IVectorStore
                     "document_id",
                     PayloadSchemaType.Keyword
                 );
-                
+
                 await _client.CreatePayloadIndexAsync(
                     _collectionName,
                     "article_id",
@@ -143,10 +143,10 @@ public class QdrantVectorStore : IVectorStore
         }
 
         await _client.CreateCollectionAsync(
-            _collectionName, 
+            _collectionName,
             new VectorParams { Size = (ulong)vectorSize, Distance = Distance.Cosine }
         );
-        
+
         await _client.CreatePayloadIndexAsync(
             _collectionName,
             "text",
@@ -167,7 +167,7 @@ public class QdrantVectorStore : IVectorStore
         var point = new PointStruct
         {
             Id = ToGuid(chunk.Id),
-            Vectors = new Vectors { Vector = new Vector { Data = { embedding } } },
+            Vectors = embedding,
             Payload =
             {
                 ["chunk_id"] = chunk.Id,

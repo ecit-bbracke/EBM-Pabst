@@ -1,4 +1,4 @@
-﻿namespace DocumentRagSystem.Core.Models;
+namespace DocumentRagSystem.Core.Models;
 
 public enum DocumentStatus
 {

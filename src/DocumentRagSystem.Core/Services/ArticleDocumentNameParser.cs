@@ -7,15 +7,15 @@ namespace DocumentRagSystem.Core.Services;
 public static class ArticleDocumentNameParser
 {
     private static readonly Regex ArtDocRegex = new(
-        @"^Art_(?<article>.+?)\s*[-_]\s*Doc_(?<doc>.+)$", 
+        @"^Art_(?<article>.+?)\s*[-_]\s*Doc_(?<doc>.+)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex DataSheetPrefixRegex = new(
-        @"^Data_sheet_[A-Za-z0-9]+[_\s\-]+", 
+        @"^Data_sheet_[A-Za-z0-9]+[_\s\-]+",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex LeadingArticleNumberRegex = new(
-        @"^(\d{7,12})[-_](.+)$", 
+        @"^(\d{7,12})[-_](.+)$",
         RegexOptions.Compiled);
 
     /// <summary>

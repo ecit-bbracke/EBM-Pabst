@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using FluentValidation;
 
 namespace DocumentRagSystem.WebApi.DTOs;
@@ -8,11 +8,11 @@ public record QueryRequest(string Question, string? ConversationId = null);
 public record QueryResponse(string Answer, IEnumerable<CitationDto> Citations, string? ConversationId = null);
 
 public record CitationDto(
-    string ChunkId, 
-    string DocumentId, 
-    string Text, 
-    int Index, 
-    string filename, 
+    string ChunkId,
+    string DocumentId,
+    string Text,
+    int Index,
+    string filename,
     string filepath,
     string? language = null,
     bool isCompanion = false

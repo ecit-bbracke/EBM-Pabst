@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -23,7 +23,7 @@ public class InputGovernor : IInputGovernor
     private readonly ILogger<InputGovernor>? _logger;
 
     public InputGovernor(
-        ILlmClient llmClient, 
+        ILlmClient llmClient,
         IEbmProductCodeParser? ebmParser = null,
         ILogger<InputGovernor>? logger = null)
     {
@@ -41,7 +41,7 @@ public class InputGovernor : IInputGovernor
     }
 
     public InputGovernor(
-        ILlmService llmService, 
+        ILlmService llmService,
         IEbmProductCodeParser? ebmParser = null,
         ILogger<InputGovernor>? logger = null)
         : this(new LlmServiceToClientAdapter(llmService), ebmParser, logger)
@@ -137,15 +137,15 @@ Output JSON:
         try
         {
             var req = LlmRequest.FromPrompt(
-                userPrompt, 
-                requireJson: true, 
-                systemInstruction: SystemInstruction, 
-                temperature: 0.0, 
+                userPrompt,
+                requireJson: true,
+                systemInstruction: SystemInstruction,
+                temperature: 0.0,
                 maxOutputTokens: 256);
 
             var structuredRes = await _llmClient.GenerateStructuredAsync<InputGovernorResult>(req);
             stopwatch.Stop();
-            
+
             var result = structuredRes.Value;
             if (result != null)
             {
@@ -155,7 +155,7 @@ Output JSON:
 
                 foreach (var prod in extractedProducts)
                 {
-                    if (!entities.Any(e => string.Equals(e.Name, prod.RawCode, StringComparison.OrdinalIgnoreCase) || 
+                    if (!entities.Any(e => string.Equals(e.Name, prod.RawCode, StringComparison.OrdinalIgnoreCase) ||
                                            string.Equals(e.Name, prod.CleanCode, StringComparison.OrdinalIgnoreCase)))
                     {
                         var entityType = prod.FanFamily switch
@@ -192,12 +192,12 @@ Output JSON:
                     "[InputGovernor] Classification completed in {DurationMs}ms. Intent: {Intent}, Confidence: {Confidence}, Entities: {EntityCount}, ClarificationRequired: {ClarificationRequired}.",
                     stopwatch.ElapsedMilliseconds, finalIntent, result.Confidence, entities.Count, result.ClarificationRequired);
 
-                return result with 
-                { 
+                return result with
+                {
                     Intent = finalIntent,
-                    Entities = entities, 
+                    Entities = entities,
                     RequestedAttributes = requestedAttrs,
-                    ParsedEbmProducts = extractedProducts 
+                    ParsedEbmProducts = extractedProducts
                 };
             }
         }
@@ -233,8 +233,8 @@ Output JSON:
                                      combinedText.Contains("alternativ", StringComparison.OrdinalIgnoreCase);
 
         var fallbackEntities = extractedProducts.Select(p => new EntityInfo(p.FanFamily == FanFamilyType.Axial ? "axial_fan" : "fan", p.RawCode)).ToList();
-        var fallbackIntent = isOverviewFallback 
-            ? "OVERVIEW" 
+        var fallbackIntent = isOverviewFallback
+            ? "OVERVIEW"
             : (isReplacementFallback ? "COMPATIBILITY" : (extractedProducts.Count >= 2 ? "COMPARISON" : "SPEC_LOOKUP"));
 
         return new InputGovernorResult(

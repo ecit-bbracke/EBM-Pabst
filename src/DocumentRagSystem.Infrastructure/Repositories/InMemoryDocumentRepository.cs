@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,9 +23,9 @@ public class InMemoryDocumentRepository : IDocumentRepository
     {
         if (_documents.TryGetValue(id, out var doc))
         {
-            _documents[id] = doc with 
-            { 
-                Status = status, 
+            _documents[id] = doc with
+            {
+                Status = status,
                 ErrorMessage = errorMessage,
                 Language = language ?? doc.Language,
                 ProductCode = productCode ?? doc.ProductCode,

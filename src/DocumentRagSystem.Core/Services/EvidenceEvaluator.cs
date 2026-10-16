@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -86,10 +86,10 @@ Output JSON object:
         try
         {
             var req = LlmRequest.FromPrompt(
-                userPrompt, 
-                requireJson: true, 
-                systemInstruction: SystemInstruction, 
-                temperature: 0.0, 
+                userPrompt,
+                requireJson: true,
+                systemInstruction: SystemInstruction,
+                temperature: 0.0,
                 maxOutputTokens: 256);
 
             var structuredRes = await _llmClient.GenerateStructuredAsync<EvidenceClaimsEnvelope>(req);

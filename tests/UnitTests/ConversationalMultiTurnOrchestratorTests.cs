@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -166,6 +166,7 @@ public class ConversationalMultiTurnOrchestratorTests
         Assert.NotNull(updatedState);
         Assert.Equal(4, updatedState.TurnCount);
         Assert.Contains(updatedState.ActiveEntities, e => e.Name == "Sensor XYZ");
+        Assert.NotNull(updatedState.ValidatedFacts);
         Assert.NotEmpty(updatedState.ValidatedFacts);
     }
 

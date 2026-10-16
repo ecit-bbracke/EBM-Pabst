@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
@@ -78,6 +78,7 @@ public class ConversationalQueryRefinerTests
         Assert.Contains("Model A and Model B", result.ResolvedQuestion);
         Assert.Equal(2, result.ActiveEntities.Count);
         Assert.Equal(2, result.ActiveConstraints.Count);
+        Assert.NotNull(result.ReferencesResolved);
         Assert.Contains("those -> Model A, Model B", result.ReferencesResolved);
     }
 
@@ -242,6 +243,7 @@ public class ConversationalQueryRefinerTests
 
         // Assert
         Assert.Equal(TurnRelationship.Modifies, result.RelationshipToPreviousTurn);
+        Assert.NotNull(result.ConstraintsReplaced);
         Assert.Single(result.ConstraintsReplaced);
         Assert.Equal("supply_voltage", result.ConstraintsReplaced[0].OldAttribute);
         Assert.Contains(result.ActiveConstraints, c => c.Attribute == "supply_voltage" && c.Value == "48");
@@ -292,6 +294,7 @@ public class ConversationalQueryRefinerTests
         var result = await refiner.RefineQueryAsync("Ignore IP67 requirement.", state);
 
         // Assert
+        Assert.NotNull(result.ConstraintsRemoved);
         Assert.Single(result.ConstraintsRemoved);
         Assert.Equal("ingress_protection", result.ConstraintsRemoved[0].Attribute);
         Assert.DoesNotContain(result.ActiveConstraints, c => c.Attribute == "ingress_protection");

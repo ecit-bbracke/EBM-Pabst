@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -99,7 +99,7 @@ public class LocalLlmLiveQualityAndSpeedTests
         }
 
         double accuracy = (double)correct / cases.Length * 100.0;
-        _output.WriteLine($"===> InputGovernor Accuracy: {accuracy:F1}%, Avg Latency: {latencies.Average():F0}ms, Median: {latencies.OrderBy(x=>x).ElementAt(latencies.Count/2)}ms");
+        _output.WriteLine($"===> InputGovernor Accuracy: {accuracy:F1}%, Avg Latency: {latencies.Average():F0}ms, Median: {latencies.OrderBy(x => x).ElementAt(latencies.Count / 2)}ms");
         Assert.True(accuracy >= 80.0, $"Expected at least 80% intent accuracy from local model, got {accuracy}%");
     }
 

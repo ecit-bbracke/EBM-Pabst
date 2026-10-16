@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -7,9 +7,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DocumentRagSystem.Core.Services;
 
@@ -192,7 +192,7 @@ public class AnswerComposer : IAnswerComposer
         }
 
         var ebmProducts = governorResult.ParsedEbmProducts ?? new List<EbmProductInfo>();
-        
+
         bool hasAxial = ebmProducts.Any(p => p.FanFamily == FanFamilyType.Axial) ||
                         question.Contains("axial", StringComparison.OrdinalIgnoreCase) ||
                         question.Contains("aksial", StringComparison.OrdinalIgnoreCase) ||

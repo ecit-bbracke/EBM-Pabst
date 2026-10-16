@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -242,7 +242,7 @@ public class EbmProductCodeParser : IEbmProductCodeParser
                 }
                 else
                 {
-                    if (cand.FanFamily == sourceProduct.FanFamily || 
+                    if (cand.FanFamily == sourceProduct.FanFamily ||
                         (cand.ImpellerDiameterMm.HasValue && sourceProduct.ImpellerDiameterMm.HasValue && Math.Abs(cand.ImpellerDiameterMm.Value - sourceProduct.ImpellerDiameterMm.Value) <= 100))
                     {
                         incompatible.Add(eval);
@@ -260,7 +260,7 @@ public class EbmProductCodeParser : IEbmProductCodeParser
         if (sourceProduct.FanFamily == FanFamilyType.Axial)
         {
             rules.Add($"Impellerdiameter: Erstatningsmodellen skal have samme diameter (Ø{diameterStr} mm) for at passe i kappe/vægudskæring.");
-            
+
             if (sourceProduct.AirflowDirection == AirflowDirection.A)
             {
                 rules.Add("KRITISK LUFTRETNING: Erstatningen SKAL have et LIGE ciffer på 12. position (f.eks. 02, 04, 90) for at sikre Luftretning A. Et ulige ciffer vender luftretningen 180° og er inkompatibel!");

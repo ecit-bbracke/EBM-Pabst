@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Reflection;
-using Microsoft.Extensions.Configuration;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Infrastructure.Configuration;
+using Microsoft.Extensions.Configuration;
 
 namespace DocumentRagSystem.UnitTests;
 

@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using DocumentRagSystem.Core.Services;
 using FluentAssertions;
 using Xunit;
@@ -22,7 +22,7 @@ public class ChunkingTests
         chunks.Should().NotBeEmpty();
         chunks.All(c => c.DocumentId == documentId).Should().BeTrue();
         chunks.All(c => c.Text.Length <= 50).Should().BeTrue();
-        
+
         // Check indexes are sequential
         for (int i = 0; i < chunks.Count; i++)
         {
@@ -37,7 +37,7 @@ public class ChunkingTests
         // Arrange
         var chunker = new ChunkingService(maxChunkSize: 100, chunkOverlap: 20);
         var text = "Line 1\r\n   Line 2   \n\n Line 3";
-        
+
         // Act
         var chunks = chunker.ChunkText(text, "doc1").ToList();
 

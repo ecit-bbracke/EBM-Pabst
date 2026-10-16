@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -54,7 +54,7 @@ public class SpecializedWorkflowTests
         var mockVectorStore = new Mock<IVectorStore>();
         mockVectorStore.Setup(x => x.SearchAsync("Model A specifications supply_voltage communication_protocol", It.IsAny<int>()))
             .ReturnsAsync(new[] { new DocumentChunk("c1", "docA", "Model A operates on 18-30 VDC and supports Modbus RTU.", 0) });
-        
+
         mockVectorStore.Setup(x => x.SearchAsync("Model B specifications supply_voltage communication_protocol", It.IsAny<int>()))
             .ReturnsAsync(new[] { new DocumentChunk("c2", "docB", "Model B has 24 VDC nominal supply and CANopen interface.", 0) });
 

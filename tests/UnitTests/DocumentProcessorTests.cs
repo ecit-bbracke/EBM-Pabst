@@ -175,7 +175,7 @@ public class DocumentProcessorTests
         Assert.Equal("3258_J_2H3PU-011_PDB_EN", result.SourceDocumentId);
 
         mockVectorStore.Verify(x => x.AddChunkAsync(
-            It.Is<DocumentChunk>(c => c.ArticleId == "9293512011" && c.SourceDocumentId == "3258_J_2H3PU-011_PDB_EN"), 
+            It.Is<DocumentChunk>(c => c.ArticleId == "9293512011" && c.SourceDocumentId == "3258_J_2H3PU-011_PDB_EN"),
             It.IsAny<float[]>()), Times.Once);
     }
 

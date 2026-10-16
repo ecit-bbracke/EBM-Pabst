@@ -1,16 +1,16 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.WebApi.DTOs;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Testcontainers.Qdrant;
 using Xunit;
@@ -105,14 +105,14 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                     mockStore.Setup(x => x.AddChunkAsync(Moq.It.IsAny<DocumentChunk>(), Moq.It.IsAny<float[]>()))
                         .Callback<DocumentChunk, float[]>((chunk, _) => storedChunks.Add(chunk))
                         .Returns(Task.CompletedTask);
-                    
+
                     mockStore.Setup(x => x.SearchAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int>()))
-                        .ReturnsAsync(() => storedChunks.Count > 0 
-                            ? storedChunks.Take(3).ToList() 
+                        .ReturnsAsync(() => storedChunks.Count > 0
+                            ? storedChunks.Take(3).ToList()
                             : new List<DocumentChunk> { new("e2e_chunk_0", "e2e_doc_id", "This is the main topic context.", 0) });
 
                     mockStore.Setup(x => x.GetChunksByDocumentAndIndicesAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<IEnumerable<int>>()))
-                        .ReturnsAsync((string docId, IEnumerable<int> indices) => 
+                        .ReturnsAsync((string docId, IEnumerable<int> indices) =>
                             storedChunks.Where(c => c.DocumentId == docId && indices.Contains(c.Index)).ToList());
 
                     var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IVectorStore));
@@ -158,12 +158,12 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
 
         // Arrange
         var testDataPath = GetTestDataPath("sample.pdf");
-        
+
         // Assert that the test data actually exists in output directory
         Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
 
         var pdfContent = await File.ReadAllBytesAsync(testDataPath);
-        
+
         using var content = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(pdfContent);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
@@ -180,7 +180,7 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         // Assert
         queryResponse.EnsureSuccessStatusCode();
         var result = await queryResponse.Content.ReadFromJsonAsync<QueryResponse>();
-        
+
         Assert.NotNull(result);
         Assert.NotEmpty(result.Citations);
     }
@@ -193,7 +193,7 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
 
         var pdfContent = await File.ReadAllBytesAsync(testDataPath);
-        
+
         using var content = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(pdfContent);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
@@ -268,7 +268,7 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.NotEmpty(result.Citations);
 
         // Verify Danish companion is present in citations
-        var danishCitation = result.Citations.FirstOrDefault(c => 
+        var danishCitation = result.Citations.FirstOrDefault(c =>
             c.filename.Contains("Art_9293512011-Doc_2002.pdf", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(danishCitation);
         Assert.Equal("da", danishCitation.language);

@@ -72,6 +72,7 @@ src/DocumentRagSystem.Worker/appsettings.local.json
 publish/
 release/
 dist/
+coveragereport/
 *.tar.gz
 *.zip
 

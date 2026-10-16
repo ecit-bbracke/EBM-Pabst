@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using DocumentRagSystem.Core.Models;
 
 namespace DocumentRagSystem.Core.Interfaces;

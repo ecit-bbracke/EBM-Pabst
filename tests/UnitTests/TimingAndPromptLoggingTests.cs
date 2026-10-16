@@ -1,16 +1,16 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Core.Services;
 using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.Llm;
 using DocumentRagSystem.Infrastructure.VectorStores;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
 
 namespace DocumentRagSystem.UnitTests;
 

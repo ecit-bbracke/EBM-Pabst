@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -16,7 +16,7 @@ public interface IDocumentRepository
     }
     Task<Document?> GetDocumentByIdAsync(string id);
     Task<IEnumerable<Document>> GetAllDocumentsAsync();
-    
+
     Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null)
     {
         return GetAllDocumentsAsync().ContinueWith(t =>

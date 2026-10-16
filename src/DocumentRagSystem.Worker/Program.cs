@@ -1,17 +1,17 @@
-using DocumentRagSystem.Worker;
-using DocumentRagSystem.Worker.HostedServices;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Configuration;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Services;
-using DocumentRagSystem.Infrastructure.TextExtractors;
+using DocumentRagSystem.Infrastructure.Configuration;
+using DocumentRagSystem.Infrastructure.Data;
 using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.Repositories;
+using DocumentRagSystem.Infrastructure.TextExtractors;
 using DocumentRagSystem.Infrastructure.VectorStores;
-using DocumentRagSystem.Infrastructure.Data;
-using DocumentRagSystem.Infrastructure.Configuration;
+using DocumentRagSystem.Worker;
+using DocumentRagSystem.Worker.HostedServices;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -31,25 +31,25 @@ builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 
 // Set up Gemini embedding service
-builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp => 
+builder.Services.AddSingleton<IEmbeddingService, GeminiEmbeddingService>(sp =>
     new GeminiEmbeddingService(
-        geminiApiKey, 
+        geminiApiKey,
         geminiEmbeddingModel,
         null,
         sp.GetService<Microsoft.Extensions.Logging.ILogger<GeminiEmbeddingService>>()));
 
 // Set up Qdrant Vector Store
-builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp => 
+builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
     new QdrantVectorStore(
-        qdrantConnString, 
-        qdrantCollection, 
+        qdrantConnString,
+        qdrantCollection,
         sp.GetRequiredService<IEmbeddingService>(),
         sp.GetService<Microsoft.Extensions.Logging.ILogger<QdrantVectorStore>>()));
 
 // Set up Language Detector & overall DocumentProcessor
 builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>();
 
-builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp => 
+builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
         sp.GetRequiredService<IChunkingService>(),
