@@ -113,6 +113,48 @@ Rules:
             );
         }
 
+        // Fast-path: If user explicitly provided a new distinct ebm-papst product model and does not use ambiguous pronouns
+        if (extractedProducts.Count > 0)
+        {
+            var msgLower = userMessage.ToLowerInvariant();
+            var hasPronouns = msgLower.Contains(" den ") || msgLower.EndsWith(" den") ||
+                              msgLower.Contains(" denne ") || msgLower.Contains(" dette ") ||
+                              msgLower.Contains(" it ") || msgLower.Contains(" its ") ||
+                              msgLower.Contains(" that ") || msgLower.Contains(" them ") ||
+                              msgLower.Contains(" those ") || msgLower.Contains(" previous ");
+
+            if (!hasPronouns)
+            {
+                var newEntities = extractedProducts.Select(p => new ConversationEntity(
+                    p.FanFamily == FanFamilyType.Axial ? "axial_fan" : "fan",
+                    p.RawCode
+                )).ToList();
+
+                stopwatch.Stop();
+                _logger?.LogInformation(
+                    "[QueryRefiner] Fast-path explicit product query detected without ambiguous pronouns. Completed in {DurationMs}ms.",
+                    stopwatch.ElapsedMilliseconds);
+
+                return new QueryRefinementResult(
+                    OriginalQuestion: userMessage,
+                    RelationshipToPreviousTurn: TurnRelationship.NewTopic,
+                    ResolvedQuestion: userMessage,
+                    EffectiveQuestion: userMessage,
+                    ActiveEntities: newEntities,
+                    ActiveConstraints: new List<ConversationConstraint>(),
+                    CandidateSet: null,
+                    ConstraintsAdded: new List<ConversationConstraint>(),
+                    ConstraintsRemoved: new List<ConversationConstraint>(),
+                    ConstraintsReplaced: new List<ConstraintReplacement>(),
+                    ReferencesResolved: new List<string>(),
+                    ContextUsed: new List<int>(),
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    NewTopic: true
+                );
+            }
+        }
+
         var serializedState = JsonSerializer.Serialize(conversationState, new JsonSerializerOptions
         {
             WriteIndented = false,
@@ -132,7 +174,7 @@ Rules:
                 requireJson: true,
                 systemInstruction: SystemInstruction,
                 temperature: 0.0,
-                maxOutputTokens: 160);
+                maxOutputTokens: 110);
 
             var structuredRes = await _llmClient.GenerateStructuredAsync<QueryRefinementResult>(req);
             stopwatch.Stop();

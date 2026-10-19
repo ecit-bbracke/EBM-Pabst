@@ -394,4 +394,32 @@ public class ConversationalQueryRefinerTests
         Assert.NotNull(result.ClarificationReason);
         Assert.Contains("Controller A, Controller B, or Sensor X", result.ClarificationReason);
     }
+
+    [Fact]
+    public async Task MultiTurn_WithExplicitProductCodeAndNoPronouns_ShouldFastPathWithoutLlmCall()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var refiner = new ConversationalQueryRefiner(mockLlm.Object);
+        var state = new ConversationState(
+            ConversationId: "conv-1",
+            Topic: "Previous topic",
+            ActiveEntities: new List<ConversationEntity> { new("fan", "K3G560PC0401") },
+            ActiveConstraints: new List<ConversationConstraint>(),
+            TurnCount: 1
+        );
+
+        // Act - user asks about 4114N explicitly without pronouns
+        var result = await refiner.RefineQueryAsync("Hvad er data for 4114N?", state);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Hvad er data for 4114N?", result.EffectiveQuestion);
+        Assert.Equal(TurnRelationship.NewTopic, result.RelationshipToPreviousTurn);
+        Assert.Single(result.ActiveEntities);
+        Assert.Equal("4114N", result.ActiveEntities[0].Name);
+
+        // Verify LLM was NOT invoked
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
 }
