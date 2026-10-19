@@ -19,7 +19,7 @@ public class GeminiEmbeddingService : IEmbeddingService
     private readonly int _fallbackDimensions = 768;
     private readonly ILogger<GeminiEmbeddingService>? _logger;
     private sealed record CacheEntry(float[] Vector, DateTime LastAccessed);
-    private static readonly ConcurrentDictionary<string, CacheEntry> _embeddingCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, CacheEntry> _embeddingCache = new(StringComparer.OrdinalIgnoreCase);
     private const int MaxCacheEntries = 10000;
 
     public GeminiEmbeddingService(

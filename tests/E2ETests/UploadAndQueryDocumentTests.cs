@@ -167,14 +167,14 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         using var content = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(pdfContent);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
-        content.Add(fileContent, "file", "sample.pdf");
+        content.Add(fileContent, "file", "4114N_sample.pdf");
 
         // Upload and process the PDF
         var uploadResponse = await _client.PostAsync("/api/documents/upload", content);
         uploadResponse.EnsureSuccessStatusCode();
 
         // Act - Query the processed document
-        var queryRequest = new QueryRequest("What is the main topic?");
+        var queryRequest = new QueryRequest("What are the specifications for 4114N?");
         var queryResponse = await _client.PostAsJsonAsync("/api/query", queryRequest);
 
         // Assert

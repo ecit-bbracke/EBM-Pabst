@@ -221,8 +221,8 @@ public class DocumentProcessorTests
         );
 
         var mockRepo = new Mock<IDocumentRepository>();
-        mockRepo.Setup(x => x.GetAllDocumentsAsync())
-            .ReturnsAsync(new List<Document> { existingDoc });
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("existing_fan.pdf"))
+            .ReturnsAsync(existingDoc);
         mockRepo.Setup(x => x.AddDocumentAsync(It.IsAny<Document>()))
             .Returns(Task.CompletedTask);
         mockRepo.Setup(x => x.UpdateDocumentStatusAsync(It.IsAny<string>(), It.IsAny<DocumentStatus>(), It.IsAny<string>(), It.IsAny<string>()))
@@ -297,6 +297,132 @@ public class DocumentProcessorTests
             DocumentStatus.Failed,
             It.Is<string>(msg => msg.Contains("ingen digital tekst")),
             null), Times.Once);
+
+        // Clean up file
+        var diskName = Path.GetFileName(Uri.UnescapeDataString(result.FilePath));
+        var diskPath = Path.Combine(AppContext.BaseDirectory, "uploads", diskName);
+        try { File.Delete(diskPath); } catch { }
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_UsesIndexedQueries_AndNeverCallsGetAllDocumentsAsync()
+    {
+        // Arrange
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Test content");
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("new_fan.pdf"))
+            .ReturnsAsync((Document?)null);
+        mockRepo.Setup(x => x.GetAllDocumentsAsync())
+            .Throws(new InvalidOperationException("GetAllDocumentsAsync must NEVER be called during upload! Full table scan forbidden."));
+        mockRepo.Setup(x => x.AddDocumentAsync(It.IsAny<Document>()))
+            .Returns(Task.CompletedTask);
+        mockRepo.Setup(x => x.UpdateDocumentStatusAsync(It.IsAny<string>(), It.IsAny<DocumentStatus>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            Mock.Of<IChunkingService>(),
+            null,
+            null,
+            mockRepo.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "new_fan.pdf");
+
+        // Assert
+        Assert.NotNull(result);
+        mockRepo.Verify(x => x.GetDocumentByFileNameAsync("new_fan.pdf"), Times.Once);
+        mockRepo.Verify(x => x.GetAllDocumentsAsync(), Times.Never);
+
+        // Clean up file
+        var diskName = Path.GetFileName(Uri.UnescapeDataString(result.FilePath));
+        var diskPath = Path.Combine(AppContext.BaseDirectory, "uploads", diskName);
+        try { File.Delete(diskPath); } catch { }
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenMultipleChunks_GeneratesEmbeddingsConcurrently_WithThrottling()
+    {
+        // Arrange
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Technical specifications for ebm-papst fan. Nominal voltage 24V. Airflow 500 m3/h.");
+
+        // Create 15 chunks
+        var chunks = new List<DocumentChunk>();
+        for (int i = 0; i < 15; i++)
+        {
+            chunks.Add(new DocumentChunk($"c_{i}", "doc-1", $"chunk text {i}", i));
+        }
+
+        var mockChunkingService = new Mock<IChunkingService>();
+        mockChunkingService.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(chunks);
+
+        int currentConcurrency = 0;
+        int maxObservedConcurrency = 0;
+        object lockObj = new();
+
+        var mockEmbeddingService = new Mock<IEmbeddingService>();
+        mockEmbeddingService.Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>()))
+            .Returns(async () =>
+            {
+                var current = System.Threading.Interlocked.Increment(ref currentConcurrency);
+                lock (lockObj)
+                {
+                    if (current > maxObservedConcurrency)
+                    {
+                        maxObservedConcurrency = current;
+                    }
+                }
+
+                // Small delay to simulate API round-trip and measure concurrency
+                await Task.Delay(30);
+
+                System.Threading.Interlocked.Decrement(ref currentConcurrency);
+                return new float[] { 0.1f, 0.2f, 0.3f };
+            });
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()))
+            .Returns(Task.CompletedTask);
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync(It.IsAny<string>()))
+            .ReturnsAsync((Document?)null);
+        mockRepo.Setup(x => x.AddDocumentAsync(It.IsAny<Document>()))
+            .Returns(Task.CompletedTask);
+        mockRepo.Setup(x => x.UpdateDocumentStatusAsync(It.IsAny<string>(), It.IsAny<DocumentStatus>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunkingService.Object,
+            mockEmbeddingService.Object,
+            mockVectorStore.Object,
+            mockRepo.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "fan_with_many_chunks.pdf");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(DocumentStatus.Processed, result.Status);
+
+        // 1. All 15 chunks must be embedded
+        mockEmbeddingService.Verify(x => x.GenerateEmbeddingAsync(It.IsAny<string>()), Times.Exactly(15));
+        mockVectorStore.Verify(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()), Times.Exactly(15));
+
+        // 2. Concurrency must be greater than 1 (proving parallel execution, not sequential)
+        Assert.True(maxObservedConcurrency > 1, $"Expected parallel execution (concurrency > 1), but observed {maxObservedConcurrency}");
+
+        // 3. Concurrency must be throttled to <= 6 (proving the SemaphoreSlim throttling works)
+        Assert.True(maxObservedConcurrency <= 6, $"Expected throttled concurrency <= 6, but observed {maxObservedConcurrency}");
 
         // Clean up file
         var diskName = Path.GetFileName(Uri.UnescapeDataString(result.FilePath));

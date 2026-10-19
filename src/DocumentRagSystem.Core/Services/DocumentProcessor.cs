@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
@@ -68,31 +71,38 @@ public class DocumentProcessor : IDocumentProcessor
 
         var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
 
-        // 1. Look for existing document with same ID, SourceDocumentId, or FileName to overwrite
+        // 1. Look for existing document with same ID, SourceDocumentId, or FileName to overwrite using fast indexed queries
         Document? existingDoc = null;
         if (_documentRepository != null)
         {
             try
             {
-                var allDocs = await _documentRepository.GetAllDocumentsAsync();
-                existingDoc = allDocs.FirstOrDefault(d =>
-                    (!string.IsNullOrWhiteSpace(documentId) && string.Equals(d.Id, documentId, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.Id, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
-                    string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(documentId))
+                {
+                    existingDoc = await _documentRepository.GetDocumentByIdAsync(documentId);
+                }
+
+                if (existingDoc == null && !string.IsNullOrWhiteSpace(sourceDocId))
+                {
+                    existingDoc = await _documentRepository.GetDocumentBySourceDocIdAsync(sourceDocId);
+                }
+
+                if (existingDoc == null && !string.IsNullOrWhiteSpace(fileName))
+                {
+                    existingDoc = await _documentRepository.GetDocumentByFileNameAsync(fileName);
+                }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Failed to query repository for existing documents during upload.");
             }
         }
-
-        if (existingDoc == null && _vectorStore != null)
+        else if (_vectorStore != null)
         {
             try
             {
-                var vectorDocs = await _vectorStore.GetDocumentsAsync();
-                existingDoc = vectorDocs.FirstOrDefault(d =>
+                var vectorDocs = await _vectorStore.GetDocumentsAsync(100);
+                existingDoc = vectorDocs?.FirstOrDefault(d =>
                     (!string.IsNullOrWhiteSpace(documentId) && string.Equals(d.Id, documentId, StringComparison.OrdinalIgnoreCase)) ||
                     (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.SourceDocumentId, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
                     (!string.IsNullOrWhiteSpace(sourceDocId) && string.Equals(d.Id, sourceDocId, StringComparison.OrdinalIgnoreCase)) ||
@@ -241,27 +251,36 @@ public class DocumentProcessor : IDocumentProcessor
 
             if (languageResult.IsEnglish)
             {
-                var chunks = _chunkingService.ChunkText(extractedText, targetDocumentId);
-                var chunksWithMetaList = new List<DocumentChunk>();
-
-                foreach (var chunk in chunks)
+                var rawChunks = _chunkingService.ChunkText(extractedText, targetDocumentId).ToList();
+                var chunksWithMetaList = rawChunks.Select(chunk => chunk with
                 {
-                    var chunkWithDocumentMetadata = chunk with
-                    {
-                        FileName = document.FileName,
-                        OriginalFileName = document.FileName,
-                        FilePath = document.FilePath,
-                        UploadedAt = document.UploadedAt,
-                        ArticleId = document.ArticleId,
-                        SourceDocumentId = document.SourceDocumentId
-                    };
-                    chunksWithMetaList.Add(chunkWithDocumentMetadata);
+                    FileName = document.FileName,
+                    OriginalFileName = document.FileName,
+                    FilePath = document.FilePath,
+                    UploadedAt = document.UploadedAt,
+                    ArticleId = document.ArticleId,
+                    SourceDocumentId = document.SourceDocumentId
+                }).ToList();
 
-                    if (_embeddingService != null && _vectorStore != null)
+                if (_embeddingService != null && _vectorStore != null && chunksWithMetaList.Count > 0)
+                {
+                    // Generate embeddings and store in vector store concurrently (throttled to 6 parallel tasks)
+                    using var semaphore = new SemaphoreSlim(6);
+                    var embeddingTasks = chunksWithMetaList.Select(async chunkWithMeta =>
                     {
-                        var embedding = await _embeddingService.GenerateEmbeddingAsync(chunk.Text);
-                        await _vectorStore.AddChunkAsync(chunkWithDocumentMetadata, embedding);
-                    }
+                        await semaphore.WaitAsync();
+                        try
+                        {
+                            var embedding = await _embeddingService.GenerateEmbeddingAsync(chunkWithMeta.Text);
+                            await _vectorStore.AddChunkAsync(chunkWithMeta, embedding);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    });
+
+                    await Task.WhenAll(embeddingTasks);
                 }
 
                 if (_ftsStore != null && chunksWithMetaList.Count > 0)
