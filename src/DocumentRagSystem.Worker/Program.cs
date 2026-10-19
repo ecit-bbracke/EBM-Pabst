@@ -7,7 +7,6 @@ using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.Infrastructure.TextExtractors;
 using DocumentRagSystem.Infrastructure.VectorStores;
 using DocumentRagSystem.Worker;
-using DocumentRagSystem.Worker.HostedServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -61,7 +60,6 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
     ));
 
 builder.Services.AddHostedService<Worker>();
-builder.Services.AddHostedService<PeriodicCleanupService>();
 
 var host = builder.Build();
 host.Run();

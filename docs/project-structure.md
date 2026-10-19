@@ -110,7 +110,6 @@ Important files and folders:
 | --- | --- |
 | `Program.cs` | Worker dependency injection and hosted-service setup. |
 | `Worker.cs` | Main ingestion worker (conditional startup seeding via `SEED_DATA=true`). |
-| `HostedServices/PeriodicCleanupService.cs` | Periodic cleanup of temporary upload files. |
 
 The Worker indexes PDFs from `data/Generelt/` (when `SEED_DATA=true`) and writes embeddings into Qdrant using the shared Core and Infrastructure services.
 

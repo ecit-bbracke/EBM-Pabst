@@ -15,7 +15,7 @@ public class MaintenanceCleanupHostedService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MaintenanceCleanupHostedService> _logger;
-    private readonly TimeSpan _initialDelay = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _initialDelay = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _checkInterval = TimeSpan.FromHours(24);
 
     public MaintenanceCleanupHostedService(
@@ -74,22 +74,26 @@ public class MaintenanceCleanupHostedService : BackgroundService
         var repository = scope.ServiceProvider.GetService<IDocumentRepository>();
         if (repository == null) return;
 
-        var (allDocs, total) = await repository.GetPagedDocumentsAsync(1, 100, null);
-        int missingCount = 0;
+        var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+        int healedCount = 0;
+
         foreach (var doc in allDocs)
         {
-            if (doc.Status == DocumentStatus.Processed &&
-                !string.IsNullOrWhiteSpace(doc.FilePath) &&
-                !doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
-                !File.Exists(doc.FilePath))
+            if (cancellationToken.IsCancellationRequested) break;
+
+            if (doc.Status == DocumentStatus.Failed && doc.ErrorMessage == "Filen blev ikke fundet på disk.")
             {
-                await repository.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Filen blev ikke fundet på disk.");
-                missingCount++;
+                var restoredStatus = !string.IsNullOrWhiteSpace(doc.Language) && !doc.Language.Equals("en", StringComparison.OrdinalIgnoreCase)
+                    ? DocumentStatus.Skipped
+                    : DocumentStatus.Processed;
+
+                await repository.UpdateDocumentStatusAsync(doc.Id, restoredStatus, errorMessage: null);
+                healedCount++;
             }
         }
 
         sw.Stop();
-        _logger.LogInformation("[MaintenanceCleanup] Cycle completed in {DurationMs}ms (Checked {Total} records, Marked {Missing} missing).",
-            sw.ElapsedMilliseconds, total, missingCount);
+        _logger.LogInformation("[MaintenanceCleanup] Reconciliation cycle completed in {DurationMs}ms (Checked {Total} records, Healed {Healed} records).",
+            sw.ElapsedMilliseconds, allDocs.Count, healedCount);
     }
 }
