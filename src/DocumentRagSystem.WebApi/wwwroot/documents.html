@@ -152,6 +152,11 @@
                             <option value="Centrifugal">Centrifugal / RadiPac</option>
                             <option value="CompactOrSpecial">Kompakt / Special</option>
                         </select>
+                        <select id="doc-file-filter" onchange="onFileFilterChange(this.value)" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500 shrink-0">
+                            <option value="">Alle filer</option>
+                            <option value="existing">Kun med PDF på disk</option>
+                            <option value="missing">Mangler PDF på disk</option>
+                        </select>
                     </div>
                     <div class="flex items-center space-x-2 text-xs text-slate-500 shrink-0">
                         <span>Vis:</span>
@@ -395,12 +400,19 @@
         let pageSize = 20;
         let searchQuery = '';
         let selectedCategory = '';
+        let selectedFileFilter = '';
         let totalPages = 1;
         let totalCount = 0;
         let searchDebounceTimer = null;
 
         function onCategoryChange(val) {
             selectedCategory = val || '';
+            currentPage = 1;
+            fetchDocuments();
+        }
+
+        function onFileFilterChange(val) {
+            selectedFileFilter = val || '';
             currentPage = 1;
             fetchDocuments();
         }
@@ -451,14 +463,18 @@
             try {
                 const params = new URLSearchParams({
                     page: currentPage,
-                    pageSize: pageSize,
-                    onlyExisting: 'true'
+                    pageSize: pageSize
                 });
                 if (searchQuery) {
                     params.append('search', searchQuery);
                 }
                 if (selectedCategory) {
                     params.append('category', selectedCategory);
+                }
+                if (selectedFileFilter === 'existing') {
+                    params.append('onlyExisting', 'true');
+                } else if (selectedFileFilter === 'missing') {
+                    params.append('onlyMissing', 'true');
                 }
 
                 const response = await fetch(`/api/documents?${params.toString()}`);
@@ -479,13 +495,11 @@
                 
                 const data = await response.json();
                 const isPaged = data && !Array.isArray(data) && Array.isArray(data.items);
-                const rawDocs = isPaged ? data.items : (Array.isArray(data) ? data : []);
-                // Ensure only documents with actual existing physical files on disk are shown
-                const docs = rawDocs.filter(doc => isDocumentUrl(doc.FilePath || doc.filePath));
+                const docs = isPaged ? data.items : (Array.isArray(data) ? data : []);
 
-                totalCount = docs.length < rawDocs.length ? docs.length : (isPaged ? data.totalCount : docs.length);
-                totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-                currentPage = isPaged ? data.page : 1;
+                totalCount = isPaged ? (data.totalCount ?? docs.length) : docs.length;
+                totalPages = isPaged ? (data.totalPages ?? Math.max(1, Math.ceil(totalCount / pageSize))) : Math.max(1, Math.ceil(totalCount / pageSize));
+                currentPage = isPaged ? (data.page ?? 1) : 1;
 
                 if (countBadge) {
                     countBadge.textContent = totalCount;
@@ -498,7 +512,7 @@
                     listContainer.innerHTML = `
                         <div class="text-center py-12 text-slate-400 text-sm">
                             <i class="fa-solid fa-folder-open text-3xl mb-3 block"></i>
-                            ${searchQuery || selectedCategory ? 'Ingen tilgængelige dokumenter på serveren matchede søgningen/kategorien.' : 'Ingen dokumenter indlæst endnu.'}
+                            ${searchQuery || selectedCategory || selectedFileFilter ? 'Ingen dokumenter på serveren matchede de valgte filtre/søgning.' : 'Ingen dokumenter indlæst endnu.'}
                         </div>`;
                     if (paginationContainer) paginationContainer.classList.add('hidden');
                     return;

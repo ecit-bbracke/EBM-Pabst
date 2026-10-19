@@ -172,6 +172,7 @@ public class AnswerComposer : IAnswerComposer
             - Clearly mark derived conclusions as derived, showing the logical steps (e.g. "Since operating voltage is 18-30 VDC, 24 VDC is compatible").
             - Highlight any conflicting information from different sources; do not choose one silently.
             - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like "K3G560PC0401" or "230V"), you MUST write the response in the same language as the application page itself: Danish (Dansk). NEVER reply in English when the user question is language-ambiguous or a model code.
+            - NO LATEX / CLEAN TYPOGRAPHY: NEVER use LaTeX math notation or syntax (e.g. do NOT write $\pm 3%$, $I_max$, $\approx$, etc.). Always use clean plain text, standard Markdown, and standard Unicode symbols (e.g. write ± 3%, I_max = 1,1 mA, ≈, Δp, m³/h, µF, °C, Ø).
             - Keep simple questions simple. For complex questions, make the reasoning auditable.
             """;
     }

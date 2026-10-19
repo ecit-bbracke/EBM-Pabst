@@ -353,8 +353,8 @@
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             const overlay = document.getElementById('sidebar-overlay');
-            sidebar.classList.toggle('-translate-x-full');
-            overlay.classList.toggle('hidden');
+            if (sidebar) sidebar.classList.toggle('-translate-x-full');
+            if (overlay) overlay.classList.toggle('hidden');
         }
 
         // Initialize conversations from local storage
@@ -419,8 +419,18 @@
 
             // If mobile sidebar was open, close it
             const sidebar = document.getElementById('sidebar');
-            if (!sidebar.classList.contains('-translate-x-full')) {
+            if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
                 toggleSidebar();
+            }
+
+            // Focus the prompt input field for immediate typing
+            const queryInput = document.getElementById('query-input');
+            if (queryInput) {
+                queryInput.value = '';
+                if (typeof autoExpandTextarea === 'function') {
+                    autoExpandTextarea(queryInput);
+                }
+                queryInput.focus();
             }
         }
 
@@ -436,8 +446,13 @@
             // Render all historical messages
             renderConversationHistory(chat);
 
-            // Fetch and render active conversation state/constraints
-            fetchActiveState(id);
+            // Fetch and render active conversation state/constraints only if conversation has messages
+            if (chat.messages && chat.messages.length > 0) {
+                fetchActiveState(id);
+            } else {
+                const panel = document.getElementById('active-state-panel');
+                if (panel) panel.classList.add('hidden');
+            }
 
             // If mobile sidebar is open, slide it away so the user can see the loaded conversation
             const sidebar = document.getElementById('sidebar');
@@ -450,6 +465,13 @@
         async function fetchActiveState(conversationId) {
             const panel = document.getElementById('active-state-panel');
             if (!conversationId) {
+                if (panel) panel.classList.add('hidden');
+                return;
+            }
+
+            // Avoid unneeded HTTP requests for empty conversations that have no server-side state
+            const chat = conversations.find(c => c.id === conversationId);
+            if (chat && (!chat.messages || chat.messages.length === 0)) {
                 if (panel) panel.classList.add('hidden');
                 return;
             }
@@ -659,10 +681,12 @@
                                         </div>
                                     </div>
                                     ${ecBadgeHtml}
-                                    <div class="text-slate-700 html-content leading-relaxed text-[15px]">
+                                    <div ${msg.isStreaming ? 'id="active-streaming-body"' : ''} class="text-slate-700 html-content leading-relaxed text-[15px]">
                                         ${msg.html}
                                     </div>
-                                    ${msg.citationsHtml || ''}
+                                    <div ${msg.isStreaming ? 'id="active-streaming-citations"' : ''}>
+                                        ${msg.citationsHtml || ''}
+                                    </div>
                                 </div>
                             </div>
                         `;
@@ -767,16 +791,63 @@
             startNewChat(false);
         }
 
+        function cleanLatexMath(text) {
+            if (!text || typeof text !== 'string') return text;
+
+            let result = text;
+
+            // 1. Unpack \text{...}, \mathrm{...}, \mathbf{...}
+            result = result.replace(/\\(text|mathrm|mathbf)\{([^{}]+)\}/g, '$2');
+
+            // 2. Common LaTeX math symbols to Unicode
+            const symbols = [
+                [/\\pm\b/g, '±'],
+                [/\\mp\b/g, '∓'],
+                [/\\times\b/g, '×'],
+                [/\\cdot\b/g, '·'],
+                [/\\div\b/g, '÷'],
+                [/\\approx\b/g, '≈'],
+                [/\\neq\b/g, '≠'],
+                [/\\le\b|\\leq\b/g, '≤'],
+                [/\\ge\b|\\geq\b/g, '≥'],
+                [/\\degree\b/g, '°'],
+                [/\\mu\b/g, 'µ'],
+                [/\\Omega\b/g, 'Ω'],
+                [/\\Delta\b/g, 'Δ'],
+                [/\\pi\b/g, 'π'],
+                [/\\infty\b/g, '∞'],
+                [/\\rightarrow\b|\\to\b/g, '→'],
+                [/\\leftarrow\b/g, '←'],
+                [/\\quad\b|\\qquad\b/g, ' ']
+            ];
+
+            for (const [pattern, replacement] of symbols) {
+                result = result.replace(pattern, replacement);
+            }
+
+            // 3. Subscripts and superscripts inside math expressions
+            result = result.replace(/\^3(?!\d)/g, '³');
+            result = result.replace(/\^2(?!\d)/g, '²');
+            result = result.replace(/_\{([^{}]+)\}/g, '_$1');
+
+            // 4. Strip surrounding math delimiters: $$...$$ and $...$
+            result = result.replace(/\$\$([\s\S]*?)\$\$/g, '$1');
+            result = result.replace(/\$([^\$\n]+?)\$/g, '$1');
+
+            return result;
+        }
+
         function renderMarkdownToHtml(markdownText) {
             if (!markdownText) return '';
+            const cleaned = cleanLatexMath(markdownText);
             if (typeof marked !== 'undefined') {
                 try {
-                    return marked.parse(markdownText);
+                    return marked.parse(cleaned);
                 } catch (e) {
                     // Fallback
                 }
             }
-            return escapeHtml(markdownText).replace(/\n/g, '<br>');
+            return escapeHtml(cleaned).replace(/\n/g, '<br>');
         }
 
         function buildCitationsHtml(citations) {
@@ -784,25 +855,48 @@
             const uniqueCitationsMap = new Map();
 
             citations.forEach((cit) => {
-                let displayDoc = cit.documentId;
-                if (cit.chunkId && cit.chunkId.includes('_chunk_')) {
-                    displayDoc = cit.chunkId.split('_chunk_')[0];
+                const chunkId = String(cit.chunkId || cit.ChunkId || '');
+                let displayDoc = String(cit.documentId || cit.DocumentId || '');
+                if (chunkId && chunkId.includes('_chunk_')) {
+                    displayDoc = chunkId.split('_chunk_')[0];
                 }
                 
-                const key = cit.filename || displayDoc;
+                const fileName = cit.filename || cit.FileName || cit.fileName || displayDoc;
+                const filePath = cit.filepath || cit.FilePath || cit.filePath || '';
+                const isCompanion = Boolean(cit.isCompanion || cit.IsCompanion || cit.language === 'da' || cit.Language === 'da');
+                const key = fileName || displayDoc;
 
                 if (!uniqueCitationsMap.has(key)) {
                     uniqueCitationsMap.set(key, {
-                        filename: cit.filename,
-                        filepath: cit.filepath,
+                        filename: fileName,
+                        filepath: filePath,
                         documentId: displayDoc,
                         pages: new Set(),
-                        isCompanion: cit.isCompanion || cit.language === 'da'
+                        isCompanion: isCompanion
                     });
+                } else {
+                    const existing = uniqueCitationsMap.get(key);
+                    if (!existing.filepath && filePath) {
+                        existing.filepath = filePath;
+                    }
                 }
                 
-                if (cit.index !== undefined && cit.index !== null && !cit.isCompanion) {
-                    uniqueCitationsMap.get(key).pages.add(cit.index + 1);
+                // Resolve page index robustly:
+                // 1. Try cit.index or cit.Index (0-based)
+                // 2. Fall back to parsing the suffix of chunkId (e.g. "10327430_chunk_4" -> index 4)
+                let rawIdx = cit.index ?? cit.Index;
+                if ((rawIdx === undefined || rawIdx === null) && chunkId.includes('_chunk_')) {
+                    const parts = chunkId.split('_chunk_');
+                    if (parts.length > 1) {
+                        const parsedNum = parseInt(parts[1], 10);
+                        if (!isNaN(parsedNum)) {
+                            rawIdx = parsedNum;
+                        }
+                    }
+                }
+
+                if (rawIdx !== undefined && rawIdx !== null && !isNaN(rawIdx) && !isCompanion) {
+                    uniqueCitationsMap.get(key).pages.add(rawIdx + 1);
                 }
             });
 
@@ -885,13 +979,14 @@
                 activeChat.title = question;
             }
 
-            // Create streaming assistant message entry immediately
+            // Create streaming assistant message entry immediately with progressive status
             const assistantMsg = {
                 role: 'assistant',
                 text: '',
-                html: '<span class="inline-block animate-pulse text-brand-500">Tænker og henter kilder...</span>',
+                html: '<span id="active-streaming-status" class="inline-flex items-center text-brand-600 font-medium text-xs"><i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>Søger i tekniske datablade...</span>',
                 citationsHtml: '',
-                duration: null
+                duration: null,
+                isStreaming: true
             };
             activeChat.messages.push(assistantMsg);
 
@@ -905,6 +1000,7 @@
 
             const startTime = performance.now();
             let rawAccumulatedText = '';
+            let renderPending = false;
 
             try {
                 const response = await fetch('/api/query/stream', {
@@ -961,15 +1057,38 @@
                                 }
                                 if (parsed.citations && parsed.citations.length > 0) {
                                     assistantMsg.citationsHtml = buildCitationsHtml(parsed.citations);
-                                    renderConversationHistory(activeChat);
+                                    
+                                    // Direct DOM update: Update citations element without full chat re-render
+                                    const citEl = document.getElementById('active-streaming-citations');
+                                    if (citEl) {
+                                        citEl.innerHTML = assistantMsg.citationsHtml;
+                                    }
+
+                                    // Progressive status: Kilder fundet
+                                    const statusEl = document.getElementById('active-streaming-status');
+                                    if (statusEl && !rawAccumulatedText) {
+                                        statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>Kilder fundet, formulerer svar...';
+                                    }
+                                    scrollToBottom();
                                 }
                             } else if (eventType === 'chunk') {
                                 if (parsed.text) {
                                     rawAccumulatedText += parsed.text;
                                     assistantMsg.text = rawAccumulatedText;
-                                    assistantMsg.html = renderMarkdownToHtml(rawAccumulatedText);
-                                    renderConversationHistory(activeChat);
-                                    scrollToBottom();
+
+                                    // Batch DOM update via requestAnimationFrame for 60fps streaming and zero DOM-thrashing
+                                    if (!renderPending) {
+                                        renderPending = true;
+                                        requestAnimationFrame(() => {
+                                            renderPending = false;
+                                            const bodyEl = document.getElementById('active-streaming-body');
+                                            if (bodyEl) {
+                                                // Active streaming with smooth pulsing caret
+                                                bodyEl.innerHTML = renderMarkdownToHtml(rawAccumulatedText) + '<span class="inline-block w-1.5 h-4 ml-0.5 align-middle bg-brand-500 animate-pulse rounded-xs"></span>';
+                                            }
+                                            scrollToBottom();
+                                        });
+                                    }
                                 }
                             } else if (eventType === 'done') {
                                 if (parsed.conversationId && parsed.conversationId !== activeChat.id) {
@@ -984,10 +1103,10 @@
                 }
 
                 const endTime = performance.now();
+                delete assistantMsg.isStreaming;
                 assistantMsg.duration = ((endTime - startTime) / 1000).toFixed(2);
-                if (!rawAccumulatedText && !assistantMsg.html.includes('animate-pulse')) {
-                    assistantMsg.html = renderMarkdownToHtml(assistantMsg.text || 'Intet svar modtaget.');
-                }
+                assistantMsg.text = rawAccumulatedText;
+                assistantMsg.html = renderMarkdownToHtml(rawAccumulatedText || 'Intet svar modtaget.');
                 
                 saveConversations();
                 renderConversationHistory(activeChat);

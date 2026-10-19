@@ -575,6 +575,7 @@ app.MapGet("/api/documents", async (
     [FromQuery] string? search,
     [FromQuery] string? category,
     [FromQuery] bool? onlyExisting,
+    [FromQuery] bool? onlyMissing,
     IDocumentRepository repository,
     IVectorStore vectorStore) =>
 {
@@ -583,11 +584,34 @@ app.MapGet("/api/documents", async (
 
     var (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
 
+    // Auto-reconcile fallback: if repository is completely empty, check if vector store has indexed documents
+    if (totalCount == 0 && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(category))
+    {
+        try
+        {
+            var vectorDocs = await vectorStore.GetDocumentsAsync(100);
+            if (vectorDocs != null && vectorDocs.Any())
+            {
+                foreach (var vDoc in vectorDocs)
+                {
+                    await repository.AddDocumentAsync(vDoc);
+                }
+                (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+            }
+        }
+        catch { }
+    }
+
     var items = repoDocs.Select(doc => doc with { FilePath = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) }).ToList();
 
     if (onlyExisting == true)
     {
         items = items.Where(d => !string.IsNullOrWhiteSpace(d.FilePath)).ToList();
+        totalCount = items.Count < repoDocs.Count() ? items.Count : totalCount;
+    }
+    else if (onlyMissing == true)
+    {
+        items = items.Where(d => string.IsNullOrWhiteSpace(d.FilePath)).ToList();
         totalCount = items.Count < repoDocs.Count() ? items.Count : totalCount;
     }
 
@@ -642,6 +666,7 @@ app.MapDelete("/api/documents/{id}", async (
 
     // 1. Delete physical file from disk
     DeletePhysicalDocumentFile(doc.FilePath, doc.FileName, servedUploadDirectories);
+    Program.DirFileCache.Clear();
 
     // 2. Delete chunks from vector database
     try
@@ -761,7 +786,7 @@ app.MapPost("/api/query", async (
 
     // Convert markdown answer to HTML with advanced extensions (for tables, bold, lists, etc.)
     var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-    var htmlAnswer = Markdown.ToHtml(answer, pipeline);
+    var htmlAnswer = Markdown.ToHtml(CleanLatexMath(answer), pipeline);
     var citations = new List<CitationDto>();
 
     foreach (var item in chunks)
@@ -934,14 +959,14 @@ app.MapPost("/api/query/stream", async (
                     }
                 }
 
-                var payload = JsonSerializer.Serialize(new { citations, conversationId = evt.ConversationId });
+                var payload = JsonSerializer.Serialize(new { citations, conversationId = evt.ConversationId }, Program.JsonCamelCase);
                 await httpContext.Response.WriteAsync($"event: citations\ndata: {payload}\n\n", streamToken);
                 await httpContext.Response.Body.FlushAsync(streamToken);
             }
             else if (evt.EventType == "chunk")
             {
                 chunkIndex++;
-                var payload = JsonSerializer.Serialize(new { text = evt.Text });
+                var payload = JsonSerializer.Serialize(new { text = evt.Text }, Program.JsonCamelCase);
                 await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", streamToken);
                 await httpContext.Response.Body.FlushAsync(streamToken);
             }
@@ -1385,10 +1410,11 @@ app.MapPost("/api/admin/backfill-fts", async (
 .RequireAuthorization()
 .WithName("BackfillFts");
 
-// CLEAN ORPHANED DOCUMENTS ENDPOINT (Admin only - removes DB records whose files were deleted from disk)
+// CLEAN ORPHANED DOCUMENTS ENDPOINT (Admin only - removes DB records whose files were deleted from disk and have no vector embeddings)
 app.MapPost("/api/admin/clean-orphans", async (
     ClaimsPrincipal currentUser,
-    IDocumentRepository repository) =>
+    IDocumentRepository repository,
+    IVectorStore vectorStore) =>
 {
     if (!IsUserAdmin(currentUser))
     {
@@ -1396,12 +1422,15 @@ app.MapPost("/api/admin/clean-orphans", async (
     }
 
     var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+    var vectorDocs = (await vectorStore.GetDocumentsAsync(100_000))?.ToList() ?? new List<Document>();
+    var vectorDocIds = new HashSet<string>(vectorDocs.Select(d => d.Id), StringComparer.OrdinalIgnoreCase);
+
     var deletedCount = 0;
 
     foreach (var doc in allDocs)
     {
         var resolvedUrl = ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories);
-        if (string.IsNullOrWhiteSpace(resolvedUrl))
+        if (string.IsNullOrWhiteSpace(resolvedUrl) && !vectorDocIds.Contains(doc.Id))
         {
             await repository.DeleteDocumentAsync(doc.Id);
             deletedCount++;
@@ -1410,7 +1439,7 @@ app.MapPost("/api/admin/clean-orphans", async (
 
     return Results.Ok(new
     {
-        message = $"Oprydning fuldført. Fjernede {deletedCount} forældreløse dokumenter uden fysisk fil på disken.",
+        message = $"Oprydning fuldført. Fjernede {deletedCount} forældreløse dokumenter uden fysisk fil eller vektorer.",
         deletedCount,
         remainingCount = allDocs.Count - deletedCount
     });
@@ -1480,6 +1509,7 @@ app.MapPost("/api/documents/upload", async (
             try
             {
                 await processor.ProcessPdfAsync(memoryStream, file.FileName, documentId);
+                Program.DirFileCache.Clear();
             }
             catch (Exception ex)
             {
@@ -1499,6 +1529,7 @@ app.MapPost("/api/documents/upload", async (
 
         using var stream = file.OpenReadStream();
         var document = await processor.ProcessPdfAsync(stream, file.FileName);
+        Program.DirFileCache.Clear();
 
         if (document.Status == DocumentStatus.Failed)
         {
@@ -1868,6 +1899,31 @@ static void DeletePhysicalDocumentFile(string? filePath, string? fileName, IEnum
     }
 }
 
+static HashSet<string> GetCachedDirectoryFiles(string directory)
+{
+    var now = DateTime.UtcNow;
+    if (Program.DirFileCache.TryGetValue(directory, out var entry) && (now - entry.CachedAt).TotalSeconds < 5)
+    {
+        return entry.Files;
+    }
+
+    var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    if (Directory.Exists(directory))
+    {
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                files.Add(Path.GetFileName(f));
+            }
+        }
+        catch { }
+    }
+
+    Program.DirFileCache[directory] = (now, files);
+    return files;
+}
+
 static string ToExistingUploadUrl(string? fileName, IEnumerable<string> uploadDirectories, string? fallbackUrl = null)
 {
     if (string.IsNullOrWhiteSpace(fileName))
@@ -1876,27 +1932,20 @@ static string ToExistingUploadUrl(string? fileName, IEnumerable<string> uploadDi
     }
 
     var normalizedFileName = Path.GetFileName(fileName);
+    var suffixTarget = $"_{normalizedFileName}";
+
     foreach (var uploadDirectory in uploadDirectories)
     {
-        var directPath = Path.Combine(uploadDirectory, normalizedFileName);
-        if (File.Exists(directPath))
+        var cachedFiles = GetCachedDirectoryFiles(uploadDirectory);
+        if (cachedFiles.Contains(normalizedFileName))
         {
             return $"/uploads/{Uri.EscapeDataString(normalizedFileName)}";
         }
 
-        if (!Directory.Exists(uploadDirectory))
+        var suffixMatch = cachedFiles.FirstOrDefault(f => f.EndsWith(suffixTarget, StringComparison.OrdinalIgnoreCase));
+        if (suffixMatch != null)
         {
-            continue;
-        }
-
-        var suffixMatches = Directory
-            .EnumerateFiles(uploadDirectory, $"*_{normalizedFileName}", SearchOption.TopDirectoryOnly)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .ToList();
-
-        if (suffixMatches.Count > 0)
-        {
-            return $"/uploads/{Uri.EscapeDataString(Path.GetFileName(suffixMatches[0]))}";
+            return $"/uploads/{Uri.EscapeDataString(suffixMatch)}";
         }
     }
 
@@ -2047,4 +2096,42 @@ static async Task<IResult> GetDocumentStatusResultAsync(
 public partial class Program
 {
     private static readonly SemaphoreSlim _dbInitLock = new(1, 1);
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CachedAt, HashSet<string> Files)> DirFileCache = new(StringComparer.OrdinalIgnoreCase);
+    public static readonly JsonSerializerOptions JsonCamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    public static string CleanLatexMath(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        var result = text;
+        // Unpack \text{...}, \mathrm{...}, \mathbf{...}
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\(text|mathrm|mathbf)\{([^{}]+)\}", "$2");
+
+        // Replace LaTeX symbols
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\pm\b", "±");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\mp\b", "∓");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\times\b", "×");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\cdot\b", "·");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\approx\b", "≈");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\neq\b", "≠");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\(le|leq)\b", "≤");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\(ge|geq)\b", "≥");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\degree\b", "°");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\mu\b", "µ");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\Omega\b", "Ω");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\Delta\b", "Δ");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\pi\b", "π");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\\infty\b", "∞");
+
+        // Subscripts and superscripts
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\^3(?!\d)", "³");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\^2(?!\d)", "²");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"_\{([^{}]+)\}", "_$1");
+
+        // Strip enclosing math delimiters: $$...$$ and $...$
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\$\$([\s\S]*?)\$\$", "$1");
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\$([^\$\n]+?)\$", "$1");
+
+        return result;
+    }
 }

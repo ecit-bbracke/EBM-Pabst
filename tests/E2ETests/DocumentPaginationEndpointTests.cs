@@ -153,4 +153,42 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
         paged!.Items.Should().NotBeEmpty();
         paged.Items.Should().OnlyContain(d => d.FileName.Contains("Centrifugal", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public async Task GetDocuments_WithOnlyMissing_ReturnsDocumentsWithoutPhysicalFiles()
+    {
+        // Arrange
+        await SeedDocumentsAsync(5);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        // Act - request only missing physical files
+        var response = await client.GetAsync("/api/documents?page=1&pageSize=10&onlyMissing=true");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var paged = await response.Content.ReadFromJsonAsync<PagedResult<Document>>();
+        paged.Should().NotBeNull();
+        paged!.Items.Should().NotBeEmpty();
+        paged.Items.Should().OnlyContain(d => string.IsNullOrWhiteSpace(d.FilePath));
+    }
+
+    [Fact]
+    public async Task GetDocuments_WithOnlyExisting_WhenNoPhysicalFiles_ReturnsEmpty()
+    {
+        // Arrange
+        await SeedDocumentsAsync(5);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        // Act - request only existing physical files
+        var response = await client.GetAsync("/api/documents?page=1&pageSize=10&onlyExisting=true");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var paged = await response.Content.ReadFromJsonAsync<PagedResult<Document>>();
+        paged.Should().NotBeNull();
+        paged!.Items.Should().BeEmpty();
+        paged.TotalCount.Should().Be(0);
+    }
 }
