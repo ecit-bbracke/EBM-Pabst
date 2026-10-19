@@ -134,6 +134,22 @@ public class EbmProductCodeParserTests
     }
 
     [Fact]
+    public void Compare_FanWithKnownDiameter_And_FanWithUnknownDiameter_ShouldReportBlocker()
+    {
+        // Arrange - K3G560PC0401 has known diameter 560 mm, 8300100799 has unknown diameter
+        var k3g = _parser.Parse("K3G560PC0401");
+        var series8300 = _parser.Parse("8300100799");
+
+        // Act
+        var evaluation = _parser.Compare(k3g, series8300);
+
+        // Assert
+        Assert.False(evaluation.IsDropInReplacement);
+        Assert.NotEmpty(evaluation.CriticalBlockers);
+        Assert.Contains(evaluation.CriticalBlockers, b => b.Contains("impellerdiameter"));
+    }
+
+    [Fact]
     public void ExtractProductsFromText_ShouldFindAllProductCodesInQuery()
     {
         // Arrange

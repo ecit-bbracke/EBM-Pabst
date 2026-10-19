@@ -66,6 +66,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private readonly IContextExpander _contextExpander;
     private readonly IDocumentRepository? _documentRepository;
     private readonly IFullTextSearchStore? _ftsStore;
+    private readonly IEbmProductCodeParser _ebmParser;
     private readonly ILogger<TechnicalRagOrchestrator>? _logger;
 
     // Workflow executors dictionary
@@ -103,6 +104,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         _ftsStore = ftsStore;
 
         var parser = ebmParser ?? new EbmProductCodeParser();
+        _ebmParser = parser;
         _queryRefiner = queryRefiner ?? new ConversationalQueryRefiner(llmClient, parser);
         _stateStore = stateStore ?? new InMemoryConversationStateStore();
 
@@ -296,21 +298,23 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 4. Start Input Governor and Initial Vector Search in Parallel
         stageStopwatch.Restart();
-        var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
-        var govResult = await govResultTask;
-        timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
-        _logger?.LogInformation("[Orchestrator] Input governor completed in {DurationMs}ms (Intent: {Intent}, Confidence: {Confidence}).", timings["InputGovernor"], govResult.Intent, govResult.Confidence);
+        var immediateProducts = _ebmParser.ExtractProductsFromText(effectiveQuestion);
+        var productCodes = immediateProducts.Select(p => p.CleanCode).Distinct().ToList();
 
         Task<IEnumerable<DocumentChunk>> initialSearchTask;
-        if ((govResult.ParsedEbmProducts != null && govResult.ParsedEbmProducts.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
         {
-            var codes = govResult.ParsedEbmProducts?.Select(p => p.CleanCode).Distinct().ToList() ?? new List<string>();
-            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, codes, vectorStore, _documentRepository);
+            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, productCodes, vectorStore, _documentRepository);
         }
         else
         {
             initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
         }
+
+        var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
+        var govResult = await govResultTask;
+        timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
+        _logger?.LogInformation("[Orchestrator] Input governor completed in {DurationMs}ms (Intent: {Intent}, Confidence: {Confidence}).", timings["InputGovernor"], govResult.Intent, govResult.Confidence);
 
         // 5. Workflow Router
         var workflowType = _workflowRouter.RouteWorkflow(govResult);
@@ -424,11 +428,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             _logger?.LogInformation("[Orchestrator] Evidence evaluation and iterative retrieval completed in {DurationMs}ms ({IterationCount} iterations).", timings["EvidenceAndIterativeRetrievalTotal"], iterations);
         }
 
-        // 8. Answer Composer
+        // 8. Answer Composer (Trim context to top 8 most relevant chunks to optimize prefill latency)
         stageStopwatch.Restart();
+        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, productCodes);
         string composedAnswer = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting)
             ? currentDraft
-            : await _answerComposer.ComposeAnswerAsync(effectiveQuestion, govResult, evidenceClaims, allChunks, currentDraft, workflowData);
+            : await _answerComposer.ComposeAnswerAsync(effectiveQuestion, govResult, evidenceClaims, chunksForComposer, currentDraft, workflowData);
         timings["AnswerComposition"] = stageStopwatch.ElapsedMilliseconds;
         _logger?.LogInformation("[Orchestrator] Answer composition completed in {DurationMs}ms (Length: {Length} chars).", timings["AnswerComposition"], composedAnswer.Length);
 
@@ -543,10 +548,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
         {
-            CacheQueryResult(cacheKey, finalAnswer, allChunks, trace);
+            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
         }
 
-        return (finalAnswer, allChunks, trace);
+        return (finalAnswer, chunksForComposer, trace);
     }
 
     public async IAsyncEnumerable<OrchestrationStreamEvent> ProcessQueryStreamAsync(
@@ -660,28 +665,41 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 4. Start Input Governor and Initial Vector Search in Parallel
         stageStopwatch.Restart();
-        var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
-        var govResult = await govResultTask;
-        timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
+        var immediateProducts = _ebmParser.ExtractProductsFromText(effectiveQuestion);
+        var productCodes = immediateProducts.Select(p => p.CleanCode).Distinct().ToList();
 
         Task<IEnumerable<DocumentChunk>> initialSearchTask;
-        if ((govResult.ParsedEbmProducts != null && govResult.ParsedEbmProducts.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
         {
-            var codes = govResult.ParsedEbmProducts?.Select(p => p.CleanCode).Distinct().ToList() ?? new List<string>();
-            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, codes, vectorStore, _documentRepository);
+            initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, productCodes, vectorStore, _documentRepository);
         }
         else
         {
             initialSearchTask = vectorStore.SearchAsync(effectiveQuestion);
         }
 
+        var govResultTask = _inputGovernor.GovernInputAsync(effectiveQuestion, question, conversationContext);
+        var govResult = await govResultTask;
+        timings["InputGovernor"] = stageStopwatch.ElapsedMilliseconds;
+
         // 5. Workflow Router
         var workflowType = _workflowRouter.RouteWorkflow(govResult);
         var executor = _executors[workflowType];
 
-        // 6. Execute Initial Workflow
+        // 6. Execute Initial Workflow (Fast-path: SimpleRag bypasses redundant intermediate draft generation)
         stageStopwatch.Restart();
-        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(effectiveQuestion, govResult, vectorStore, initialSearchTask);
+        string draftResponse = string.Empty;
+        List<DocumentChunk> contextChunks;
+        object? workflowData = null;
+
+        if (workflowType == WorkflowType.SimpleRag)
+        {
+            contextChunks = (initialSearchTask != null ? (await initialSearchTask).ToList() : (await vectorStore.SearchAsync(effectiveQuestion)).ToList());
+        }
+        else
+        {
+            (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(effectiveQuestion, govResult, vectorStore, initialSearchTask);
+        }
 
         // Positional Expansion: Expand context with adjacent neighbor chunks
         var expandedContextChunks = await _contextExpander.ExpandContextAsync(contextChunks, vectorStore, cancellationToken: cancellationToken);
@@ -698,12 +716,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 7. Evidence evaluation
         stageStopwatch.Restart();
-        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison || workflowType == WorkflowType.Greeting);
+        bool isDomainWorkflow = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility || workflowType == WorkflowType.Comparison || workflowType == WorkflowType.Greeting || workflowType == WorkflowType.SimpleRag);
         List<EvidenceClaim> evidenceClaims;
 
         if (isDomainWorkflow)
         {
-            _logger?.LogInformation("[Orchestrator] Bypassing LLM evidence evaluation for deterministic domain workflow: {WorkflowType}.", workflowType);
+            _logger?.LogInformation("[Orchestrator] Bypassing LLM evidence evaluation for streamlined workflow: {WorkflowType}.", workflowType);
             evidenceClaims = ExtractDomainEvidenceClaims(workflowData, govResult);
             timings["EvidenceEvaluation"] = stageStopwatch.ElapsedMilliseconds;
         }
@@ -713,10 +731,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             timings["EvidenceEvaluation"] = stageStopwatch.ElapsedMilliseconds;
         }
 
-        // Yield citations event as soon as retrieved chunks are ready
-        yield return new OrchestrationStreamEvent("citations", null, allChunks, effectiveConvId);
+        // 8. Stream the Answer in Real-Time (Trim context to top 8 most relevant chunks to optimize TTFT prefill latency)
+        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, productCodes);
 
-        // 8. Stream the Answer in Real-Time
+        // Yield citations event as soon as retrieved chunks are ready
+        yield return new OrchestrationStreamEvent("citations", null, chunksForComposer, effectiveConvId);
+
         stageStopwatch.Restart();
         var streamTtftStopwatch = Stopwatch.StartNew();
         bool firstChunk = false;
@@ -729,7 +749,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         }
         else
         {
-            await foreach (var chunk in _answerComposer.StreamAnswerAsync(effectiveQuestion, govResult, evidenceClaims, allChunks, draftResponse, workflowData, cancellationToken))
+            await foreach (var chunk in _answerComposer.StreamAnswerAsync(effectiveQuestion, govResult, evidenceClaims, chunksForComposer, draftResponse, workflowData, cancellationToken))
             {
                 if (!firstChunk)
                 {
@@ -777,10 +797,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
         {
-            CacheQueryResult(cacheKey, finalAnswer, allChunks, trace);
+            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
         }
 
-        yield return new OrchestrationStreamEvent("done", null, allChunks, effectiveConvId, trace);
+        yield return new OrchestrationStreamEvent("done", null, chunksForComposer, effectiveConvId, trace);
     }
 
     private static void CacheQueryResult(string key, string answer, List<DocumentChunk> chunks, ExecutionTrace trace)
@@ -1116,6 +1136,50 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         }
 
         return fusedChunks;
+    }
+
+    private static List<DocumentChunk> SelectChunksForComposerAndCitations(List<DocumentChunk> allChunks, List<string> targetProductCodes, int maxChunks = 8)
+    {
+        if (allChunks == null || allChunks.Count == 0)
+        {
+            return new List<DocumentChunk>();
+        }
+
+        if (targetProductCodes == null || targetProductCodes.Count == 0)
+        {
+            return allChunks.Count > maxChunks ? allChunks.Take(maxChunks).ToList() : allChunks;
+        }
+
+        // Prioritize chunks belonging to or referencing the target product codes
+        var matchingChunks = new List<DocumentChunk>();
+
+        foreach (var chunk in allChunks)
+        {
+            bool isTargetMatch = false;
+            foreach (var code in targetProductCodes)
+            {
+                if ((chunk.FileName != null && chunk.FileName.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                    (chunk.Text != null && chunk.Text.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                    (chunk.ArticleId != null && chunk.ArticleId.Contains(code, StringComparison.OrdinalIgnoreCase)))
+                {
+                    isTargetMatch = true;
+                    break;
+                }
+            }
+
+            if (isTargetMatch)
+            {
+                matchingChunks.Add(chunk);
+            }
+        }
+
+        // If target matching chunks exist, prioritize them exclusively up to maxChunks to prevent noise
+        if (matchingChunks.Count > 0)
+        {
+            return matchingChunks.GroupBy(c => c.Id).Select(g => g.First()).Take(maxChunks).ToList();
+        }
+
+        return allChunks.Count > maxChunks ? allChunks.Take(maxChunks).ToList() : allChunks;
     }
 
     private List<EvidenceClaim> ExtractDomainEvidenceClaims(object? workflowData, InputGovernorResult govResult)

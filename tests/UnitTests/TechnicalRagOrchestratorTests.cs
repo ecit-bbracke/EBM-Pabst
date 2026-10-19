@@ -368,4 +368,135 @@ public class TechnicalRagOrchestratorTests
         Assert.Contains(trace.Evidence, c => c.Claim.Contains("910") && c.Claim.Contains("A3G910"));
         Assert.Contains(trace.Evidence, c => c.Claim.Contains("Impeller Diameter") || c.Claim.Contains("serieerstatning"));
     }
+
+    [Fact]
+    public async Task StreamProcessQueryAsync_ShouldFastPathSimpleRag_WithoutIntermediateEvidenceEvaluation()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+
+        // 1. Input Governor mock for SPEC_LOOKUP
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""
+            {
+              "intent": "SPEC_LOOKUP",
+              "confidence": 0.95,
+              "entities": [{"type": "fan", "name": "K3G560PC0401"}],
+              "requested_attributes": ["voltage", "power"],
+              "constraints": [],
+              "clarification_required": false,
+              "clarification_reason": null
+            }
+            """);
+
+        var mockEvidenceEvaluator = new Mock<IEvidenceEvaluator>();
+
+        var mockAnswerComposer = new Mock<IAnswerComposer>();
+        mockAnswerComposer.Setup(x => x.StreamAnswerAsync(
+                It.IsAny<string>(),
+                It.IsAny<InputGovernorResult>(),
+                It.IsAny<List<EvidenceClaim>>(),
+                It.IsAny<List<DocumentChunk>>(),
+                It.IsAny<string>(),
+                It.IsAny<object?>(),
+                It.IsAny<System.Threading.CancellationToken>()))
+            .Returns(new[] { "Driftsspænding er 400 VAC.", " Nominel effekt er 3 kW." }.ToAsyncEnumerable());
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "K3G560PC0401 spænding 400 VAC, 3 kW", 0, "Data_sheet.pdf")
+            });
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object, parser),
+            new WorkflowRouter(),
+            mockEvidenceEvaluator.Object,
+            mockAnswerComposer.Object,
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            ebmParser: parser
+        );
+
+        // Act - run stream
+        var events = new List<OrchestrationStreamEvent>();
+        await foreach (var evt in orchestrator.ProcessQueryStreamAsync("Hvad er spændingen for K3G560PC0401?", mockVectorStore.Object, null))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        Assert.NotEmpty(events);
+        var citationsEvent = events.FirstOrDefault(e => e.EventType == "citations");
+        Assert.NotNull(citationsEvent);
+        Assert.NotNull(citationsEvent.Chunks);
+        Assert.Single(citationsEvent.Chunks);
+
+        var chunkEvents = events.Where(e => e.EventType == "chunk").ToList();
+        Assert.Equal(2, chunkEvents.Count);
+        Assert.Equal("Driftsspænding er 400 VAC.", chunkEvents[0].Text);
+
+        // Verify that intermediate LLM EvidenceEvaluator was BYPASSED for fast-path SimpleRag
+        mockEvidenceEvaluator.Verify(x => x.EvaluateEvidenceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<DocumentChunk>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StreamProcessQueryAsync_WithTargetProduct_ShouldFilterCitationsToTargetProductChunks()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+
+        var mockEvidenceEvaluator = new Mock<IEvidenceEvaluator>();
+        var mockAnswerComposer = new Mock<IAnswerComposer>();
+        mockAnswerComposer.Setup(x => x.StreamAnswerAsync(
+                It.IsAny<string>(),
+                It.IsAny<InputGovernorResult>(),
+                It.IsAny<List<EvidenceClaim>>(),
+                It.IsAny<List<DocumentChunk>>(),
+                It.IsAny<string>(),
+                It.IsAny<object?>(),
+                It.IsAny<System.Threading.CancellationToken>()))
+            .Returns(new[] { "Ja, K3G560PC0401 er kompatibel med 400V." }.ToAsyncEnumerable());
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        // Return 1 target product chunk and 3 unrelated fan chunks (e.g. from 8300 and A3G910)
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c_target", "doc_target", "K3G560PC0401 400V 50/60Hz 3~", 0, "Data_sheet_DA_-_K3G560PC0401_KM260717_.pdf"),
+                new DocumentChunk("c_unrelated_1", "doc_8300", "8300100799 centrifugal fan 400V", 0, "Data_sheet_US_-_8300100799.pdf"),
+                new DocumentChunk("c_unrelated_2", "doc_a3g", "A3G910 axial fan 400V", 0, "Data_sheet_US_-_A3G910AO8390.pdf")
+            });
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object, parser),
+            new WorkflowRouter(),
+            mockEvidenceEvaluator.Object,
+            mockAnswerComposer.Object,
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            ebmParser: parser
+        );
+
+        // Act - query specifically about K3G560PC0401
+        var events = new List<OrchestrationStreamEvent>();
+        await foreach (var evt in orchestrator.ProcessQueryStreamAsync("Er K3G560PC0401 kompatibel med 400V?", mockVectorStore.Object, null))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        var citationsEvent = events.FirstOrDefault(e => e.EventType == "citations");
+        Assert.NotNull(citationsEvent);
+        Assert.NotNull(citationsEvent.Chunks);
+
+        // Citations MUST only contain the target product chunk and exclude unrelated products
+        Assert.Single(citationsEvent.Chunks);
+        Assert.Equal("c_target", citationsEvent.Chunks[0].Id);
+        Assert.Contains("K3G560PC0401", citationsEvent.Chunks[0].FileName);
+        Assert.DoesNotContain(citationsEvent.Chunks, c => c.Id == "c_unrelated_1" || c.Id == "c_unrelated_2");
+    }
 }

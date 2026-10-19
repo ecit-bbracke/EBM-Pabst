@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
@@ -56,10 +57,10 @@ public class InputGovernor : IInputGovernor
     private const string SystemInstruction = """
 You are the Input Governor for an industrial ventilation & drive system (ebm-papst domain).
 Classify the user's technical question into ONE intent:
-- SPEC_LOOKUP (specs/attributes of a single fan/model)
+- SPEC_LOOKUP (specs/attributes, dimensions, data lookup, electrical voltage/power compatibility for a single model)
 - PROCEDURE (steps to install/configure/run)
 - COMPARISON (comparing 2+ models/products)
-- COMPATIBILITY (interchangeability/replacements/matching rules)
+- COMPATIBILITY (interchangeability/replacements/matching rules between fan models)
 - TROUBLESHOOTING (faults/errors/symptoms)
 - DESIGN (system design/setup)
 - CALCULATION (formulas/math)
@@ -310,7 +311,27 @@ Output JSON:
                                 text.Contains("work with", StringComparison.OrdinalIgnoreCase) ||
                                 text.Contains("fungere med", StringComparison.OrdinalIgnoreCase);
 
-            if (isReplacement)
+            // If only 1 product is present, distinguish between a cross-product replacement search and an electrical/operating parameter compatibility check
+            var isElectricalOrOperatingParameter =
+                Regex.IsMatch(text, @"\b\d+\s*(?:v|vac|vdc|volt|hz|khz|w|kw|watt|a|ma|amp|ampere)\b", RegexOptions.IgnoreCase) ||
+                text.Contains("spænding", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("voltage", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("strøm", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("current", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("effekt", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("power", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("frekvens", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("frequency", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("modbus", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("0-10v", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("0-10 v", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("pwm", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("potentiometer", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("tacho", StringComparison.OrdinalIgnoreCase);
+
+            var isModelReplacement = isReplacement && (extractedProducts.Count >= 2 || !isElectricalOrOperatingParameter);
+
+            if (isModelReplacement)
             {
                 var entities = extractedProducts.Select(p => new EntityInfo(
                     p.FanFamily == FanFamilyType.Axial ? "axial_fan" : (p.FanFamily == FanFamilyType.Centrifugal ? "centrifugal_fan" : "fan"),
@@ -364,6 +385,65 @@ Output JSON:
                 );
                 return true;
             }
+        }
+
+        // 4. Single-Product Intent (when exactly 1 EbmProduct code is detected and no conversational entity ambiguity)
+        if (extractedProducts.Count == 1 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count <= 1))
+        {
+            var isTroubleshooting = text.Contains("fejl", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("fault", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("alarm", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("virker ikke", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("not working", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("defekt", StringComparison.OrdinalIgnoreCase) ||
+                                    text.Contains("problem", StringComparison.OrdinalIgnoreCase);
+
+            var isProcedure = text.Contains("hvordan tilslut", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("hvordan monter", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("how to install", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("how to connect", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("ledningsdiagram", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("wiring diagram", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("montage", StringComparison.OrdinalIgnoreCase);
+
+            var intent = isTroubleshooting ? "TROUBLESHOOTING" : (isProcedure ? "PROCEDURE" : "SPEC_LOOKUP");
+
+            var entities = extractedProducts.Select(p => new EntityInfo(
+                p.FanFamily == FanFamilyType.Axial ? "axial_fan" : (p.FanFamily == FanFamilyType.Centrifugal ? "centrifugal_fan" : "fan"),
+                p.RawCode
+            )).ToList();
+
+            var requestedAttrs = new List<string>();
+            if (text.Contains("spænding", StringComparison.OrdinalIgnoreCase) || text.Contains("voltage", StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(text, @"\b\d+\s*(?:v|vac|vdc|volt)\b", RegexOptions.IgnoreCase))
+                requestedAttrs.Add("voltage");
+            if (text.Contains("strøm", StringComparison.OrdinalIgnoreCase) || text.Contains("current", StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(text, @"\b\d+\s*(?:a|ma|amp|ampere)\b", RegexOptions.IgnoreCase))
+                requestedAttrs.Add("current");
+            if (text.Contains("effekt", StringComparison.OrdinalIgnoreCase) || text.Contains("power", StringComparison.OrdinalIgnoreCase) || text.Contains("watt", StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(text, @"\b\d+\s*(?:w|kw|watt)\b", RegexOptions.IgnoreCase))
+                requestedAttrs.Add("power");
+            if (text.Contains("luft", StringComparison.OrdinalIgnoreCase) || text.Contains("airflow", StringComparison.OrdinalIgnoreCase) || text.Contains("m3/h", StringComparison.OrdinalIgnoreCase))
+                requestedAttrs.Add("airflow");
+            if (text.Contains("lyd", StringComparison.OrdinalIgnoreCase) || text.Contains("støj", StringComparison.OrdinalIgnoreCase) || text.Contains("sound", StringComparison.OrdinalIgnoreCase) || text.Contains("noise", StringComparison.OrdinalIgnoreCase) || text.Contains("db", StringComparison.OrdinalIgnoreCase))
+                requestedAttrs.Add("sound_pressure");
+            if (text.Contains("dimension", StringComparison.OrdinalIgnoreCase) || text.Contains("mål", StringComparison.OrdinalIgnoreCase) || text.Contains("diameter", StringComparison.OrdinalIgnoreCase) || text.Contains("størrelse", StringComparison.OrdinalIgnoreCase))
+                requestedAttrs.Add("dimensions");
+            if (text.Contains("modbus", StringComparison.OrdinalIgnoreCase) || text.Contains("0-10v", StringComparison.OrdinalIgnoreCase) || text.Contains("0-10 v", StringComparison.OrdinalIgnoreCase) || text.Contains("pwm", StringComparison.OrdinalIgnoreCase) || text.Contains("tacho", StringComparison.OrdinalIgnoreCase))
+                requestedAttrs.Add("control_interface");
+
+            result = new InputGovernorResult(
+                Intent: intent,
+                Confidence: 1.0,
+                Entities: entities,
+                RequestedAttributes: requestedAttrs,
+                Constraints: new List<string>(),
+                ClarificationRequired: false,
+                ClarificationReason: null,
+                ParsedEbmProducts: extractedProducts
+            );
+            return true;
         }
 
         return false;

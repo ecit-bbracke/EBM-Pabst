@@ -232,6 +232,15 @@ public class CategorizationTests
     [InlineData("Sammenlign A6E450AP0201 og A6E450AP0202", "COMPARISON", "A6E450AP0201")]
     [InlineData("What ventilators are there in the system?", "OVERVIEW", null)]
     [InlineData("Hvilke ventilatorer findes der?", "OVERVIEW", null)]
+    [InlineData("Hvad er spændingen for K3G560PC0401?", "SPEC_LOOKUP", "K3G560PC0401")]
+    [InlineData("Er K3G560PC0401 kompatibel med 400V?", "SPEC_LOOKUP", "K3G560PC0401")]
+    [InlineData("Er K3G560PC0401 kompatibel med 230V?", "SPEC_LOOKUP", "K3G560PC0401")]
+    [InlineData("Er K3G560PC0401 kompatibel med Modbus?", "SPEC_LOOKUP", "K3G560PC0401")]
+    [InlineData("Er K3G560PC0401 kompatibel med K3G355HA3401?", "COMPATIBILITY", "K3G560PC0401")]
+    [InlineData("Hvilken ventilator er kompatibel med K3G560PC0401?", "COMPATIBILITY", "K3G560PC0401")]
+    [InlineData("Specifikationer for 4114N", "SPEC_LOOKUP", "4114N")]
+    [InlineData("Hvorfor viser 6314H en fejl?", "TROUBLESHOOTING", "6314H")]
+    [InlineData("Hvordan tilslutter jeg K3G560PC0401?", "PROCEDURE", "K3G560PC0401")]
     public async Task InputGovernor_ShouldShortCircuitDeterministicQueries_WithoutLlmCalls(
         string question, string expectedIntent, string? expectedProductCode)
     {

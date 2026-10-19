@@ -16,7 +16,7 @@ public class EbmProductCodeParser : IEbmProductCodeParser
     );
 
     private static readonly Regex ProductCodeExtractorRegex = new(
-        @"\b([ASWRKGD][\s\-]*(?:3G|[0-9]{1,2}[ED]|[0-9]G)[\s\-]*[0-9]{3}[\s\-]*[A-Z0-9]{2,4}[\s\-]*[0-9]{2,4})\b|\b(9[2-7]\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
+        @"\b([ASWRKGD][\s\-]*(?:3G|[0-9]{1,2}[ED]|[0-9]G)[\s\-]*[0-9]{3}[\s\-]*[A-Z0-9]{2,4}[\s\-]*[0-9]{2,4})\b|\b(9[2-7]\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b((?:4114|6314|6318|3258)[A-Z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
@@ -154,6 +154,14 @@ public class EbmProductCodeParser : IEbmProductCodeParser
                 blockers.Add(msg);
                 differences.Add(new EbmComparisonDifference("Diameter", $"Ø{productA.ImpellerDiameterMm.Value} mm", $"Ø{productB.ImpellerDiameterMm.Value} mm", true, msg));
             }
+        }
+        else if (productA.ImpellerDiameterMm.HasValue != productB.ImpellerDiameterMm.HasValue)
+        {
+            var known = productA.ImpellerDiameterMm ?? productB.ImpellerDiameterMm;
+            var unknownProd = productA.ImpellerDiameterMm.HasValue ? productB.RawCode : productA.RawCode;
+            var msg = $"Uvis eller uverificeret impellerdiameter for {unknownProd} (sammenlignet med Ø{known} mm). Kræver manuel verifikation af mekaniske dimensioner før udskiftning.";
+            blockers.Add(msg);
+            differences.Add(new EbmComparisonDifference("Diameter", productA.ImpellerDiameterMm.HasValue ? $"Ø{productA.ImpellerDiameterMm.Value} mm" : "Ubekendt", productB.ImpellerDiameterMm.HasValue ? $"Ø{productB.ImpellerDiameterMm.Value} mm" : "Ubekendt", true, msg));
         }
 
         // 4. Motor Technology (EC vs AC)
