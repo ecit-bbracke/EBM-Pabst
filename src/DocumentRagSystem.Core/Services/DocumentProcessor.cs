@@ -261,22 +261,19 @@ public class DocumentProcessor : IDocumentProcessor
 
                     // Snapshot existing vectors before replacement to ensure rollback restoration on failure
                     List<(DocumentChunk Chunk, float[] Embedding)>? existingVectorSnapshot = null;
-                    if (existingDoc != null && _vectorStore != null && _embeddingService != null)
+                    if (isOverwritingCompletedDoc && _vectorStore != null && _embeddingService != null)
                     {
-                        try
+                        var oldChunks = (await _vectorStore.GetChunksByDocumentAndIndicesAsync(existingDoc!.Id, Enumerable.Range(0, 1000), cancellationToken))?.ToList();
+                        if (oldChunks != null && oldChunks.Count > 0)
                         {
-                            var oldChunks = (await _vectorStore.GetChunksByDocumentAndIndicesAsync(existingDoc.Id, Enumerable.Range(0, 1000), cancellationToken))?.ToList();
-                            if (oldChunks != null && oldChunks.Count > 0)
+                            var oldTexts = oldChunks.Select(c => c.Text).ToList();
+                            var oldEmbeddings = await _embeddingService.GenerateEmbeddingsAsync(oldTexts, cancellationToken);
+                            if (oldEmbeddings == null || oldEmbeddings.Count != oldChunks.Count)
                             {
-                                var oldTexts = oldChunks.Select(c => c.Text).ToList();
-                                var oldEmbeddings = await _embeddingService.GenerateEmbeddingsAsync(oldTexts, cancellationToken);
-                                if (oldEmbeddings != null && oldEmbeddings.Count == oldChunks.Count)
-                                {
-                                    existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
-                                }
+                                throw new InvalidOperationException($"Cannot safely replace document '{existingDoc.Id}': failed to capture backup snapshot of existing vectors before replacement.");
                             }
+                            existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
                         }
-                        catch { }
                     }
 
                     try

@@ -231,22 +231,21 @@ public static class DocumentEndpoints
                 return Results.NotFound(new { message = "Dokumentet blev ikke fundet." });
             }
 
-            // 1. Delete physical file from disk
-            DeletePhysicalDocumentFile(doc.FilePath, doc.FileName, servedUploadDirectories);
-            Program.DirFileCache.Clear();
-            TechnicalRagOrchestrator.InvalidateQueryCache();
-
-            // 2. Delete chunks from vector database
+            // 1. Delete chunks from vector database
             try
             {
                 await vectorStore.DeleteDocumentChunksAsync(id);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Fejl under sletning af chunks i vektordatabasen for dokument ID: {DocumentId}", id);
+                logger.LogError(ex, "Fejl under sletning af chunks i vektordatabasen for dokument ID: {DocumentId}", id);
+                return Results.Problem(
+                    title: "Sletning af vektorer mislykkedes",
+                    detail: $"Kunne ikke fjerne dokumentets vektorer fra søgeindekset: {ex.Message}. Dokumentposten er bevaret, så sletningen kan forsøges igen.",
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
-            // 3. Delete chunks from SQLite FTS5 database
+            // 2. Delete chunks from SQLite FTS5 database
             if (ftsStore != null)
             {
                 try
@@ -255,9 +254,18 @@ public static class DocumentEndpoints
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Fejl under sletning af chunks i FTS5 for dokument ID: {DocumentId}", id);
+                    logger.LogError(ex, "Fejl under sletning af chunks i FTS5 for dokument ID: {DocumentId}", id);
+                    return Results.Problem(
+                        title: "Sletning af fuldtekstindeks mislykkedes",
+                        detail: $"Kunne ikke fjerne dokumentets fuldtekst-chunks: {ex.Message}. Dokumentposten er bevaret, så sletningen kan forsøges igen.",
+                        statusCode: StatusCodes.Status500InternalServerError);
                 }
             }
+
+            // 3. Delete physical file from disk
+            DeletePhysicalDocumentFile(doc.FilePath, doc.FileName, servedUploadDirectories);
+            Program.DirFileCache.Clear();
+            TechnicalRagOrchestrator.InvalidateQueryCache();
 
             // 4. Delete document record from SQLite repository
             try
@@ -266,7 +274,11 @@ public static class DocumentEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Fejl under sletning af dokument fra repository for dokument ID: {DocumentId}", id);
+                logger.LogError(ex, "Fejl under sletning af dokument fra repository for dokument ID: {DocumentId}", id);
+                return Results.Problem(
+                    title: "Sletning af metadata mislykkedes",
+                    detail: $"Kunne ikke fjerne dokumentposten fra databasen: {ex.Message}.",
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
             logger.LogInformation("Dokument slettet succesfuldt: {FileName} (ID: {DocumentId})", doc.FileName, id);
