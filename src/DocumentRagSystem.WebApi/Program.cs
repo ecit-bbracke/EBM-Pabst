@@ -185,7 +185,10 @@ var servedUploadDirectories = GetServedUploadDirectories(uploadsDirectory).ToLis
 builder.Services.Configure<LlmOptions>(options =>
 {
     builder.Configuration.GetSection("Llm").Bind(options);
-    if (!string.IsNullOrWhiteSpace(geminiApiKey) && string.IsNullOrWhiteSpace(options.Gemini.ApiKey))
+    if (!string.IsNullOrWhiteSpace(geminiApiKey) &&
+        (string.IsNullOrWhiteSpace(options.Gemini.ApiKey) ||
+         string.Equals(options.Gemini.ApiKey, "YOUR_GEMINI_API_KEY", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(options.Gemini.ApiKey, "your_gemini_api_key_here", StringComparison.OrdinalIgnoreCase)))
     {
         options.Gemini.ApiKey = geminiApiKey;
     }

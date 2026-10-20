@@ -41,10 +41,12 @@ public sealed class GeminiLlmClient : ILlmClient
         _fastModel = string.IsNullOrWhiteSpace(fastModel) ? _model : fastModel;
         _logger = logger;
 
-        if (!string.IsNullOrWhiteSpace(apiKey) && apiKey != "YOUR_GEMINI_API_KEY")
+        if (!string.IsNullOrWhiteSpace(apiKey) &&
+            !string.Equals(apiKey, "YOUR_GEMINI_API_KEY", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(apiKey, "your_gemini_api_key_here", StringComparison.OrdinalIgnoreCase))
         {
             _apiKey = apiKey;
-            _httpClient = httpClient ?? new HttpClient();
+            _httpClient = httpClient;
         }
     }
 
@@ -156,21 +158,26 @@ public sealed class GeminiLlmClient : ILlmClient
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger?.LogWarning(
-                    "[{Provider}] API error (Status {StatusCode}) after {DurationMs}ms: {ErrorContent}. Falling back to mock.",
+                _logger?.LogError(
+                    "[{Provider}] API error (Status {StatusCode}) after {DurationMs}ms: {ErrorContent}.",
                     ProviderName, response.StatusCode, stopwatch.ElapsedMilliseconds, errorContent);
 
-                var mockFallback = GenerateLocalMockResponse(prompt, request.RequireJson);
-                var errMeta = new LlmExecutionMetadata(
-                    Provider: ProviderName,
-                    Model: modelToUse,
-                    DurationMs: stopwatch.ElapsedMilliseconds,
-                    InputTokens: prompt.Length / 4,
-                    OutputTokens: mockFallback.Length / 4,
-                    StructuredOutputValid: !request.RequireJson || IsValidJson(mockFallback),
-                    AttemptCount: 1,
-                    Error: $"HTTP {(int)response.StatusCode}: {errorContent}");
-                return new LlmTextResult(mockFallback, errMeta);
+                if (string.IsNullOrWhiteSpace(_apiKey))
+                {
+                    var mockFallback = GenerateLocalMockResponse(prompt, request.RequireJson);
+                    var errMeta = new LlmExecutionMetadata(
+                        Provider: ProviderName,
+                        Model: modelToUse,
+                        DurationMs: stopwatch.ElapsedMilliseconds,
+                        InputTokens: prompt.Length / 4,
+                        OutputTokens: mockFallback.Length / 4,
+                        StructuredOutputValid: !request.RequireJson || IsValidJson(mockFallback),
+                        AttemptCount: 1,
+                        Error: $"HTTP {(int)response.StatusCode}: {errorContent}");
+                    return new LlmTextResult(mockFallback, errMeta);
+                }
+
+                throw new HttpRequestException($"[{ProviderName}] Gemini API error (Status {(int)response.StatusCode} {response.StatusCode}) after {stopwatch.ElapsedMilliseconds}ms: {errorContent}");
             }
 
             var jsonResult = await response.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken);
@@ -208,35 +215,46 @@ public sealed class GeminiLlmClient : ILlmClient
                 return new LlmTextResult(resultText, meta);
             }
 
-            _logger?.LogWarning("[{Provider}] Failed to parse response after {DurationMs}ms. Falling back to mock.", ProviderName, stopwatch.ElapsedMilliseconds);
-            var parseMock = GenerateLocalMockResponse(prompt, request.RequireJson);
-            var parseMeta = new LlmExecutionMetadata(
-                Provider: ProviderName,
-                Model: modelToUse,
-                DurationMs: stopwatch.ElapsedMilliseconds,
-                InputTokens: prompt.Length / 4,
-                OutputTokens: parseMock.Length / 4,
-                StructuredOutputValid: !request.RequireJson || IsValidJson(parseMock),
-                AttemptCount: 1,
-                Error: "Empty or unparseable candidates from Gemini API");
+            _logger?.LogError("[{Provider}] Failed to parse response after {DurationMs}ms.", ProviderName, stopwatch.ElapsedMilliseconds);
+            if (string.IsNullOrWhiteSpace(_apiKey))
+            {
+                var parseMock = GenerateLocalMockResponse(prompt, request.RequireJson);
+                var parseMeta = new LlmExecutionMetadata(
+                    Provider: ProviderName,
+                    Model: modelToUse,
+                    DurationMs: stopwatch.ElapsedMilliseconds,
+                    InputTokens: prompt.Length / 4,
+                    OutputTokens: parseMock.Length / 4,
+                    StructuredOutputValid: !request.RequireJson || IsValidJson(parseMock),
+                    AttemptCount: 1,
+                    Error: "Empty or unparseable candidates from Gemini API");
 
-            return new LlmTextResult(parseMock, parseMeta);
+                return new LlmTextResult(parseMock, parseMeta);
+            }
+
+            throw new InvalidOperationException($"[{ProviderName}] Failed to parse valid response candidate text from Gemini API response.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             stopwatch.Stop();
-            _logger?.LogError(ex, "[{Provider}] Error after {DurationMs}ms: {Message}. Falling back to mock.", ProviderName, stopwatch.ElapsedMilliseconds, ex.Message);
-            var mockFallback = GenerateLocalMockResponse(prompt, request.RequireJson);
-            var errMeta = new LlmExecutionMetadata(
-                Provider: ProviderName,
-                Model: modelToUse,
-                DurationMs: stopwatch.ElapsedMilliseconds,
-                InputTokens: prompt.Length / 4,
-                OutputTokens: mockFallback.Length / 4,
-                StructuredOutputValid: !request.RequireJson || IsValidJson(mockFallback),
-                AttemptCount: 1,
-                Error: ex.Message);
-            return new LlmTextResult(mockFallback, errMeta);
+            _logger?.LogError(ex, "[{Provider}] Error after {DurationMs}ms: {Message}.", ProviderName, stopwatch.ElapsedMilliseconds, ex.Message);
+
+            if (string.IsNullOrWhiteSpace(_apiKey))
+            {
+                var mockFallback = GenerateLocalMockResponse(prompt, request.RequireJson);
+                var errMeta = new LlmExecutionMetadata(
+                    Provider: ProviderName,
+                    Model: modelToUse,
+                    DurationMs: stopwatch.ElapsedMilliseconds,
+                    InputTokens: prompt.Length / 4,
+                    OutputTokens: mockFallback.Length / 4,
+                    StructuredOutputValid: !request.RequireJson || IsValidJson(mockFallback),
+                    AttemptCount: 1,
+                    Error: ex.Message);
+                return new LlmTextResult(mockFallback, errMeta);
+            }
+
+            throw;
         }
     }
 

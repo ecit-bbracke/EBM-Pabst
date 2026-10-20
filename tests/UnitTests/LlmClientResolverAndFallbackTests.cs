@@ -230,4 +230,36 @@ public class LlmClientResolverAndFallbackTests
         // Assert
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
     }
+
+    [Fact]
+    public async Task GeminiLlmClient_WhenServiceUnavailable_ThrowsHttpRequestException_AndTriggersFallback()
+    {
+        // Arrange: Gemini returns 503
+        var geminiHandler = new SimpleMockHandler(HttpStatusCode.ServiceUnavailable, "503 Gemini Service Unavailable");
+        var geminiHttp = new HttpClient(geminiHandler);
+        var geminiClient = new GeminiLlmClient("real-gemini-api-key-12345", httpClient: geminiHttp);
+
+        // Local fallback returns valid response
+        var localHandler = new SimpleMockHandler(HttpStatusCode.OK, """
+        {
+          "choices": [
+            {
+              "message": { "role": "assistant", "content": "{\"intent\":\"SPEC_LOOKUP\"}" }
+            }
+          ]
+        }
+        """);
+        var localHttp = new HttpClient(localHandler) { BaseAddress = new Uri("http://localhost:8000") };
+        var localClient = new LocalLlmClient(new LocalLlmOptions { BaseUrl = "http://localhost:8000", Model = "qwen2.5-7b" }, localHttp);
+
+        var fallbackClient = new FallbackLlmClient(geminiClient, localClient, fallbackEnabled: true);
+
+        // Act
+        var result = await fallbackClient.GenerateTextAsync(new LlmRequest(new[] { new LlmMessage("user", "test") }));
+
+        // Assert: Fallback was invoked instead of generating fabricated mock response!
+        Assert.NotNull(result);
+        Assert.True(result.Metadata.IsFallback);
+        Assert.Equal("Local", result.Metadata.Provider);
+    }
 }
