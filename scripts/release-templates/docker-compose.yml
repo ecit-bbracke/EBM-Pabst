@@ -19,6 +19,7 @@ services:
       - Qdrant__ConnectionString=http://qdrant:6334
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY}
+      - Conversations__StorageDirectory=/app/data/conversations
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
