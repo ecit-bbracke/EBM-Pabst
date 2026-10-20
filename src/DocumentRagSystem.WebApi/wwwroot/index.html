@@ -1106,10 +1106,30 @@
                                         });
                                     }
                                 }
+                            } else if (eventType === 'replace') {
+                                if (parsed.text) {
+                                    rawAccumulatedText = parsed.text;
+                                    assistantMsg.text = rawAccumulatedText;
+                                    const bodyEl = document.getElementById('active-streaming-body');
+                                    if (bodyEl) {
+                                        bodyEl.innerHTML = renderMarkdownToHtml(rawAccumulatedText);
+                                    }
+                                    scrollToBottom();
+                                }
                             } else if (eventType === 'done') {
                                 if (parsed.conversationId && parsed.conversationId !== activeChat.id) {
                                     activeChat.id = parsed.conversationId;
                                     currentConversationId = parsed.conversationId;
+                                }
+                                if (parsed.trace && parsed.trace.outputGovernor && !parsed.trace.outputGovernor.approved) {
+                                    if (parsed.trace.finalAnswer) {
+                                        rawAccumulatedText = parsed.trace.finalAnswer;
+                                        assistantMsg.text = rawAccumulatedText;
+                                        const bodyEl = document.getElementById('active-streaming-body');
+                                        if (bodyEl) {
+                                            bodyEl.innerHTML = renderMarkdownToHtml(rawAccumulatedText);
+                                        }
+                                    }
                                 }
                             }
                         } catch (err) {

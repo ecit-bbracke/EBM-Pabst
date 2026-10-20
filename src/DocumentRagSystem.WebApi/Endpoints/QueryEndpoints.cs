@@ -282,6 +282,12 @@ public static class QueryEndpoints
                         await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", streamToken);
                         await httpContext.Response.Body.FlushAsync(streamToken);
                     }
+                    else if (evt.EventType == "replace")
+                    {
+                        var payload = JsonSerializer.Serialize(new { text = evt.Text }, Program.JsonCamelCase);
+                        await httpContext.Response.WriteAsync($"event: replace\ndata: {payload}\n\n", streamToken);
+                        await httpContext.Response.Body.FlushAsync(streamToken);
+                    }
                     else if (evt.EventType == "done")
                     {
                         requestStopwatch.Stop();
