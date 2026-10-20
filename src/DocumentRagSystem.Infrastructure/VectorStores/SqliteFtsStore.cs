@@ -56,19 +56,42 @@ public class SqliteFtsStore : IFullTextSearchStore
                 conn.Open();
 
                 using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
-                    CREATE VIRTUAL TABLE IF NOT EXISTS ChunkFts USING fts5(
-                        ChunkId UNINDEXED, 
-                        DocumentId UNINDEXED, 
-                        IndexNumber UNINDEXED,
-                        FileName, 
-                        FilePath UNINDEXED,
-                        Text, 
-                        ArticleId, 
-                        SourceDocumentId,
-                        tokenize='unicode61 remove_diacritics 2'
-                    );";
-                cmd.ExecuteNonQuery();
+
+                // Check if ChunkFts already exists and has the PageNumber column
+                bool hasPageNumber = false;
+                cmd.CommandText = "PRAGMA table_info(\"ChunkFts\");";
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        if (string.Equals(reader.GetString(1), "PageNumber", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasPageNumber = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasPageNumber)
+                {
+                    cmd.CommandText = "DROP TABLE IF EXISTS ChunkFts;";
+                    cmd.ExecuteNonQuery();
+
+                    cmd.CommandText = @"
+                        CREATE VIRTUAL TABLE IF NOT EXISTS ChunkFts USING fts5(
+                            ChunkId UNINDEXED, 
+                            DocumentId UNINDEXED, 
+                            IndexNumber UNINDEXED,
+                            FileName, 
+                            FilePath UNINDEXED,
+                            Text, 
+                            ArticleId, 
+                            SourceDocumentId,
+                            PageNumber UNINDEXED,
+                            tokenize='unicode61 remove_diacritics 2'
+                        );";
+                    cmd.ExecuteNonQuery();
+                }
 
                 _initializedDatabases[connStr] = true;
                 _logger?.LogInformation("[SqliteFtsStore] SQLite FTS5 ChunkFts virtual table initialized successfully.");
@@ -131,9 +154,9 @@ public class SqliteFtsStore : IFullTextSearchStore
         command.Transaction = transaction as System.Data.Common.DbTransaction;
         command.CommandText = @"
             INSERT INTO ChunkFts(
-                ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId
+                ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId, PageNumber
             ) VALUES (
-                $chunkId, $docId, $indexNum, $fileName, $filePath, $text, $articleId, $sourceDocId
+                $chunkId, $docId, $indexNum, $fileName, $filePath, $text, $articleId, $sourceDocId, $pageNumber
             );";
 
         var chunkIdParam = command.CreateParameter();
@@ -168,6 +191,10 @@ public class SqliteFtsStore : IFullTextSearchStore
         sourceDocIdParam.ParameterName = "$sourceDocId";
         command.Parameters.Add(sourceDocIdParam);
 
+        var pageNumberParam = command.CreateParameter();
+        pageNumberParam.ParameterName = "$pageNumber";
+        command.Parameters.Add(pageNumberParam);
+
         foreach (var chunk in list)
         {
             chunkIdParam.Value = chunk.Id;
@@ -178,6 +205,7 @@ public class SqliteFtsStore : IFullTextSearchStore
             textParam.Value = chunk.Text;
             articleIdParam.Value = (object?)chunk.ArticleId ?? DBNull.Value;
             sourceDocIdParam.Value = (object?)chunk.SourceDocumentId ?? DBNull.Value;
+            pageNumberParam.Value = chunk.PageNumber.HasValue ? chunk.PageNumber.Value : (object)DBNull.Value;
 
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -201,7 +229,7 @@ public class SqliteFtsStore : IFullTextSearchStore
 
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId, bm25(ChunkFts) as Score
+            SELECT ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId, PageNumber, bm25(ChunkFts) as Score
             FROM ChunkFts
             WHERE ChunkFts MATCH $ftsQuery
             ORDER BY Score ASC
@@ -232,6 +260,7 @@ public class SqliteFtsStore : IFullTextSearchStore
                 var text = reader.GetString(5);
                 var articleId = reader.IsDBNull(6) ? null : reader.GetString(6);
                 var sourceDocId = reader.IsDBNull(7) ? null : reader.GetString(7);
+                var pageNumber = reader.IsDBNull(8) ? (int?)null : Convert.ToInt32(reader.GetValue(8));
 
                 results.Add(new DocumentChunk(
                     Id: chunkId,
@@ -243,7 +272,8 @@ public class SqliteFtsStore : IFullTextSearchStore
                     UploadedAt: DateTime.UtcNow,
                     OriginalFileName: fileName,
                     ArticleId: articleId,
-                    SourceDocumentId: sourceDocId
+                    SourceDocumentId: sourceDocId,
+                    PageNumber: pageNumber
                 ));
             }
         }

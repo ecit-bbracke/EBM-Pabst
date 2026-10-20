@@ -95,4 +95,45 @@ public class SqliteFtsStoreAndRrfTests
             }
         }
     }
+
+    [Fact]
+    public async Task SqliteFtsStore_ShouldPersistAndRestorePageNumber()
+    {
+        // Arrange
+        var dbPath = Path.Combine(Path.GetTempPath(), $"fts_page_test_{Guid.NewGuid():N}.db");
+        var connStr = $"Data Source={dbPath}";
+        var factory = new TestDbContextFactory(connStr);
+
+        try
+        {
+            var ftsStore = new SqliteFtsStore(factory);
+
+            var chunkWithPage = new DocumentChunk(
+                Id: "cPage3",
+                DocumentId: "docP",
+                Text: "Technical specifications on pressure and airflow characteristics.",
+                Index: 1,
+                FileName: "datasheet.pdf",
+                FilePath: "/uploads/datasheet.pdf",
+                UploadedAt: DateTime.UtcNow,
+                PageNumber: 3
+            );
+
+            // Act
+            await ftsStore.AddChunksAsync(new[] { chunkWithPage });
+            var results = (await ftsStore.SearchAsync("airflow characteristics")).ToList();
+
+            // Assert
+            Assert.NotEmpty(results);
+            Assert.Equal("cPage3", results[0].Id);
+            Assert.Equal(3, results[0].PageNumber);
+        }
+        finally
+        {
+            if (File.Exists(dbPath))
+            {
+                try { File.Delete(dbPath); } catch { }
+            }
+        }
+    }
 }
