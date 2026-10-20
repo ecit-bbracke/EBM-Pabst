@@ -98,37 +98,86 @@ public static class DocumentEndpoints
             var p = page ?? 1;
             var size = Math.Clamp(pageSize ?? 20, 1, 100);
 
-            var (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+            IReadOnlyList<Document> items;
+            int totalCount;
 
-            // Auto-reconcile fallback: if repository is completely empty, check if vector store has indexed documents
-            if (totalCount == 0 && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(category))
+            if (onlyExisting == true || onlyMissing == true)
             {
-                try
+                // Filter the entire matching set by physical disk file presence before counting and paginating
+                var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+
+                // Auto-reconcile fallback: if repository is completely empty, check if vector store has indexed documents
+                if (allDocs.Count == 0 && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(category))
                 {
-                    var vectorDocs = await vectorStore.GetDocumentsAsync(100);
-                    if (vectorDocs != null && vectorDocs.Any())
+                    try
                     {
-                        foreach (var vDoc in vectorDocs)
+                        var vectorDocs = await vectorStore.GetDocumentsAsync(100);
+                        if (vectorDocs != null && vectorDocs.Any())
                         {
-                            await repository.AddDocumentAsync(vDoc);
+                            foreach (var vDoc in vectorDocs)
+                            {
+                                await repository.AddDocumentAsync(vDoc);
+                            }
+                            allDocs = (await repository.GetAllDocumentsAsync()).ToList();
                         }
-                        (repoDocs, totalCount) = await repository.GetPagedDocumentsAsync(p, size, search, category);
                     }
+                    catch { }
                 }
-                catch { }
-            }
 
-            var items = repoDocs.Select(doc => doc with { FilePath = DocumentUrlResolver.ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) }).ToList();
+                var query = allDocs.AsEnumerable();
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    query = query.Where(d =>
+                        (d.FileName != null && d.FileName.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
+                        (d.ArticleId != null && d.ArticleId.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
+                        (d.ProductCode != null && d.ProductCode.Contains(search, StringComparison.OrdinalIgnoreCase)));
+                }
+                if (!string.IsNullOrWhiteSpace(category))
+                {
+                    query = query.Where(d => string.Equals(d.ProductCategory, category, StringComparison.OrdinalIgnoreCase));
+                }
 
-            if (onlyExisting == true)
-            {
-                items = items.Where(d => !string.IsNullOrWhiteSpace(d.FilePath)).ToList();
-                totalCount = items.Count < repoDocs.Count() ? items.Count : totalCount;
+                var resolvedList = query.Select(doc => doc with
+                {
+                    FilePath = DocumentUrlResolver.ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories)
+                }).ToList();
+
+                if (onlyExisting == true)
+                {
+                    resolvedList = resolvedList.Where(d => !string.IsNullOrWhiteSpace(d.FilePath)).ToList();
+                }
+                else if (onlyMissing == true)
+                {
+                    resolvedList = resolvedList.Where(d => string.IsNullOrWhiteSpace(d.FilePath)).ToList();
+                }
+
+                totalCount = resolvedList.Count;
+                items = resolvedList.Skip((p - 1) * size).Take(size).ToList();
             }
-            else if (onlyMissing == true)
+            else
             {
-                items = items.Where(d => string.IsNullOrWhiteSpace(d.FilePath)).ToList();
-                totalCount = items.Count < repoDocs.Count() ? items.Count : totalCount;
+                var (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+
+                // Auto-reconcile fallback: if repository is completely empty, check if vector store has indexed documents
+                if (count == 0 && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(category))
+                {
+                    try
+                    {
+                        var vectorDocs = await vectorStore.GetDocumentsAsync(100);
+                        if (vectorDocs != null && vectorDocs.Any())
+                        {
+                            foreach (var vDoc in vectorDocs)
+                            {
+                                await repository.AddDocumentAsync(vDoc);
+                            }
+                            (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+                        }
+                    }
+                    catch { }
+                }
+
+                totalCount = count;
+                items = repoDocs.Select(doc => doc with { FilePath = DocumentUrlResolver.ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories) }).ToList();
             }
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)size);
@@ -185,6 +234,7 @@ public static class DocumentEndpoints
             // 1. Delete physical file from disk
             DeletePhysicalDocumentFile(doc.FilePath, doc.FileName, servedUploadDirectories);
             Program.DirFileCache.Clear();
+            TechnicalRagOrchestrator.InvalidateQueryCache();
 
             // 2. Delete chunks from vector database
             try
@@ -334,16 +384,22 @@ public static class DocumentEndpoints
                 var documentId = existingDoc?.Id
                     ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
 
-                var tempDocument = new Document(
-                    Id: documentId,
-                    FileName: file.FileName,
-                    FilePath: existingDoc?.FilePath ?? "Queued/Background",
-                    UploadedAt: DateTime.UtcNow,
-                    Status: DocumentStatus.Pending,
-                    ArticleId: articleId,
-                    SourceDocumentId: sourceDocId
-                );
-                await repository.AddDocumentAsync(tempDocument);
+                bool isCompletedDoc = existingDoc != null &&
+                    (existingDoc.Status == DocumentStatus.Processed || existingDoc.Status == DocumentStatus.Skipped);
+
+                if (!isCompletedDoc)
+                {
+                    var tempDocument = new Document(
+                        Id: documentId,
+                        FileName: file.FileName,
+                        FilePath: existingDoc?.FilePath ?? "Queued/Background",
+                        UploadedAt: DateTime.UtcNow,
+                        Status: DocumentStatus.Pending,
+                        ArticleId: articleId,
+                        SourceDocumentId: sourceDocId
+                    );
+                    await repository.AddDocumentAsync(tempDocument);
+                }
 
                 queue.QueueBackgroundWorkItem(async token =>
                 {
@@ -351,6 +407,7 @@ public static class DocumentEndpoints
                     {
                         await processor.ProcessPdfAsync(memoryStream, file.FileName, documentId, token);
                         Program.DirFileCache.Clear();
+                        TechnicalRagOrchestrator.InvalidateQueryCache();
                     }
                     catch (Exception ex)
                     {
@@ -362,7 +419,19 @@ public static class DocumentEndpoints
                     }
                 });
 
-                return Results.Accepted($"/api/documents", tempDocument);
+                var responseDoc = isCompletedDoc
+                    ? existingDoc! with { Status = DocumentStatus.Processing }
+                    : new Document(
+                        Id: documentId,
+                        FileName: file.FileName,
+                        FilePath: "Queued/Background",
+                        UploadedAt: DateTime.UtcNow,
+                        Status: DocumentStatus.Pending,
+                        ArticleId: articleId,
+                        SourceDocumentId: sourceDocId
+                    );
+
+                return Results.Accepted($"/api/documents", responseDoc);
             }
             else
             {
@@ -371,6 +440,7 @@ public static class DocumentEndpoints
                 using var stream = file.OpenReadStream();
                 var document = await processor.ProcessPdfAsync(stream, file.FileName, cancellationToken: cancellationToken);
                 Program.DirFileCache.Clear();
+                TechnicalRagOrchestrator.InvalidateQueryCache();
 
                 if (document.Status == DocumentStatus.Failed)
                 {
@@ -402,10 +472,6 @@ public static class DocumentEndpoints
             if (!string.IsNullOrWhiteSpace(rawName))
             {
                 candidates.Add(rawName);
-                if (rawName.Length > 37 && rawName[36] == '_')
-                {
-                    candidates.Add(rawName.Substring(37));
-                }
             }
 
             if (File.Exists(filePath))
@@ -434,14 +500,24 @@ public static class DocumentEndpoints
                 {
                     try { File.Delete(direct); } catch { }
                 }
+            }
 
+            // Only match files prefixed with a validated 36-character GUID followed by '_'
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                var targetName = Path.GetFileName(fileName);
                 try
                 {
-                    var pattern = $"*_{c}";
-                    var matches = Directory.GetFiles(dir, pattern);
-                    foreach (var m in matches)
+                    var files = Directory.GetFiles(dir);
+                    foreach (var file in files)
                     {
-                        try { File.Delete(m); } catch { }
+                        var fname = Path.GetFileName(file);
+                        if (fname.Length > 37 && fname[36] == '_' &&
+                            Guid.TryParse(fname.Substring(0, 36), out _) &&
+                            string.Equals(fname.Substring(37), targetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try { File.Delete(file); } catch { }
+                        }
                     }
                 }
                 catch { }

@@ -180,6 +180,7 @@ public static class AdminEndpoints
             if (updates.Count > 0)
             {
                 await repository.BatchUpdateMetadataAsync(updates);
+                TechnicalRagOrchestrator.InvalidateQueryCache();
             }
 
             return Results.Ok(new { message = $"Gennemførte lyn-backfill af metadata. Opdaterede {updates.Count} ud af {docsToUpdate.Count} dokumenter uden metadata i én samlet transaktion." });
@@ -291,6 +292,7 @@ public static class AdminEndpoints
                 await ftsStore.AddChunksAsync(batch, cancellationToken);
             }
 
+            TechnicalRagOrchestrator.InvalidateQueryCache();
             var totalChunksAfter = await ftsStore.GetIndexedChunkCountAsync(cancellationToken);
             return Results.Ok(new
             {
@@ -327,6 +329,11 @@ public static class AdminEndpoints
                     await repository.DeleteDocumentAsync(doc.Id);
                     deletedCount++;
                 }
+            }
+
+            if (deletedCount > 0)
+            {
+                TechnicalRagOrchestrator.InvalidateQueryCache();
             }
 
             return Results.Ok(new
