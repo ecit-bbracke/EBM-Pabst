@@ -135,4 +135,41 @@ public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory
         var retrieved = await _repository.GetDocumentByIdAsync(docId);
         retrieved.Should().BeNull();
     }
+
+    [Fact]
+    public async Task DeleteDocument_WhenVectorStoreThrows_Returns500_AndRetainsDocumentInRepository()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var docId = $"doc_failing_{Guid.NewGuid():N}";
+        var fileName = "failing_store_doc.pdf";
+        var uniqueDiskFileName = $"{Guid.NewGuid():N}_{fileName}";
+        var physicalFilePath = Path.Combine(_testUploadsDir, uniqueDiskFileName);
+        await File.WriteAllTextAsync(physicalFilePath, "%PDF-1.4 test file content");
+
+        var doc = new Document(
+            Id: docId,
+            FileName: fileName,
+            FilePath: $"/uploads/{uniqueDiskFileName}",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed
+        );
+
+        await _repository.AddDocumentAsync(doc);
+
+        _mockVectorStore
+            .Setup(x => x.DeleteDocumentChunksAsync(docId, It.IsAny<System.Threading.CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Qdrant connection dropped during deletion."));
+
+        // Act
+        var response = await client.DeleteAsync($"/api/documents/{docId}");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+
+        // Document record must be retained in repository so deletion can be retried!
+        var retained = await _repository.GetDocumentByIdAsync(docId);
+        retained.Should().NotBeNull();
+        retained!.Id.Should().Be(docId);
+    }
 }

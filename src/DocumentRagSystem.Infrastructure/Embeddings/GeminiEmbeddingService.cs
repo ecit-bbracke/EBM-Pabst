@@ -256,11 +256,16 @@ public class GeminiEmbeddingService : IEmbeddingService
                             StoreInCache(trimmed, values);
                             results[targetIdx] = values;
                         }
-                        else
+                        else if (string.IsNullOrWhiteSpace(_apiKey))
                         {
                             var fallback = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
                             StoreInCache(trimmed, fallback);
                             results[targetIdx] = fallback;
+                        }
+                        else
+                        {
+                            _logger?.LogError("[GeminiEmbedding] Embedding item {Index} missing valid 'values' property in batch response.", i);
+                            throw new InvalidOperationException($"[GeminiEmbedding] Embedding item {i} missing valid 'values' property in API response.");
                         }
                         i++;
                     }
@@ -269,7 +274,7 @@ public class GeminiEmbeddingService : IEmbeddingService
                         "[GeminiEmbedding] Batch generated {Count} embeddings with model {Model} in {DurationMs}ms.",
                         batchIndices.Count, _model, stopwatch.ElapsedMilliseconds);
                 }
-                else
+                else if (string.IsNullOrWhiteSpace(_apiKey))
                 {
                     _logger?.LogWarning(
                         "[GeminiEmbedding] Failed to parse batchEmbedContents response after {DurationMs}ms. Falling back to mocks.",
@@ -282,6 +287,11 @@ public class GeminiEmbeddingService : IEmbeddingService
                         StoreInCache(trimmed, fallback);
                         results[idx] = fallback;
                     }
+                }
+                else
+                {
+                    _logger?.LogError("[GeminiEmbedding] Failed to parse batchEmbedContents response after {DurationMs}ms.", stopwatch.ElapsedMilliseconds);
+                    throw new InvalidOperationException("[GeminiEmbedding] Failed to parse batchEmbedContents response from Gemini API.");
                 }
             }
             catch (Exception ex)
