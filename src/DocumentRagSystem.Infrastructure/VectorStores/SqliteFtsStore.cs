@@ -94,10 +94,43 @@ public class SqliteFtsStore : IFullTextSearchStore
 
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        // Explicitly delete any prior chunks for these documents/chunks to prevent FTS5 duplication
+        var docIds = list.Select(c => c.DocumentId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
+        if (docIds.Count > 0)
+        {
+            using var delDocCmd = connection.CreateCommand();
+            delDocCmd.Transaction = transaction as System.Data.Common.DbTransaction;
+            delDocCmd.CommandText = "DELETE FROM ChunkFts WHERE DocumentId = $delDocId;";
+            var delDocParam = delDocCmd.CreateParameter();
+            delDocParam.ParameterName = "$delDocId";
+            delDocCmd.Parameters.Add(delDocParam);
+
+            foreach (var docId in docIds)
+            {
+                delDocParam.Value = docId;
+                await delDocCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        else
+        {
+            using var delCmd = connection.CreateCommand();
+            delCmd.Transaction = transaction as System.Data.Common.DbTransaction;
+            delCmd.CommandText = "DELETE FROM ChunkFts WHERE ChunkId = $delChunkId;";
+            var delParam = delCmd.CreateParameter();
+            delParam.ParameterName = "$delChunkId";
+            delCmd.Parameters.Add(delParam);
+
+            foreach (var chunk in list)
+            {
+                delParam.Value = chunk.Id;
+                await delCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
         using var command = connection.CreateCommand();
         command.Transaction = transaction as System.Data.Common.DbTransaction;
         command.CommandText = @"
-            INSERT OR REPLACE INTO ChunkFts(
+            INSERT INTO ChunkFts(
                 ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId
             ) VALUES (
                 $chunkId, $docId, $indexNum, $fileName, $filePath, $text, $articleId, $sourceDocId

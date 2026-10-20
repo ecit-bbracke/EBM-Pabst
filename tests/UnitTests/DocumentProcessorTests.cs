@@ -408,4 +408,147 @@ public class DocumentProcessorTests
         var diskPath = Path.Combine(AppContext.BaseDirectory, "uploads", diskName);
         try { File.Delete(diskPath); } catch { }
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenReplacementExtractionFails_PreservesExistingDocumentMetadata()
+    {
+        // Arrange: Existing document exists
+        var existingDoc = new Document(
+            Id: "existing-doc-99",
+            FileName: "good_fan.pdf",
+            FilePath: "/uploads/good_fan.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-1),
+            Status: DocumentStatus.Processed,
+            Language: "en"
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync(string.Empty); // Text extraction returns empty!
+
+        var mockChunkingService = new Mock<IChunkingService>();
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("good_fan.pdf"))
+            .ReturnsAsync(existingDoc);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunkingService.Object,
+            null,
+            null,
+            mockRepo.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2 }), "good_fan.pdf");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(DocumentStatus.Failed, result.Status);
+
+        // Crucial: The repository record for the existing document must NOT be marked Failed or overwritten with staged path
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(existingDoc.Id, DocumentStatus.Failed, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        mockRepo.Verify(x => x.AddDocumentAsync(It.Is<Document>(d => d.Status == DocumentStatus.Processing)), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenNonEnglishReplacement_DeletesOldVectorAndFtsChunks()
+    {
+        // Arrange: Existing English document replaced with Danish version
+        var existingDoc = new Document(
+            Id: "doc-to-replace",
+            FileName: "fan_to_replace.pdf",
+            FilePath: "/uploads/fan_to_replace.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-1),
+            Status: DocumentStatus.Processed,
+            Language: "en"
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Dette er en dansk brugermanual for ventilatoren.");
+
+        var mockChunkingService = new Mock<IChunkingService>();
+        var mockLanguageDetector = new Mock<ILanguageDetector>();
+        mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new LanguageDetectionResult("da", false, 0.95));
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("fan_to_replace.pdf"))
+            .ReturnsAsync(existingDoc);
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        var mockFtsStore = new Mock<IFullTextSearchStore>();
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunkingService.Object,
+            null,
+            mockVectorStore.Object,
+            mockRepo.Object,
+            mockLanguageDetector.Object,
+            null,
+            mockFtsStore.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2 }), "fan_to_replace.pdf");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(DocumentStatus.Skipped, result.Status);
+
+        // Both vector chunks and FTS chunks from previous document must be deleted
+        mockVectorStore.Verify(x => x.DeleteDocumentChunksAsync("doc-to-replace", It.IsAny<CancellationToken>()), Times.Once);
+        mockFtsStore.Verify(x => x.DeleteChunksByDocumentIdAsync("doc-to-replace", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenPendingPlaceholderFailsTextExtraction_TransitionsStatusToFailedInRepository()
+    {
+        // Arrange: Background upload created a Pending placeholder
+        var pendingDoc = new Document(
+            Id: "pending-bg-doc-123",
+            FileName: "corrupt_upload.pdf",
+            FilePath: "Queued/Background",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Pending
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync(string.Empty); // Corrupted / empty PDF
+
+        var mockChunkingService = new Mock<IChunkingService>();
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("pending-bg-doc-123"))
+            .ReturnsAsync(pendingDoc);
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("corrupt_upload.pdf"))
+            .ReturnsAsync(pendingDoc);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunkingService.Object,
+            null,
+            null,
+            mockRepo.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2 }), "corrupt_upload.pdf", "pending-bg-doc-123");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(DocumentStatus.Failed, result.Status);
+
+        // Must transition the pending placeholder to Failed in the repository
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(
+            "pending-bg-doc-123",
+            DocumentStatus.Failed,
+            It.Is<string>(msg => msg.Contains("indeholder ingen digital tekst")),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>()
+        ), Times.Once);
+    }
 }

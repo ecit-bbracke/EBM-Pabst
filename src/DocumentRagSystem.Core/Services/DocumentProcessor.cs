@@ -123,6 +123,8 @@ public class DocumentProcessor : IDocumentProcessor
             ?? existingDoc?.Id
             ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
 
+        bool isOverwritingCompletedDoc = existingDoc != null && (existingDoc.Status == DocumentStatus.Processed || existingDoc.Status == DocumentStatus.Skipped);
+
         var safeFileName = Path.GetFileName(fileName);
         var uniqueFileName = $"{Guid.NewGuid()}_{safeFileName}";
         var filePath = Path.Combine(uploadsDir, uniqueFileName);
@@ -144,7 +146,7 @@ public class DocumentProcessor : IDocumentProcessor
             SourceDocumentId: sourceDocId
         );
 
-        if (_documentRepository != null)
+        if (_documentRepository != null && !isOverwritingCompletedDoc)
         {
             await _documentRepository.AddDocumentAsync(document);
         }
@@ -189,18 +191,18 @@ public class DocumentProcessor : IDocumentProcessor
                 }
                 catch { }
 
-                document = document with
+                var failedDoc = document with
                 {
                     Status = DocumentStatus.Failed,
                     ErrorMessage = message
                 };
 
-                if (_documentRepository != null)
+                if (_documentRepository != null && !isOverwritingCompletedDoc)
                 {
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Failed, message);
                 }
 
-                return document;
+                return failedDoc;
             }
 
             // Detect language
@@ -257,14 +259,53 @@ public class DocumentProcessor : IDocumentProcessor
                         chunksWithEmbeddings.Add((chunksWithMetaList[i], embeddings[i]));
                     }
 
-                    // Clear old chunks before inserting updated chunks
-                    if (existingDoc != null)
+                    // Snapshot existing vectors before replacement to ensure rollback restoration on failure
+                    List<(DocumentChunk Chunk, float[] Embedding)>? existingVectorSnapshot = null;
+                    if (existingDoc != null && _vectorStore != null && _embeddingService != null)
                     {
-                        try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                        try
+                        {
+                            var oldChunks = (await _vectorStore.GetChunksByDocumentAndIndicesAsync(existingDoc.Id, Enumerable.Range(0, 1000), cancellationToken))?.ToList();
+                            if (oldChunks != null && oldChunks.Count > 0)
+                            {
+                                var oldTexts = oldChunks.Select(c => c.Text).ToList();
+                                var oldEmbeddings = await _embeddingService.GenerateEmbeddingsAsync(oldTexts, cancellationToken);
+                                if (oldEmbeddings != null && oldEmbeddings.Count == oldChunks.Count)
+                                {
+                                    existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
+                                }
+                            }
+                        }
+                        catch { }
                     }
 
-                    // Upsert all points into vector store in a single batch
-                    await _vectorStore.AddChunksAsync(chunksWithEmbeddings, cancellationToken);
+                    try
+                    {
+                        // Clear old chunks before inserting updated chunks
+                        if (existingDoc != null && _vectorStore != null)
+                        {
+                            try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                        }
+
+                        // Upsert all points into vector store in a single batch
+                        if (_vectorStore != null)
+                        {
+                            await _vectorStore.AddChunksAsync(chunksWithEmbeddings, cancellationToken);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Restore the original index on failure so vectors are never lost
+                        if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
+                        {
+                            try
+                            {
+                                await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                            }
+                            catch { }
+                        }
+                        throw;
+                    }
                 }
 
                 if (_ftsStore != null && chunksWithMetaList.Count > 0)
@@ -292,6 +333,10 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_documentRepository != null)
                 {
+                    if (existingDoc != null)
+                    {
+                        await _documentRepository.AddDocumentAsync(document);
+                    }
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
@@ -301,6 +346,19 @@ public class DocumentProcessor : IDocumentProcessor
                 _logger?.LogInformation(
                     "[DocumentProcessor] File '{FileName}' was saved to '{FilePath}', but skipped from vector database because language is '{Language}'.",
                     fileName, filePath, languageResult.Language);
+
+                // Finding 3: Clear old vector and FTS chunks when committing a non-English replacement
+                if (existingDoc != null)
+                {
+                    if (_vectorStore != null)
+                    {
+                        try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                    }
+                    if (_ftsStore != null)
+                    {
+                        try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                    }
+                }
 
                 document = document with
                 {
@@ -313,6 +371,10 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_documentRepository != null)
                 {
+                    if (existingDoc != null)
+                    {
+                        await _documentRepository.AddDocumentAsync(document);
+                    }
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
@@ -334,6 +396,9 @@ public class DocumentProcessor : IDocumentProcessor
                     _logger?.LogWarning(ex, "Could not delete old file {FilePath} after successful document overwrite.", existingDoc.FilePath);
                 }
             }
+
+            // Invalidate query response cache on successful document index update
+            TechnicalRagOrchestrator.InvalidateQueryCache();
         }
         catch (Exception ex)
         {
