@@ -54,6 +54,14 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
         });
     }
 
+    private async Task<HttpClient> CreateAuthenticatedClientAsync()
+    {
+        var client = _factory.CreateClient();
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResponse.EnsureSuccessStatusCode();
+        return client;
+    }
+
     private async Task SeedDocumentsAsync(int count)
     {
         for (int i = 1; i <= count; i++)
@@ -75,8 +83,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(5);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents");
@@ -96,8 +103,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(5);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents?page=1&pageSize=2");
@@ -119,8 +125,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(5);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act
         var response = await client.GetAsync("/api/documents?page=2&pageSize=2");
@@ -140,8 +145,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(6);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act - search for 'Centrifugal'
         var response = await client.GetAsync("/api/documents?page=1&pageSize=10&search=Centrifugal");
@@ -159,8 +163,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(5);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act - request only missing physical files
         var response = await client.GetAsync("/api/documents?page=1&pageSize=10&onlyMissing=true");
@@ -178,8 +181,7 @@ public class DocumentPaginationEndpointTests : IClassFixture<WebApplicationFacto
     {
         // Arrange
         await SeedDocumentsAsync(5);
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         // Act - request only existing physical files
         var response = await client.GetAsync("/api/documents?page=1&pageSize=10&onlyExisting=true");

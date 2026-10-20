@@ -38,7 +38,7 @@ public class GeminiEmbeddingService : IEmbeddingService
         }
     }
 
-    public async Task<float[]> GenerateEmbeddingAsync(string text)
+    public async Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -87,19 +87,16 @@ public class GeminiEmbeddingService : IEmbeddingService
                 outputDimensionality = _fallbackDimensions
             };
 
-            using var response = await _httpClient.PostAsJsonAsync(url, requestBody);
+            using var response = await _httpClient.PostAsJsonAsync(url, requestBody, cancellationToken);
             stopwatch.Stop();
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger?.LogWarning(
-                    "[GeminiEmbedding] API error (Status {StatusCode}) after {DurationMs}ms: {ErrorContent}. Falling back to deterministic mock.",
+                _logger?.LogError(
+                    "[GeminiEmbedding] API error (Status {StatusCode}) after {DurationMs}ms: {ErrorContent}",
                     response.StatusCode, stopwatch.ElapsedMilliseconds, errorContent);
-                Console.WriteLine($"Gemini API error (Status {response.StatusCode}): {errorContent}. Falling back to deterministic mock.");
-                var fallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-                StoreInCache(trimmedText, fallback);
-                return fallback;
+                throw new HttpRequestException($"[GeminiEmbedding] API error (Status {response.StatusCode}): {errorContent}");
             }
 
             var jsonResult = await response.Content.ReadFromJsonAsync<JsonDocument>();
@@ -117,25 +114,201 @@ public class GeminiEmbeddingService : IEmbeddingService
                 return values;
             }
 
-            _logger?.LogWarning(
-                "[GeminiEmbedding] Failed to parse response after {DurationMs}ms. Falling back to deterministic mock.",
+            _logger?.LogError(
+                "[GeminiEmbedding] Failed to parse response after {DurationMs}ms.",
                 stopwatch.ElapsedMilliseconds);
-            Console.WriteLine("Failed to parse Gemini response. Falling back to deterministic mock.");
-            var parsedFallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-            StoreInCache(trimmedText, parsedFallback);
-            return parsedFallback;
+            throw new InvalidOperationException("[GeminiEmbedding] Failed to parse embedding values from Gemini API response.");
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
             _logger?.LogError(ex,
-                "[GeminiEmbedding] Error after {DurationMs}ms: {Message}. Falling back to deterministic mock.",
+                "[GeminiEmbedding] Error after {DurationMs}ms: {Message}.",
                 stopwatch.ElapsedMilliseconds, ex.Message);
-            Console.WriteLine($"Gemini Embedding error: {ex.Message}. Falling back to deterministic mock.");
-            var exFallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
-            StoreInCache(trimmedText, exFallback);
-            return exFallback;
+
+            if (string.IsNullOrWhiteSpace(_apiKey))
+            {
+                var exFallback = GenerateDeterministicMockEmbedding(trimmedText, _fallbackDimensions);
+                StoreInCache(trimmedText, exFallback);
+                return exFallback;
+            }
+
+            throw;
         }
+    }
+
+    public async Task<IList<float[]>> GenerateEmbeddingsAsync(IList<string> texts, CancellationToken cancellationToken = default)
+    {
+        if (texts == null || texts.Count == 0)
+        {
+            return new List<float[]>();
+        }
+
+        var results = new float[texts.Count][];
+        var uncachedIndices = new List<int>();
+
+        // 1. Check in-memory cache first
+        for (int i = 0; i < texts.Count; i++)
+        {
+            var text = texts[i];
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                results[i] = new float[_fallbackDimensions];
+                continue;
+            }
+
+            var trimmed = text.Trim();
+            if (_embeddingCache.TryGetValue(trimmed, out var entry))
+            {
+                _embeddingCache[trimmed] = entry with { LastAccessed = DateTime.UtcNow };
+                results[i] = entry.Vector;
+            }
+            else
+            {
+                uncachedIndices.Add(i);
+            }
+        }
+
+        if (uncachedIndices.Count == 0)
+        {
+            return results;
+        }
+
+        // 2. If no API key or HTTP client, generate mock embeddings for uncached
+        if (_httpClient == null || string.IsNullOrWhiteSpace(_apiKey))
+        {
+            foreach (var idx in uncachedIndices)
+            {
+                var trimmed = texts[idx].Trim();
+                var mock = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
+                StoreInCache(trimmed, mock);
+                results[idx] = mock;
+            }
+            return results;
+        }
+
+        // 3. Batch requests in chunks of up to 100 (Gemini batch limit)
+        var modelResourceName = _model.StartsWith("models/") ? _model : $"models/{_model}";
+        var batchUrl = $"https://generativelanguage.googleapis.com/v1beta/{modelResourceName}:batchEmbedContents?key={_apiKey}";
+
+        const int maxBatchSize = 100;
+        for (int offset = 0; offset < uncachedIndices.Count; offset += maxBatchSize)
+        {
+            var batchIndices = uncachedIndices.Skip(offset).Take(maxBatchSize).ToList();
+            var requests = batchIndices.Select(idx => new
+            {
+                model = modelResourceName,
+                content = new
+                {
+                    parts = new[]
+                    {
+                        new { text = texts[idx].Trim() }
+                    }
+                },
+                outputDimensionality = _fallbackDimensions
+            }).ToList();
+
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                using var response = await _httpClient.PostAsJsonAsync(batchUrl, new { requests }, cancellationToken);
+                stopwatch.Stop();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger?.LogError(
+                        "[GeminiEmbedding] batchEmbedContents API error (Status {StatusCode}) after {DurationMs}ms: {ErrorContent}",
+                        response.StatusCode, stopwatch.ElapsedMilliseconds, errorContent);
+
+                    if (string.IsNullOrWhiteSpace(_apiKey))
+                    {
+                        foreach (var idx in batchIndices)
+                        {
+                            var trimmed = texts[idx].Trim();
+                            var fallback = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
+                            StoreInCache(trimmed, fallback);
+                            results[idx] = fallback;
+                        }
+                        continue;
+                    }
+
+                    throw new HttpRequestException($"[GeminiEmbedding] batchEmbedContents API error (Status {response.StatusCode}): {errorContent}");
+                }
+
+                var jsonResult = await response.Content.ReadFromJsonAsync<JsonDocument>();
+                if (jsonResult != null &&
+                    jsonResult.RootElement.TryGetProperty("embeddings", out var embeddingsProp) &&
+                    embeddingsProp.ValueKind == JsonValueKind.Array)
+                {
+                    int i = 0;
+                    foreach (var item in embeddingsProp.EnumerateArray())
+                    {
+                        if (i >= batchIndices.Count) break;
+                        var targetIdx = batchIndices[i];
+                        var trimmed = texts[targetIdx].Trim();
+
+                        if (item.TryGetProperty("values", out var valuesProp) && valuesProp.ValueKind == JsonValueKind.Array)
+                        {
+                            var values = valuesProp.EnumerateArray()
+                                .Select(v => (float)v.GetDouble())
+                                .ToArray();
+                            StoreInCache(trimmed, values);
+                            results[targetIdx] = values;
+                        }
+                        else
+                        {
+                            var fallback = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
+                            StoreInCache(trimmed, fallback);
+                            results[targetIdx] = fallback;
+                        }
+                        i++;
+                    }
+
+                    _logger?.LogInformation(
+                        "[GeminiEmbedding] Batch generated {Count} embeddings with model {Model} in {DurationMs}ms.",
+                        batchIndices.Count, _model, stopwatch.ElapsedMilliseconds);
+                }
+                else
+                {
+                    _logger?.LogWarning(
+                        "[GeminiEmbedding] Failed to parse batchEmbedContents response after {DurationMs}ms. Falling back to mocks.",
+                        stopwatch.ElapsedMilliseconds);
+
+                    foreach (var idx in batchIndices)
+                    {
+                        var trimmed = texts[idx].Trim();
+                        var fallback = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
+                        StoreInCache(trimmed, fallback);
+                        results[idx] = fallback;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger?.LogError(ex,
+                    "[GeminiEmbedding] Batch embedding error after {DurationMs}ms: {Message}.",
+                    stopwatch.ElapsedMilliseconds, ex.Message);
+
+                if (string.IsNullOrWhiteSpace(_apiKey))
+                {
+                    foreach (var idx in batchIndices)
+                    {
+                        var trimmed = texts[idx].Trim();
+                        var fallback = GenerateDeterministicMockEmbedding(trimmed, _fallbackDimensions);
+                        StoreInCache(trimmed, fallback);
+                        results[idx] = fallback;
+                    }
+                }
+                else
+                {
+                    throw;
+                }
+            }
+        }
+
+        return results;
     }
 
     private static void StoreInCache(string key, float[] vector)

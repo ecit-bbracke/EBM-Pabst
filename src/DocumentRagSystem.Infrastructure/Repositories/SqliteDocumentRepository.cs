@@ -65,9 +65,31 @@ public class SqliteDocumentRepository : IDocumentRepository
                 """);
 
                 // Safely migrate existing databases where table already existed without new columns
-                try { context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCode"" TEXT NULL;"); } catch { }
-                try { context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCategory"" TEXT NULL;"); } catch { }
-                try { context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_ProductCode"" ON ""Documents"" (""ProductCode"");"); } catch { }
+                try
+                {
+                    var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using (var command = context.Database.GetDbConnection().CreateCommand())
+                    {
+                        context.Database.OpenConnection();
+                        command.CommandText = "PRAGMA table_info(\"Documents\");";
+                        using var reader = command.ExecuteReader();
+                        while (reader.Read())
+                        {
+                            existingColumns.Add(reader.GetString(1));
+                        }
+                    }
+
+                    if (!existingColumns.Contains("ProductCode"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCode"" TEXT NULL;");
+                    }
+                    if (!existingColumns.Contains("ProductCategory"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCategory"" TEXT NULL;");
+                    }
+                    context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_ProductCode"" ON ""Documents"" (""ProductCode"");");
+                }
+                catch { }
 
                 _initializedDatabases[connStr] = true;
             }

@@ -4,10 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Infrastructure.Repositories;
+using DocumentRagSystem.WebApi.DTOs;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -58,6 +60,14 @@ public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory
         });
     }
 
+    private async Task<HttpClient> CreateAuthenticatedClientAsync()
+    {
+        var client = _factory.CreateClient();
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResponse.EnsureSuccessStatusCode();
+        return client;
+    }
+
     [Fact]
     public async Task DeleteDocument_WithoutAuth_RequiresAuthentication()
     {
@@ -74,8 +84,7 @@ public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory
     [Fact]
     public async Task DeleteDocument_WhenNotFound_ReturnsNotFound()
     {
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         _mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>())).ReturnsAsync(Array.Empty<Document>());
 
@@ -87,8 +96,7 @@ public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory
     [Fact]
     public async Task DeleteDocument_WhenExists_DeletesFile_Chunks_AndRepositoryRecord()
     {
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var client = await CreateAuthenticatedClientAsync();
 
         var docId = $"doc_{Guid.NewGuid():N}";
         var fileName = "sample_test_doc.pdf";

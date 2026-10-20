@@ -157,13 +157,8 @@ public class QdrantVectorStore : IVectorStore
         _collectionCreated = true;
     }
 
-    public async Task AddChunkAsync(DocumentChunk chunk, float[] embedding)
+    private static PointStruct CreatePoint(DocumentChunk chunk, float[] embedding)
     {
-        if (chunk == null) throw new ArgumentNullException(nameof(chunk));
-        if (embedding == null || embedding.Length == 0) throw new ArgumentNullException(nameof(embedding));
-
-        await EnsureCollectionExistsAsync(embedding.Length);
-
 #pragma warning disable CS0612 // Vector.Data is obsolete in Qdrant.Client 1.18+ but required for Qdrant Server v1.10 compatibility
         var point = new PointStruct
         {
@@ -210,19 +205,55 @@ public class QdrantVectorStore : IVectorStore
             point.Payload["uploaded_at"] = chunk.UploadedAt.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         }
 
+        return point;
+    }
+
+    public async Task AddChunkAsync(DocumentChunk chunk, float[] embedding, CancellationToken cancellationToken = default)
+    {
+        if (chunk == null) throw new ArgumentNullException(nameof(chunk));
+        if (embedding == null || embedding.Length == 0) throw new ArgumentNullException(nameof(embedding));
+
+        await EnsureCollectionExistsAsync(embedding.Length);
+        var point = CreatePoint(chunk, embedding);
+
         try
         {
-            await _client.UpsertAsync(_collectionName, new[] { point });
+            await _client.UpsertAsync(_collectionName, new[] { point }, cancellationToken: cancellationToken);
         }
-        catch (Exception ex) when (ex.ToString().Contains("dimension") || ex.ToString().Contains("dim") || ex.ToString().Contains("InvalidArgument") || ex.ToString().Contains("Wrong input"))
+        catch (Exception ex)
         {
-            Console.WriteLine($"Dimension mismatch or collection invalidation detected for '{_collectionName}'. Recreating with dimension {embedding.Length}...");
-            await RecreateCollectionAsync(embedding.Length);
-            await _client.UpsertAsync(_collectionName, new[] { point });
+            _logger?.LogError(ex, "[QdrantVectorStore] Upsert failed for chunk {ChunkId} in collection '{CollectionName}'.", chunk.Id, _collectionName);
+            throw;
         }
     }
 
-    public async Task<IEnumerable<DocumentChunk>> SearchAsync(string query, int limit = 3)
+    public async Task AddChunksAsync(IEnumerable<(DocumentChunk Chunk, float[] Embedding)> chunksWithEmbeddings, CancellationToken cancellationToken = default)
+    {
+        if (chunksWithEmbeddings == null) return;
+        var list = chunksWithEmbeddings.ToList();
+        if (list.Count == 0) return;
+
+        var firstEmbedding = list[0].Embedding;
+        if (firstEmbedding == null || firstEmbedding.Length == 0)
+        {
+            throw new ArgumentException("Embedding vector cannot be empty", nameof(chunksWithEmbeddings));
+        }
+
+        await EnsureCollectionExistsAsync(firstEmbedding.Length);
+        var points = list.Select(item => CreatePoint(item.Chunk, item.Embedding)).ToList();
+
+        try
+        {
+            await _client.UpsertAsync(_collectionName, points, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[QdrantVectorStore] Batch upsert of {Count} chunks failed for collection '{CollectionName}'.", points.Count, _collectionName);
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<DocumentChunk>> SearchAsync(string query, int limit = 3, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
             return Array.Empty<DocumentChunk>();
@@ -233,7 +264,7 @@ public class QdrantVectorStore : IVectorStore
         float[] queryEmbedding;
         if (_embeddingService != null)
         {
-            queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query);
+            queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query, cancellationToken);
         }
         else
         {
@@ -250,7 +281,8 @@ public class QdrantVectorStore : IVectorStore
         var searchResults = await _client.SearchAsync(
             collectionName: _collectionName,
             vector: queryEmbedding,
-            limit: (uint)limit
+            limit: (uint)limit,
+            cancellationToken: cancellationToken
         );
         qdrantStopwatch.Stop();
         totalStopwatch.Stop();
@@ -279,9 +311,9 @@ public class QdrantVectorStore : IVectorStore
         return chunks;
     }
 
-    public async Task<IEnumerable<RagDocument>> GetDocumentsAsync(int limit = 1000)
+    public async Task<IEnumerable<RagDocument>> GetDocumentsAsync(int limit = 1000, CancellationToken cancellationToken = default)
     {
-        var collections = await _client.ListCollectionsAsync();
+        var collections = await _client.ListCollectionsAsync(cancellationToken);
         if (!collections.Contains(_collectionName))
         {
             return Array.Empty<RagDocument>();
@@ -299,7 +331,8 @@ public class QdrantVectorStore : IVectorStore
                 limit: pageSize,
                 offset: offset,
                 payloadSelector: true,
-                vectorsSelector: false);
+                vectorsSelector: false,
+                cancellationToken: cancellationToken);
 
             foreach (var point in response.Result)
             {
@@ -351,7 +384,7 @@ public class QdrantVectorStore : IVectorStore
             .ToList();
     }
 
-    public async Task<IEnumerable<DocumentChunk>> GetChunksByDocumentAndIndicesAsync(string documentId, IEnumerable<int> indices)
+    public async Task<IEnumerable<DocumentChunk>> GetChunksByDocumentAndIndicesAsync(string documentId, IEnumerable<int> indices, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId) || indices == null)
             return Array.Empty<DocumentChunk>();
@@ -360,7 +393,7 @@ public class QdrantVectorStore : IVectorStore
         if (targetIndices.Count == 0)
             return Array.Empty<DocumentChunk>();
 
-        var collections = await _client.ListCollectionsAsync();
+        var collections = await _client.ListCollectionsAsync(cancellationToken);
         if (!collections.Contains(_collectionName))
         {
             return Array.Empty<DocumentChunk>();
@@ -386,7 +419,8 @@ public class QdrantVectorStore : IVectorStore
             filter: filter,
             limit: 256,
             payloadSelector: true,
-            vectorsSelector: false);
+            vectorsSelector: false,
+            cancellationToken: cancellationToken);
 
         var chunks = new List<DocumentChunk>();
         foreach (var point in response.Result)
@@ -413,14 +447,14 @@ public class QdrantVectorStore : IVectorStore
         return chunks.OrderBy(c => c.Index).ToList();
     }
 
-    public async Task DeleteDocumentChunksAsync(string documentId)
+    public async Task DeleteDocumentChunksAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId))
             return;
 
         try
         {
-            var collections = await _client.ListCollectionsAsync();
+            var collections = await _client.ListCollectionsAsync(cancellationToken);
             if (!collections.Contains(_collectionName))
                 return;
 
@@ -439,7 +473,7 @@ public class QdrantVectorStore : IVectorStore
                 }
             };
 
-            await _client.DeleteAsync(collectionName: _collectionName, filter: filter);
+            await _client.DeleteAsync(collectionName: _collectionName, filter: filter, cancellationToken: cancellationToken);
             _logger?.LogInformation("[QdrantVectorStore] Deleted chunks for document ID: {DocumentId}", documentId);
         }
         catch (Exception ex)
