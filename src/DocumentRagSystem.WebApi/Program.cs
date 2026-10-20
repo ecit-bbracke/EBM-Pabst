@@ -312,7 +312,32 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
     ));
 
 // Set up RAG Orchestrator Layer & ebm-papst Domain Services
-var conversationStorageDir = Path.Combine(AppContext.BaseDirectory, ".conversations");
+var customConvDir = builder.Configuration.GetValue<string>("Conversations:StorageDirectory");
+string conversationStorageDir;
+if (!string.IsNullOrWhiteSpace(customConvDir))
+{
+    conversationStorageDir = Path.GetFullPath(customConvDir);
+}
+else
+{
+    // Derive from persistent database directory if mounted (e.g. /app/data in Docker Compose)
+    var dbConn = builder.Configuration.GetConnectionString("IdentityDb") ?? string.Empty;
+    var dbDir = string.Empty;
+    if (dbConn.Contains("Data Source=", StringComparison.OrdinalIgnoreCase))
+    {
+        var rawPath = dbConn.Split("Data Source=")[1].Split(';')[0].Trim();
+        dbDir = Path.GetDirectoryName(rawPath);
+    }
+
+    if (!string.IsNullOrWhiteSpace(dbDir) && (Directory.Exists(dbDir) || Path.IsPathRooted(dbDir)))
+    {
+        conversationStorageDir = Path.Combine(dbDir, "conversations");
+    }
+    else
+    {
+        conversationStorageDir = Path.Combine(AppContext.BaseDirectory, ".conversations");
+    }
+}
 builder.Services.AddSingleton<IConversationStateStore, FileConversationStateStore>(sp =>
     new FileConversationStateStore(conversationStorageDir));
 
@@ -750,6 +775,73 @@ try
 finally
 {
     _dbInitLock.Release();
+}
+
+// Resume unfinished background uploads on startup
+try
+{
+    using var startupScope = app.Services.CreateScope();
+    var repo = startupScope.ServiceProvider.GetService<IDocumentRepository>();
+    var queue = startupScope.ServiceProvider.GetService<IDocumentQueue>();
+    var processor = startupScope.ServiceProvider.GetService<IDocumentProcessor>();
+    if (repo != null && queue != null && processor != null)
+    {
+        var allDocs = await repo.GetAllDocumentsAsync();
+        var pendingDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending).ToList();
+        if (pendingDocs != null && pendingDocs.Count > 0)
+        {
+            var servedUploads = GetServedUploadDirectories(uploadsDirectory);
+            foreach (var doc in pendingDocs)
+            {
+                string? physicalFilePath = null;
+                if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+                {
+                    physicalFilePath = doc.FilePath;
+                }
+                else
+                {
+                    foreach (var uploadDir in servedUploads)
+                    {
+                        var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
+                        if (File.Exists(candidate))
+                        {
+                            physicalFilePath = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(physicalFilePath) && File.Exists(physicalFilePath))
+                {
+                    var resolvedPath = physicalFilePath;
+                    app.Logger.LogInformation("Resuming unfinished background upload on startup: {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
+                    queue.QueueBackgroundWorkItem(async token =>
+                    {
+                        try
+                        {
+                            await using var stream = File.OpenRead(resolvedPath);
+                            await processor.ProcessPdfAsync(stream, doc.FileName, doc.Id, token);
+                            Program.DirFileCache.Clear();
+                            TechnicalRagOrchestrator.InvalidateQueryCache();
+                        }
+                        catch (Exception ex)
+                        {
+                            app.Logger.LogError(ex, "Failed to process resumed background document: {FileName}", doc.FileName);
+                        }
+                    });
+                }
+                else
+                {
+                    app.Logger.LogWarning("Marking abandoned pending document as Failed (physical file missing on startup): {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
+                    await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Uploaden blev afbrudt under genstart, og kildestien kunne ikke findes.");
+                }
+            }
+        }
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Failed to check or resume pending background uploads on startup.");
 }
 
 app.Run();

@@ -379,11 +379,22 @@ public static class DocumentEndpoints
 
             if (background)
             {
-                logger.LogInformation("Uploading and queuing file for background processing: {FileName}", file.FileName);
+                logger.LogInformation("Uploading, persisting, and queuing file for background processing: {FileName}", file.FileName);
 
-                var memoryStream = new MemoryStream();
-                await file.CopyToAsync(memoryStream, cancellationToken);
-                memoryStream.Position = 0;
+                var targetUploadsDir = servedUploadDirectories.FirstOrDefault(d => Directory.Exists(d))
+                    ?? Path.Combine(AppContext.BaseDirectory, "uploads");
+                if (!Directory.Exists(targetUploadsDir))
+                {
+                    Directory.CreateDirectory(targetUploadsDir);
+                }
+
+                var physicalFileName = $"{Guid.NewGuid():N}_{file.FileName}";
+                var physicalPath = Path.Combine(targetUploadsDir, physicalFileName);
+
+                await using (var fileStream = File.Create(physicalPath))
+                {
+                    await file.CopyToAsync(fileStream, cancellationToken);
+                }
 
                 var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(file.FileName);
 
@@ -404,7 +415,7 @@ public static class DocumentEndpoints
                     var tempDocument = new Document(
                         Id: documentId,
                         FileName: file.FileName,
-                        FilePath: existingDoc?.FilePath ?? "Queued/Background",
+                        FilePath: physicalPath,
                         UploadedAt: DateTime.UtcNow,
                         Status: DocumentStatus.Pending,
                         ArticleId: articleId,
@@ -412,12 +423,22 @@ public static class DocumentEndpoints
                     );
                     await repository.AddDocumentAsync(tempDocument);
                 }
+                else
+                {
+                    var updatedExisting = existingDoc! with
+                    {
+                        FilePath = physicalPath,
+                        Status = DocumentStatus.Processing
+                    };
+                    await repository.AddDocumentAsync(updatedExisting);
+                }
 
                 queue.QueueBackgroundWorkItem(async token =>
                 {
                     try
                     {
-                        await processor.ProcessPdfAsync(memoryStream, file.FileName, documentId, token);
+                        await using var readStream = File.OpenRead(physicalPath);
+                        await processor.ProcessPdfAsync(readStream, file.FileName, documentId, token);
                         Program.DirFileCache.Clear();
                         TechnicalRagOrchestrator.InvalidateQueryCache();
                     }
@@ -425,18 +446,14 @@ public static class DocumentEndpoints
                     {
                         logger.LogError(ex, "Background processing failed for file: {FileName}", file.FileName);
                     }
-                    finally
-                    {
-                        await memoryStream.DisposeAsync();
-                    }
                 });
 
                 var responseDoc = isCompletedDoc
-                    ? existingDoc! with { Status = DocumentStatus.Processing }
+                    ? existingDoc! with { Status = DocumentStatus.Processing, FilePath = physicalPath }
                     : new Document(
                         Id: documentId,
                         FileName: file.FileName,
-                        FilePath: "Queued/Background",
+                        FilePath: physicalPath,
                         UploadedAt: DateTime.UtcNow,
                         Status: DocumentStatus.Pending,
                         ArticleId: articleId,
