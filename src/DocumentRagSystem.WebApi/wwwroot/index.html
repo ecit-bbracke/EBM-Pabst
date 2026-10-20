@@ -317,25 +317,37 @@
     <script>
         let conversations = [];
         let currentConversationId = null;
+        let currentUserEmail = null;
+
+        function getConversationsStorageKey() {
+            if (currentUserEmail) {
+                return `rag_conversations_${currentUserEmail.toLowerCase()}`;
+            }
+            return 'rag_conversations_guest';
+        }
 
         // Initialize on DOM load
-        document.addEventListener('DOMContentLoaded', () => {
-            initConversations();
-            checkAdminNav();
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuthAndConversations();
             initVoiceInput();
         });
 
-        async function checkAdminNav() {
+        async function initAuthAndConversations() {
             try {
                 const res = await fetch('/api/auth/me');
                 if (res.ok) {
                     const data = await res.json();
+                    if (data.email) {
+                        currentUserEmail = data.email;
+                    }
                     if (data.isAdmin) {
                         const navUsers = document.getElementById('nav-users');
                         if (navUsers) navUsers.classList.remove('hidden');
                     }
                 }
             } catch {}
+
+            initConversations();
         }
 
         function escapeHtml(value) {
@@ -361,7 +373,8 @@
 
         // Initialize conversations from local storage
         function initConversations() {
-            const stored = localStorage.getItem('rag_conversations');
+            const key = getConversationsStorageKey();
+            const stored = localStorage.getItem(key);
             if (stored) {
                 try {
                     conversations = JSON.parse(stored);
@@ -398,7 +411,8 @@
 
         // Save conversations list to localStorage
         function saveConversations() {
-            localStorage.setItem('rag_conversations', JSON.stringify(conversations));
+            const key = getConversationsStorageKey();
+            localStorage.setItem(key, JSON.stringify(conversations));
             renderSidebar();
         }
 
@@ -1155,6 +1169,9 @@
             try {
                 await fetch('/api/auth/logout', { method: 'POST' });
             } catch {}
+            conversations = [];
+            currentConversationId = null;
+            currentUserEmail = null;
             window.location.href = '/login.html';
         }
 
