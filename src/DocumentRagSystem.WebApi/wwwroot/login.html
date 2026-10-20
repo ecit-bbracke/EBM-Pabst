@@ -134,8 +134,13 @@
 
                 if (response.ok) {
                     const urlParams = new URLSearchParams(window.location.search);
-                    const returnUrl = urlParams.get('returnUrl') || '/index.html';
-                    window.location.href = returnUrl;
+                    const rawReturnUrl = (urlParams.get('returnUrl') || '').trim();
+                    let safeReturnUrl = '/index.html';
+                    // Allow only safe relative local paths; block protocol schemes like javascript: and protocol-relative '//'
+                    if (rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//') && !rawReturnUrl.startsWith('/\\') && !rawReturnUrl.includes(':')) {
+                        safeReturnUrl = rawReturnUrl;
+                    }
+                    window.location.href = safeReturnUrl;
                 } else {
                     const errorData = await response.json().catch(() => null);
                     errorMessage.textContent = errorData?.message || 'Ugyldig email eller adgangskode.';
