@@ -576,4 +576,52 @@ public class ConversationalMultiTurnOrchestratorTests
         Assert.NotNull(persistedState);
         Assert.Equal("engineer@ebmpabst.dk", persistedState.OwnerUserId);
     }
+
+    [Fact]
+    public async Task Orchestrator_WhenOutputGovernorRejectsAfterRegenerationRetries_ReturnsFailSafe_AndDoesNotCache()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": false, "issues": [{"type": "UNSUPPORTED_CLAIM", "claim": "Max current is 50A", "severity": "HIGH"}], "action": "REJECT"}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Unverified answer: Max current is 50A.");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Regeneration")), false))
+            .ReturnsAsync("Rewritten answer: Max current is still 50A.");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 voltage 400V", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var convId = $"test-gov-retry-{Guid.NewGuid():N}";
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            stateStore: stateStore
+        );
+
+        // Act
+        var (finalAnswer, _, trace) = await orchestrator.ProcessQueryAsync("What is the current of K3G560?", mockVectorStore.Object, convId);
+
+        // Assert
+        Assert.NotNull(trace.OutputGovernor);
+        Assert.False(trace.OutputGovernor.Approved);
+        Assert.Contains("Der kunne ikke formuleres et verificeret svar", finalAnswer);
+        Assert.DoesNotContain("50A", finalAnswer);
+
+        // Must not be cached: A second query must execute the pipeline again rather than returning from cache
+        await orchestrator.ProcessQueryAsync("What is the current of K3G560?", mockVectorStore.Object, convId);
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true), Times.Exactly(2));
+    }
 }

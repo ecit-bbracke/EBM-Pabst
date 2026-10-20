@@ -546,6 +546,32 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 timings[$"Regeneration_Attempt{regenAttempts}"] = regenTimer.ElapsedMilliseconds;
                 promptTraces.Add(new PromptTrace("OutputGovernor", $"Regeneration_Attempt{regenAttempts}", regenPrompt, finalAnswer, regenTimer.ElapsedMilliseconds, regenRes.Metadata.Model, regenRes.Metadata));
             }
+
+            // If the loop exited after regenerating, validate the final rewritten answer
+            if (govOutputResult != null && !govOutputResult.Approved && govOutputResult.Action != "REQUEST_CLARIFICATION" && govOutputResult.Action != "FAIL_SAFE")
+            {
+                var finalGovTimer = Stopwatch.StartNew();
+                govOutputResult = await _outputGovernor.ValidateOutputAsync(effectiveQuestion, finalAnswer, allChunks);
+                finalGovTimer.Stop();
+                timings["OutputGovernorValidation_Final"] = finalGovTimer.ElapsedMilliseconds;
+
+                if (!govOutputResult.Approved)
+                {
+                    _logger?.LogWarning(
+                        "[Orchestrator] OutputGovernor rejected answer after {RegenAttempts} regenerations. Returning controlled fail-safe.",
+                        regenAttempts);
+
+                    finalAnswer = "Der kunne ikke formuleres et verificeret svar ud fra den tilgængelige tekniske dokumentation. Kontakt venligst teknisk support for verificering af disse specifikationer.";
+                    govOutputResult = new OutputGovernorResult(
+                        Approved: false,
+                        Issues: govOutputResult.Issues ?? new List<OutputGovernorIssue>
+                        {
+                            new OutputGovernorIssue("RETRY_LIMIT_EXCEEDED", "Svaret kunne ikke verificeres efter gentagne regenereringsforsøg.", "HIGH")
+                        },
+                        Action: "FAIL_SAFE"
+                    );
+                }
+            }
         }
         timings["OutputGovernorTotal"] = stageStopwatch.ElapsedMilliseconds;
         _logger?.LogInformation("[Orchestrator] Output governor and validation loop completed in {DurationMs}ms (Action: {Action}, RegenAttempts: {RegenAttempts}).", timings["OutputGovernorTotal"], govOutputResult?.Action, regenAttempts);
@@ -579,7 +605,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             PromptTraces: promptTraces
         );
 
-        if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
+        if (canUseCache && workflowType != WorkflowType.Clarification && (govOutputResult?.Approved ?? false) && !string.IsNullOrWhiteSpace(finalAnswer))
         {
             CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
         }
@@ -840,8 +866,17 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             if (!govOutputResult.Approved)
             {
                 _logger?.LogWarning(
-                    "[Orchestrator] Streamed answer for '{Question}' flagged by OutputGovernor (Action: {Action}, Issues: {Count}). Withholding caching.",
+                    "[Orchestrator] Streamed answer for '{Question}' flagged by OutputGovernor (Action: {Action}, Issues: {Count}). Emitting replacement event.",
                     effectiveQuestion, govOutputResult.Action, govOutputResult.Issues?.Count ?? 0);
+
+                var issuesList = govOutputResult.Issues != null && govOutputResult.Issues.Count > 0
+                    ? string.Join("; ", govOutputResult.Issues.Select(i => i.Claim))
+                    : "Uunderstøttede tekniske påstande identificeret.";
+
+                var safeReplacement = $"*Svaret kunne ikke verificeres mod den tekniske dokumentation og blev tilbageholdt af kvalitetskontrollen ({issuesList}). Kontakt venligst teknisk support.*";
+
+                finalAnswer = safeReplacement;
+                yield return new OrchestrationStreamEvent("replace", safeReplacement, chunksForComposer, effectiveConvId);
             }
         }
         timings["OutputGovernorValidation"] = stageStopwatch.ElapsedMilliseconds;
