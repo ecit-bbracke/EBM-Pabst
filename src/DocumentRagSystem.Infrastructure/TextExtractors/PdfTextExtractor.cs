@@ -28,16 +28,16 @@ public class PdfTextExtractor : ITextExtractor
             bool firstPage = true;
             foreach (var page in document.GetPages())
             {
+                if (!firstPage)
+                {
+                    textBuilder.Append('\f');
+                }
                 var pageText = ExtractPageAsMarkdownTable(page);
                 if (!string.IsNullOrWhiteSpace(pageText))
                 {
-                    if (!firstPage)
-                    {
-                        textBuilder.Append('\f');
-                    }
                     textBuilder.Append(pageText);
-                    firstPage = false;
                 }
+                firstPage = false;
             }
 
             return Task.FromResult(textBuilder.ToString());

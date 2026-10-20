@@ -45,4 +45,29 @@ public class ChunkingTests
         chunks.Should().HaveCount(1);
         chunks.First().Text.Should().Be("Line 1 Line 2 Line 3");
     }
+
+    [Fact]
+    public void ChunkText_WithFormFeedPageBreaks_ShouldPreservePhysicalPageNumbers_WhenIntermediatePagesAreEmpty()
+    {
+        // Arrange: Page 1 has text, Page 2 is a blank/scanned drawing without text, Page 3 has text
+        var chunker = new ChunkingService();
+        var text = "Page 1 content\f\fPage 3 content";
+        var documentId = "doc-pdf-1";
+
+        // Act
+        var chunks = chunker.ChunkText(text, documentId).ToList();
+
+        // Assert
+        chunks.Should().HaveCount(2);
+
+        // Chunk 0 corresponds to physical Page 1 (Index 0 => #page=1)
+        chunks[0].Index.Should().Be(0);
+        chunks[0].Id.Should().Be("doc-pdf-1_chunk_0");
+        chunks[0].Text.Should().Be("Page 1 content");
+
+        // Chunk 1 corresponds to physical Page 3 (Index 2 => #page=3)
+        chunks[1].Index.Should().Be(2);
+        chunks[1].Id.Should().Be("doc-pdf-1_chunk_2");
+        chunks[1].Text.Should().Be("Page 3 content");
+    }
 }

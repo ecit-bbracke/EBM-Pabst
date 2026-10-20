@@ -27,25 +27,20 @@ public class ChunkingService : IChunkingService
         // If the text contains page break character (\f), split by page breaks
         if (text.Contains('\f'))
         {
-            var pages = text.Split('\f', StringSplitOptions.RemoveEmptyEntries);
-            var chunks = new List<string>();
-
-            foreach (var page in pages)
+            var pages = text.Split('\f');
+            for (int pageIndex = 0; pageIndex < pages.Length; pageIndex++)
             {
-                var normalizedPage = NormalizeText(page);
-                if (!string.IsNullOrWhiteSpace(normalizedPage))
+                var normalizedPage = NormalizeText(pages[pageIndex]);
+                if (string.IsNullOrWhiteSpace(normalizedPage))
                 {
-                    chunks.Add(normalizedPage);
+                    continue;
                 }
-            }
 
-            for (int i = 0; i < chunks.Count; i++)
-            {
                 yield return new DocumentChunk(
-                    Id: $"{documentId}_chunk_{i}",
+                    Id: $"{documentId}_chunk_{pageIndex}",
                     DocumentId: documentId,
-                    Text: chunks[i],
-                    Index: i
+                    Text: normalizedPage,
+                    Index: pageIndex
                 );
             }
         }

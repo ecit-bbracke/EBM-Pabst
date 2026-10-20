@@ -321,11 +321,10 @@ public class QdrantVectorStore : IVectorStore
 
         var documents = new Dictionary<string, RagDocument>();
         PointId? offset = null;
-        var remaining = Math.Max(1, limit);
 
         do
         {
-            var pageSize = (uint)Math.Min(256, remaining);
+            const uint pageSize = 256;
             var response = await _client.ScrollAsync(
                 collectionName: _collectionName,
                 limit: pageSize,
@@ -373,10 +372,10 @@ public class QdrantVectorStore : IVectorStore
                 }
             }
 
-            remaining -= response.Result.Count;
             offset = response.NextPageOffset;
+            if (response.Result.Count == 0) break;
         }
-        while (offset != null && remaining > 0);
+        while (offset != null && documents.Count < limit);
 
         return documents.Values
             .OrderByDescending(document => document.UploadedAt)
@@ -414,35 +413,47 @@ public class QdrantVectorStore : IVectorStore
             }
         };
 
-        var response = await _client.ScrollAsync(
-            collectionName: _collectionName,
-            filter: filter,
-            limit: 256,
-            payloadSelector: true,
-            vectorsSelector: false,
-            cancellationToken: cancellationToken);
-
         var chunks = new List<DocumentChunk>();
-        foreach (var point in response.Result)
+        var foundIndices = new HashSet<int>();
+        PointId? offset = null;
+
+        do
         {
-            var idx = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : -1;
-            if (!targetIndices.Contains(idx))
+            var response = await _client.ScrollAsync(
+                collectionName: _collectionName,
+                filter: filter,
+                limit: 256,
+                offset: offset,
+                payloadSelector: true,
+                vectorsSelector: false,
+                cancellationToken: cancellationToken);
+
+            foreach (var point in response.Result)
             {
-                continue;
+                var idx = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : -1;
+                if (!targetIndices.Contains(idx) || foundIndices.Contains(idx))
+                {
+                    continue;
+                }
+
+                var chunkId = point.Payload.TryGetValue("chunk_id", out var idVal) ? idVal.StringValue : point.Id.ToString();
+                var docId = point.Payload.TryGetValue("document_id", out var docVal) ? docVal.StringValue : documentId;
+                var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
+                var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
+                var originalFileName = point.Payload.TryGetValue("original_file_name", out var origVal) ? origVal.StringValue : fileName;
+                var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
+                var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
+                var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
+                var uploadedAt = TryGetUploadedAt(point.Payload);
+
+                chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
+                foundIndices.Add(idx);
             }
 
-            var chunkId = point.Payload.TryGetValue("chunk_id", out var idVal) ? idVal.StringValue : point.Id.ToString();
-            var docId = point.Payload.TryGetValue("document_id", out var docVal) ? docVal.StringValue : documentId;
-            var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
-            var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
-            var originalFileName = point.Payload.TryGetValue("original_file_name", out var origVal) ? origVal.StringValue : fileName;
-            var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
-            var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
-            var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
-            var uploadedAt = TryGetUploadedAt(point.Payload);
-
-            chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
+            offset = response.NextPageOffset;
+            if (response.Result.Count == 0) break;
         }
+        while (offset != null && foundIndices.Count < targetIndices.Count);
 
         return chunks.OrderBy(c => c.Index).ToList();
     }
