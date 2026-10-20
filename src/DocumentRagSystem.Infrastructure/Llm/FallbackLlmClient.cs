@@ -186,46 +186,41 @@ public sealed class FallbackLlmClient : ILlmClient
             yield break;
         }
 
-        var queue = new System.Collections.Generic.Queue<string>();
-        var enumerator = _primary.StreamTextAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
         bool primaryFailed = false;
         bool hasProducedTokens = false;
 
-        while (true)
+        await using (var enumerator = _primary.StreamTextAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken))
         {
-            bool hasNext = false;
-            try
+            while (true)
             {
-                hasNext = await enumerator.MoveNextAsync();
-            }
-            catch (Exception ex)
-            {
-                if (!hasProducedTokens)
+                bool hasNext;
+                try
                 {
-                    primaryFailed = true;
-                    _logger?.LogWarning(ex, "[{PrimaryProvider}] stream failed on start. Falling back to [{FallbackProvider}].", _primary.ProviderName, _fallback.ProviderName);
+                    hasNext = await enumerator.MoveNextAsync();
                 }
-                else
+                catch (Exception ex)
                 {
-                    _logger?.LogError(ex, "[{PrimaryProvider}] stream failed mid-stream.", _primary.ProviderName);
+                    if (!hasProducedTokens)
+                    {
+                        primaryFailed = true;
+                        _logger?.LogWarning(ex, "[{PrimaryProvider}] stream failed on start. Falling back to [{FallbackProvider}].", _primary.ProviderName, _fallback.ProviderName);
+                        break;
+                    }
+                    else
+                    {
+                        _logger?.LogError(ex, "[{PrimaryProvider}] stream failed mid-stream after producing tokens. Propagating failure.", _primary.ProviderName);
+                        throw;
+                    }
+                }
+
+                if (!hasNext)
+                {
                     break;
                 }
-            }
 
-            if (primaryFailed)
-            {
-                await enumerator.DisposeAsync();
-                break;
+                hasProducedTokens = true;
+                yield return enumerator.Current;
             }
-
-            if (!hasNext)
-            {
-                await enumerator.DisposeAsync();
-                break;
-            }
-
-            hasProducedTokens = true;
-            yield return enumerator.Current;
         }
 
         if (primaryFailed)

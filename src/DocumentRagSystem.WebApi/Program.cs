@@ -325,13 +325,13 @@ builder.Services.AddSingleton<IConversationalQueryRefiner, ConversationalQueryRe
 
 builder.Services.AddSingleton<IInputGovernor, InputGovernor>(sp =>
     new InputGovernor(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetRequiredService<IEbmProductCodeParser>(),
         sp.GetService<ILogger<InputGovernor>>()));
 
 builder.Services.AddSingleton<IOutputGovernor, OutputGovernor>(sp =>
     new OutputGovernor(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<OutputGovernor>>()));
 
 builder.Services.AddSingleton<IWorkflowRouter, WorkflowRouter>();
@@ -343,7 +343,7 @@ builder.Services.AddSingleton<IEvidenceEvaluator, EvidenceEvaluator>(sp =>
 
 builder.Services.AddSingleton<IAnswerComposer, AnswerComposer>(sp =>
     new AnswerComposer(
-        sp.GetRequiredService<ILlmService>(),
+        sp.GetRequiredService<ILlmClientResolver>(),
         sp.GetService<ILogger<AnswerComposer>>()));
 
 builder.Services.AddSingleton<IContextExpander, ContextExpander>();

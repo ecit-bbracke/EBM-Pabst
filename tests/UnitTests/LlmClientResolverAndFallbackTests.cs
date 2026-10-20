@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Core.Services;
 using DocumentRagSystem.Infrastructure.HealthChecks;
 using DocumentRagSystem.Infrastructure.Llm;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -261,5 +262,64 @@ public class LlmClientResolverAndFallbackTests
         Assert.NotNull(result);
         Assert.True(result.Metadata.IsFallback);
         Assert.Equal("Local", result.Metadata.Provider);
+    }
+
+    private sealed class FailingMidStreamClient : ILlmClient
+    {
+        public string ProviderName => "FailingMidStream";
+        public Task<LlmTextResult> GenerateTextAsync(LlmRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<LlmStructuredResult<T>> GenerateStructuredAsync<T>(LlmRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public async IAsyncEnumerable<string> StreamTextAsync(LlmRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return "First token";
+            await Task.Yield();
+            throw new HttpRequestException("Simulated mid-stream network drop");
+        }
+    }
+
+    [Fact]
+    public async Task FallbackLlmClient_WhenStreamFailsMidStream_PropagatesException()
+    {
+        // Arrange
+        var primary = new FailingMidStreamClient();
+        var secondaryMock = new Mock<ILlmClient>();
+        secondaryMock.Setup(x => x.ProviderName).Returns("Secondary");
+
+        var client = new FallbackLlmClient(primary, secondaryMock.Object, fallbackEnabled: true);
+
+        // Act & Assert
+        var tokens = new List<string>();
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+        {
+            await foreach (var token in client.StreamTextAsync(new LlmRequest(new[] { new LlmMessage("user", "test") })))
+            {
+                tokens.Add(token);
+            }
+        });
+
+        Assert.Contains("Simulated mid-stream network drop", ex.Message);
+        Assert.Single(tokens); // Received initial token before error was thrown
+    }
+
+    [Fact]
+    public async Task OutputGovernor_WhenLlmThrows_ReturnsUnapprovedFailSafe()
+    {
+        // Arrange
+        var failingLlm = new Mock<ILlmClient>();
+        failingLlm
+            .Setup(x => x.GenerateStructuredAsync<OutputGovernorResult>(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Outage 503"));
+
+        var governor = new OutputGovernor(failingLlm.Object);
+
+        // Act
+        var result = await governor.ValidateOutputAsync("question", "answer", new List<DocumentChunk>());
+
+        // Assert
+        Assert.False(result.Approved);
+        Assert.Equal("FAIL_SAFE", result.Action);
+        Assert.NotEmpty(result.Issues);
     }
 }
