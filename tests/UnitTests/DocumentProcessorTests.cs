@@ -551,4 +551,51 @@ public class DocumentProcessorTests
             It.IsAny<string>()
         ), Times.Once);
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_ConcurrentUploads_TargetingSameDocument_AreSerializedByLock()
+    {
+        // Arrange
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Sample technical text for serialization verification");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("c1", "doc-same", "Sample text", 0) });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        int activeExecutions = 0;
+        int maxConcurrency = 0;
+
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("concurrent_doc.pdf"))
+            .Returns(async () =>
+            {
+                var current = Interlocked.Increment(ref activeExecutions);
+                lock (mockRepo)
+                {
+                    if (current > maxConcurrency) maxConcurrency = current;
+                }
+                await Task.Delay(50);
+                Interlocked.Decrement(ref activeExecutions);
+                return null;
+            });
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunker.Object,
+            null,
+            null,
+            mockRepo.Object
+        );
+
+        // Act: Start two concurrent uploads targeting the exact same document
+        var task1 = processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "concurrent_doc.pdf");
+        var task2 = processor.ProcessPdfAsync(new MemoryStream(new byte[] { 2 }), "concurrent_doc.pdf");
+
+        await Task.WhenAll(task1, task2);
+
+        // Assert: Concurrency for the same document key was strictly serialized (maxConcurrency == 1)
+        Assert.Equal(1, maxConcurrency);
+    }
 }

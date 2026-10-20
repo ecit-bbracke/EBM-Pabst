@@ -22,6 +22,29 @@ public class DocumentProcessor : IDocumentProcessor
     private readonly ILogger<DocumentProcessor>? _logger;
     private readonly string _uploadsDirectory;
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _documentLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    private static async Task<IDisposable> AcquireDocumentLockAsync(string documentKey, CancellationToken cancellationToken)
+    {
+        var sem = _documentLocks.GetOrAdd(documentKey, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(cancellationToken);
+        return new DocumentLockReleaser(sem);
+    }
+
+    private sealed class DocumentLockReleaser : IDisposable
+    {
+        private readonly SemaphoreSlim _sem;
+        private int _disposed;
+        public DocumentLockReleaser(SemaphoreSlim sem) => _sem = sem;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _sem.Release();
+            }
+        }
+    }
+
     // Constructor to support the exact Unit Test signature from prompt
     public DocumentProcessor(
         ITextExtractor textExtractor,
@@ -68,13 +91,18 @@ public class DocumentProcessor : IDocumentProcessor
 
     public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null, CancellationToken cancellationToken = default)
     {
+        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
+        var lockKey = (!string.IsNullOrWhiteSpace(sourceDocId)
+            ? sourceDocId
+            : (!string.IsNullOrWhiteSpace(documentId) ? documentId : fileName)).Trim().ToLowerInvariant();
+
+        using var docLock = await AcquireDocumentLockAsync(lockKey, cancellationToken);
+
         var uploadsDir = _uploadsDirectory;
         if (!Directory.Exists(uploadsDir))
         {
             Directory.CreateDirectory(uploadsDir);
         }
-
-        var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
 
         // 1. Look for existing document with same ID, SourceDocumentId, or FileName to overwrite using fast indexed queries
         Document? existingDoc = null;
