@@ -23,7 +23,7 @@ public static class DataberegningEndpoints
             <html>
             <head>
             <meta charset="utf-8">
-            <title>EBM-Pabst databeregning form</title>
+            <title>ebm-papst databeregning form</title>
             <style>
                 html { scrollbar-gutter: stable; }
                 body { margin: 0; padding: 20px 16px; min-height: 100vh; display: flex; justify-content: center; background: #f8fafc; color: #1e293b; font-family: system-ui, sans-serif; box-sizing: border-box; }
@@ -100,7 +100,7 @@ public static class DataberegningEndpoints
             <main>
               <form id="form">
                 <div id="banner">🔒 Tidligere beregning – kan ikke ændres <small id="banner-dato"></small></div>
-                <h1 id="overskrift">EBM-Pabst databeregning</h1>
+                <h1 id="overskrift">ebm-papst databeregning</h1>
                 <div id="stamdata">
                     <label>Installeringssted<input name="installeringssted" placeholder="Installatørens kunde" required></label>
                     <label>Kunde<input name="kunde" placeholder="Installatørens selskab" required></label>
@@ -270,7 +270,7 @@ public static class DataberegningEndpoints
               function nyBeregning() {
                 if (!form.classList.contains("laast")) localStorage.removeItem("kladde");
                 udfyld(hentKladde(), false);
-                document.getElementById("overskrift").textContent = "EBM-Pabst databeregning";
+                document.getElementById("overskrift").textContent = "ebm-papst databeregning";
                 markerAktiv(-1);
               }
 

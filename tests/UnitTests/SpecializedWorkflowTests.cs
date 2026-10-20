@@ -517,4 +517,43 @@ public class SpecializedWorkflowTests
         // Verify that LLM draft generation was completely eliminated (0 LLM round-trips for draft generation)
         mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), false), Times.Never);
     }
+
+    [Fact]
+    public async Task GreetingWorkflow_UsesExactEbmPapstCasing()
+    {
+        // Arrange
+        var executor = new GreetingWorkflowExecutor();
+        var govResult = new InputGovernorResult("GREETING", 1.0, new List<EntityInfo>(), new List<string>(), new List<string>(), false, null);
+
+        // Act
+        var (danishResponse, _, _) = await executor.ExecuteAsync("Hej", govResult, null!);
+        var (englishResponse, _, _) = await executor.ExecuteAsync("Hello", govResult, null!);
+
+        // Assert
+        Assert.Contains("ebm-papst", danishResponse);
+        Assert.DoesNotContain("EBM-Papst", danishResponse);
+        Assert.Contains("ebm-papst", englishResponse);
+        Assert.DoesNotContain("EBM-Papst", englishResponse);
+    }
+
+    [Fact]
+    public async Task AnswerComposer_PromptIncludesExactEbmPapstCasingInstruction()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        string capturedPrompt = "";
+        mockLlm.Setup(m => m.GenerateCompletionAsync(It.IsAny<string>(), false))
+            .Callback<string, bool>((p, _) => capturedPrompt = p)
+            .ReturnsAsync("Svar");
+
+        var composer = new AnswerComposer(mockLlm.Object);
+        var govResult = new InputGovernorResult("SPEC_LOOKUP", 1.0, new List<EntityInfo>(), new List<string>(), new List<string>(), false, null);
+
+        // Act
+        await composer.ComposeAnswerAsync("Spænding?", govResult, new List<EvidenceClaim>(), new List<DocumentChunk>(), "");
+
+        // Assert
+        Assert.Contains("\"ebm-papst\"", capturedPrompt);
+        Assert.Contains("MUST ALWAYS be spelled with this exact casing (\"ebm-papst\", all lowercase)", capturedPrompt);
+    }
 }

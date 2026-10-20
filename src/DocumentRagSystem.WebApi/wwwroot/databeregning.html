@@ -305,7 +305,7 @@
                     <span>Chat Assistent</span>
                 </a>
                 <a href="documents.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
-                    <i class="fa-solid fa-folder-gear text-xs"></i>
+                    <i class="fa-solid fa-file text-xs"></i>
                     <span>Dokumenter</span>
                 </a>
                 <span class="bg-brand-600 text-white px-3.5 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2 border border-brand-500">
@@ -364,7 +364,7 @@
                     </div>
 
                     <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <h2 id="overskrift" class="text-lg font-semibold text-slate-900">EBM-Pabst databeregning</h2>
+                        <h2 id="overskrift" class="text-lg font-semibold text-slate-900">ebm-papst databeregning</h2>
                         <a href="/databeregningsform" target="_blank" rel="noopener noreferrer" class="text-xs text-slate-500 hover:text-brand-600 transition flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-brand-300 hover:bg-slate-50 font-medium" title="Åbn formular i nyt vindue">
                             <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
                             <span>Åbn i nyt vindue</span>
@@ -588,7 +588,7 @@
         function nyBeregning() {
             if (!form.classList.contains("laast")) localStorage.removeItem("kladde");
             udfyld(hentKladde(), false);
-            document.getElementById("overskrift").textContent = "EBM-Pabst databeregning";
+            document.getElementById("overskrift").textContent = "ebm-papst databeregning";
             markerAktiv(-1);
         }
 
