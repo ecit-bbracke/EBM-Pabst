@@ -537,4 +537,43 @@ public class ConversationalMultiTurnOrchestratorTests
         var cleared = await store.GetStateAsync("conv-123");
         Assert.Null(cleared);
     }
+
+    [Fact]
+    public async Task Orchestrator_ShouldPreserveOwnerUserId_AcrossCompletedTurns()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 voltage 400V", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var initialState = ConversationState.CreateNew("conv-owner-test", ownerUserId: "engineer@ebmpabst.dk");
+        await stateStore.SaveStateAsync("conv-owner-test", initialState);
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            queryRefiner: new ConversationalQueryRefiner(mockLlm.Object),
+            stateStore: stateStore
+        );
+
+        // Act
+        var (_, _, trace) = await orchestrator.ProcessQueryAsync("What is the voltage of K3G560?", mockVectorStore.Object, "conv-owner-test", initialState);
+
+        // Assert
+        Assert.NotNull(trace.ConversationStateAfter);
+        Assert.Equal("engineer@ebmpabst.dk", trace.ConversationStateAfter.OwnerUserId);
+
+        var persistedState = await stateStore.GetStateAsync("conv-owner-test");
+        Assert.NotNull(persistedState);
+        Assert.Equal("engineer@ebmpabst.dk", persistedState.OwnerUserId);
+    }
 }

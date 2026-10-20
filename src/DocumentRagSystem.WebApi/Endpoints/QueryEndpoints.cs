@@ -42,30 +42,32 @@ public static class QueryEndpoints
                 return Results.BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
             }
 
+            var ownerId = user.Identity?.Name;
+            var targetConversationId = string.IsNullOrWhiteSpace(request.ConversationId)
+                ? Guid.NewGuid().ToString()
+                : request.ConversationId;
+
             ConversationState? initialConversationState = null;
-            if (!string.IsNullOrWhiteSpace(request.ConversationId))
+            var existingState = await stateStore.GetStateAsync(targetConversationId);
+            if (existingState != null)
             {
-                var existingState = await stateStore.GetStateAsync(request.ConversationId);
-                if (existingState != null)
+                if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
+                    !string.Equals(existingState.OwnerUserId, ownerId, StringComparison.OrdinalIgnoreCase) &&
+                    !UserSecurityHelper.IsUserAdmin(user))
                 {
-                    if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
-                        !string.Equals(existingState.OwnerUserId, user.Identity?.Name, StringComparison.OrdinalIgnoreCase) &&
-                        !UserSecurityHelper.IsUserAdmin(user))
-                    {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
-                    }
-                    initialConversationState = existingState;
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
-                else
-                {
-                    initialConversationState = ConversationState.CreateNew(request.ConversationId, ownerUserId: user.Identity?.Name);
-                }
+                initialConversationState = existingState;
+            }
+            else
+            {
+                initialConversationState = ConversationState.CreateNew(targetConversationId, ownerUserId: ownerId);
             }
 
-            logger.LogInformation("Query received: {Question} (ConversationId: {ConversationId})", request.Question, request.ConversationId);
+            logger.LogInformation("Query received: {Question} (ConversationId: {ConversationId})", request.Question, targetConversationId);
 
             // Process through the Multi-Stage Technical RAG Orchestrator
-            var (answer, chunks, trace) = await orchestrator.ProcessQueryAsync(request.Question, vectorStore, request.ConversationId, initialConversationState);
+            var (answer, chunks, trace) = await orchestrator.ProcessQueryAsync(request.Question, vectorStore, targetConversationId, initialConversationState);
 
             logger.LogInformation("Execution Trace: {TraceJson}", JsonSerializer.Serialize(trace));
 
@@ -162,27 +164,29 @@ public static class QueryEndpoints
                 return Results.BadRequest(validationResult.Errors.Select(e => e.ErrorMessage));
             }
 
+            var ownerId = httpContext.User.Identity?.Name;
+            var targetConversationId = string.IsNullOrWhiteSpace(request.ConversationId)
+                ? Guid.NewGuid().ToString()
+                : request.ConversationId;
+
             ConversationState? initialConversationState = null;
-            if (!string.IsNullOrWhiteSpace(request.ConversationId))
+            var existingState = await stateStore.GetStateAsync(targetConversationId);
+            if (existingState != null)
             {
-                var existingState = await stateStore.GetStateAsync(request.ConversationId);
-                if (existingState != null)
+                if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
+                    !string.Equals(existingState.OwnerUserId, ownerId, StringComparison.OrdinalIgnoreCase) &&
+                    !UserSecurityHelper.IsUserAdmin(httpContext.User))
                 {
-                    if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
-                        !string.Equals(existingState.OwnerUserId, httpContext.User.Identity?.Name, StringComparison.OrdinalIgnoreCase) &&
-                        !UserSecurityHelper.IsUserAdmin(httpContext.User))
-                    {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
-                    }
-                    initialConversationState = existingState;
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
-                else
-                {
-                    initialConversationState = ConversationState.CreateNew(request.ConversationId, ownerUserId: httpContext.User.Identity?.Name);
-                }
+                initialConversationState = existingState;
+            }
+            else
+            {
+                initialConversationState = ConversationState.CreateNew(targetConversationId, ownerUserId: ownerId);
             }
 
-            logger.LogInformation("Streaming query received: {Question} (ConversationId: {ConversationId})", request.Question, request.ConversationId);
+            logger.LogInformation("Streaming query received: {Question} (ConversationId: {ConversationId})", request.Question, targetConversationId);
 
             httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
             httpContext.Response.Headers.Append("Cache-Control", "no-cache");
@@ -194,7 +198,7 @@ public static class QueryEndpoints
             var stream = orchestrator.ProcessQueryStreamAsync(
                 request.Question,
                 vectorStore,
-                request.ConversationId,
+                targetConversationId,
                 initialConversationState,
                 streamToken);
 

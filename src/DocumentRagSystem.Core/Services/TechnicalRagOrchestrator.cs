@@ -54,6 +54,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
     private const int MaxCacheSize = 5000;
 
+    public static void InvalidateQueryCache()
+    {
+        _queryResponseCache.Clear();
+    }
+
     private readonly IInputGovernor _inputGovernor;
     private readonly IWorkflowRouter _workflowRouter;
     private readonly IEvidenceEvaluator _evidenceEvaluator;
@@ -298,7 +303,17 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         if (canUseCache && _queryResponseCache.TryGetValue(cacheKey, out var cachedEntry) && (DateTime.UtcNow - cachedEntry.CachedAt) < CacheTtl)
         {
             _logger?.LogInformation("[Orchestrator] Instant query cache hit for: \"{EffectiveQuestion}\"", effectiveQuestion);
-            return (cachedEntry.Answer, cachedEntry.Chunks, cachedEntry.Trace);
+            var cachedStateAfter = UpdateConversationState(currentState, refinement, cachedEntry.Trace.InputGovernor, cachedEntry.Trace.Evidence, effectiveQuestion);
+            await _stateStore.SaveStateAsync(effectiveConvId, cachedStateAfter);
+
+            var updatedTrace = cachedEntry.Trace with
+            {
+                OriginalQuestion = question,
+                Question = effectiveQuestion,
+                ConversationStateBefore = stateBefore,
+                ConversationStateAfter = cachedStateAfter
+            };
+            return (cachedEntry.Answer, cachedEntry.Chunks, updatedTrace);
         }
 
         var conversationContext = new ConversationContext(
@@ -680,9 +695,20 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         if (canUseCache && _queryResponseCache.TryGetValue(cacheKey, out var cachedEntry) && (DateTime.UtcNow - cachedEntry.CachedAt) < CacheTtl)
         {
             _logger?.LogInformation("[Orchestrator] Instant query cache hit for streaming: \"{EffectiveQuestion}\"", effectiveQuestion);
+            var cachedStateAfter = UpdateConversationState(currentState, refinement, cachedEntry.Trace.InputGovernor, cachedEntry.Trace.Evidence, effectiveQuestion);
+            await _stateStore.SaveStateAsync(effectiveConvId, cachedStateAfter);
+
+            var updatedTrace = cachedEntry.Trace with
+            {
+                OriginalQuestion = question,
+                Question = effectiveQuestion,
+                ConversationStateBefore = stateBefore,
+                ConversationStateAfter = cachedStateAfter
+            };
+
             yield return new OrchestrationStreamEvent("citations", null, cachedEntry.Chunks, effectiveConvId);
             yield return new OrchestrationStreamEvent("chunk", cachedEntry.Answer);
-            yield return new OrchestrationStreamEvent("done", null, cachedEntry.Chunks, effectiveConvId, cachedEntry.Trace);
+            yield return new OrchestrationStreamEvent("done", null, cachedEntry.Chunks, effectiveConvId, updatedTrace);
             yield break;
         }
 
@@ -943,7 +969,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 LastIntent: safeIntent,
                 LastEffectiveQuestion: effectiveQuestion,
                 TopicVersion: currentState.TopicVersion + 1,
-                TurnCount: newTurnCount
+                TurnCount: newTurnCount,
+                OwnerUserId: currentState.OwnerUserId
             );
         }
 
@@ -964,7 +991,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 LastIntent: safeIntent,
                 LastEffectiveQuestion: effectiveQuestion,
                 TopicVersion: currentState.TopicVersion + 1,
-                TurnCount: newTurnCount
+                TurnCount: newTurnCount,
+                OwnerUserId: currentState.OwnerUserId
             );
         }
 
@@ -1081,7 +1109,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             LastIntent: safeIntent,
             LastEffectiveQuestion: effectiveQuestion,
             TopicVersion: currentState.TopicVersion,
-            TurnCount: newTurnCount
+            TurnCount: newTurnCount,
+            OwnerUserId: currentState.OwnerUserId
         );
     }
 
