@@ -205,6 +205,11 @@ public class QdrantVectorStore : IVectorStore
             point.Payload["uploaded_at"] = chunk.UploadedAt.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         }
 
+        if (chunk.PageNumber.HasValue)
+        {
+            point.Payload["page_number"] = chunk.PageNumber.Value;
+        }
+
         return point;
     }
 
@@ -300,8 +305,9 @@ public class QdrantVectorStore : IVectorStore
             var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
             var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
             var uploadedAt = TryGetUploadedAt(point.Payload);
+            var pageNumber = point.Payload.TryGetValue("page_number", out var pgVal) ? (int)pgVal.IntegerValue : (int?)null;
 
-            chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
+            chunks.Add(new DocumentChunk(chunkId, docId, text, index, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId, pageNumber));
         }
 
         _logger?.LogInformation(
@@ -445,8 +451,9 @@ public class QdrantVectorStore : IVectorStore
                 var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
                 var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
                 var uploadedAt = TryGetUploadedAt(point.Payload);
+                var pageNumber = point.Payload.TryGetValue("page_number", out var pgVal) ? (int)pgVal.IntegerValue : (int?)null;
 
-                chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId));
+                chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId, pageNumber));
                 foundIndices.Add(idx);
             }
 

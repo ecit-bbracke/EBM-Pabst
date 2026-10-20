@@ -33,5 +33,6 @@ public record DocumentChunk(
     DateTime? UploadedAt = null,
     string? OriginalFileName = null,
     string? ArticleId = null,
-    string? SourceDocumentId = null
+    string? SourceDocumentId = null,
+    int? PageNumber = null
 );

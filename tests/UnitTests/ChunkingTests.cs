@@ -60,14 +60,16 @@ public class ChunkingTests
         // Assert
         chunks.Should().HaveCount(2);
 
-        // Chunk 0 corresponds to physical Page 1 (Index 0 => #page=1)
+        // Chunk 0 corresponds to physical Page 1 (Index 0, PageNumber 1)
         chunks[0].Index.Should().Be(0);
+        chunks[0].PageNumber.Should().Be(1);
         chunks[0].Id.Should().Be("doc-pdf-1_chunk_0");
         chunks[0].Text.Should().Be("Page 1 content");
 
-        // Chunk 1 corresponds to physical Page 3 (Index 2 => #page=3)
-        chunks[1].Index.Should().Be(2);
-        chunks[1].Id.Should().Be("doc-pdf-1_chunk_2");
+        // Chunk 1 corresponds to physical Page 3 (Index 1, PageNumber 3)
+        chunks[1].Index.Should().Be(1);
+        chunks[1].PageNumber.Should().Be(3);
+        chunks[1].Id.Should().Be("doc-pdf-1_chunk_1");
         chunks[1].Text.Should().Be("Page 3 content");
     }
 }

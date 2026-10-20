@@ -98,7 +98,8 @@ public static class QueryEndpoints
                     var searchParam = !string.IsNullOrWhiteSpace(searchKeyword)
                         ? $"&search={Uri.EscapeDataString(searchKeyword)}"
                         : string.Empty;
-                    url += $"#page={item.Index + 1}{searchParam}";
+                    var targetPage = item.PageNumber ?? (item.Index + 1);
+                    url += $"#page={targetPage}{searchParam}";
                 }
 
                 citations.Add(new CitationDto(

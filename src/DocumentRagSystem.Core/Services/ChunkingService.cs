@@ -28,62 +28,47 @@ public class ChunkingService : IChunkingService
         if (text.Contains('\f'))
         {
             var pages = text.Split('\f');
+            int chunkIndex = 0;
             for (int pageIndex = 0; pageIndex < pages.Length; pageIndex++)
             {
+                int physicalPage = pageIndex + 1;
                 var normalizedPage = NormalizeText(pages[pageIndex]);
                 if (string.IsNullOrWhiteSpace(normalizedPage))
                 {
                     continue;
                 }
 
-                yield return new DocumentChunk(
-                    Id: $"{documentId}_chunk_{pageIndex}",
-                    DocumentId: documentId,
-                    Text: normalizedPage,
-                    Index: pageIndex
-                );
+                if (normalizedPage.Length > _maxChunkSize)
+                {
+                    var subChunks = SplitTextIntoSizedChunks(normalizedPage);
+                    foreach (var subChunk in subChunks)
+                    {
+                        yield return new DocumentChunk(
+                            Id: $"{documentId}_chunk_{chunkIndex}",
+                            DocumentId: documentId,
+                            Text: subChunk,
+                            Index: chunkIndex++,
+                            PageNumber: physicalPage
+                        );
+                    }
+                }
+                else
+                {
+                    yield return new DocumentChunk(
+                        Id: $"{documentId}_chunk_{chunkIndex}",
+                        DocumentId: documentId,
+                        Text: normalizedPage,
+                        Index: chunkIndex++,
+                        PageNumber: physicalPage
+                    );
+                }
             }
         }
         else
         {
-            // Fall back to original fixed character / sentence split logic if no page breaks exist
+            // Fall back to original fixed character / sentence split logic if no page breaks exist (single-page)
             text = NormalizeText(text);
-
-            var chunks = new List<string>();
-            int index = 0;
-            int length = text.Length;
-
-            while (index < length)
-            {
-                int size = Math.Min(_maxChunkSize, length - index);
-                string chunkText = text.Substring(index, size);
-
-                if (index + size < length)
-                {
-                    int lastSpace = chunkText.LastIndexOf(' ');
-                    int lastPeriod = chunkText.LastIndexOf('.');
-                    int lastNewline = chunkText.LastIndexOf('\n');
-
-                    int splitIndex = -1;
-                    if (lastPeriod > _maxChunkSize / 2) splitIndex = lastPeriod + 1;
-                    else if (lastNewline > _maxChunkSize / 2) splitIndex = lastNewline + 1;
-                    else if (lastSpace > _maxChunkSize / 2) splitIndex = lastSpace + 1;
-
-                    if (splitIndex > 0)
-                    {
-                        chunkText = chunkText.Substring(0, splitIndex);
-                        size = splitIndex;
-                    }
-                }
-
-                chunks.Add(chunkText.Trim());
-
-                index += size - _chunkOverlap;
-                if (index < 0 || size <= _chunkOverlap)
-                {
-                    index += _chunkOverlap;
-                }
-            }
+            var chunks = SplitTextIntoSizedChunks(text);
 
             for (int i = 0; i < chunks.Count; i++)
             {
@@ -91,10 +76,52 @@ public class ChunkingService : IChunkingService
                     Id: $"{documentId}_chunk_{i}",
                     DocumentId: documentId,
                     Text: chunks[i],
-                    Index: i
+                    Index: i,
+                    PageNumber: 1
                 );
             }
         }
+    }
+
+    private List<string> SplitTextIntoSizedChunks(string text)
+    {
+        var chunks = new List<string>();
+        int index = 0;
+        int length = text.Length;
+
+        while (index < length)
+        {
+            int size = Math.Min(_maxChunkSize, length - index);
+            string chunkText = text.Substring(index, size);
+
+            if (index + size < length)
+            {
+                int lastSpace = chunkText.LastIndexOf(' ');
+                int lastPeriod = chunkText.LastIndexOf('.');
+                int lastNewline = chunkText.LastIndexOf('\n');
+
+                int splitIndex = -1;
+                if (lastPeriod > _maxChunkSize / 2) splitIndex = lastPeriod + 1;
+                else if (lastNewline > _maxChunkSize / 2) splitIndex = lastNewline + 1;
+                else if (lastSpace > _maxChunkSize / 2) splitIndex = lastSpace + 1;
+
+                if (splitIndex > 0)
+                {
+                    chunkText = chunkText.Substring(0, splitIndex);
+                    size = splitIndex;
+                }
+            }
+
+            chunks.Add(chunkText.Trim());
+
+            index += size - _chunkOverlap;
+            if (index < 0 || size <= _chunkOverlap)
+            {
+                index += _chunkOverlap;
+            }
+        }
+
+        return chunks;
     }
 
     private string NormalizeText(string text)

@@ -33,10 +33,13 @@ public static class DocumentUrlResolver
             return filePath;
         }
 
-        var normalizedFileName = Path.GetFileName(filePath ?? string.Empty);
+        var rawPath = filePath ?? string.Empty;
+        var unescapedPath = Uri.UnescapeDataString(rawPath);
+        var normalizedFileName = Path.GetFileName(unescapedPath);
         if (string.IsNullOrWhiteSpace(normalizedFileName))
         {
-            normalizedFileName = Path.GetFileName(fileName ?? string.Empty);
+            var unescapedName = Uri.UnescapeDataString(fileName ?? string.Empty);
+            normalizedFileName = Path.GetFileName(unescapedName);
         }
 
         if (string.IsNullOrWhiteSpace(normalizedFileName))
@@ -51,7 +54,8 @@ public static class DocumentUrlResolver
     {
         if (string.IsNullOrWhiteSpace(targetFileName)) return string.Empty;
 
-        var cleanName = Path.GetFileName(targetFileName);
+        var unescaped = Uri.UnescapeDataString(targetFileName);
+        var cleanName = Path.GetFileName(unescaped);
         foreach (var dir in uploadDirectories)
         {
             if (!Directory.Exists(dir)) continue;
