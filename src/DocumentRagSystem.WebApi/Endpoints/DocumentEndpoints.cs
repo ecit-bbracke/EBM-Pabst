@@ -425,12 +425,18 @@ public static class DocumentEndpoints
                 }
                 else
                 {
-                    var updatedExisting = existingDoc! with
-                    {
-                        FilePath = physicalPath,
-                        Status = DocumentStatus.Processing
-                    };
-                    await repository.AddDocumentAsync(updatedExisting);
+                    // Keep existing completed document untouched in repository to preserve completed-document status and vector backups.
+                    // Store staging job metadata as a separate pending job record so restarts can recover it without corrupting the completed document.
+                    var stagingJobDoc = new Document(
+                        Id: $"replacement_{existingDoc!.Id}",
+                        FileName: file.FileName,
+                        FilePath: physicalPath,
+                        UploadedAt: DateTime.UtcNow,
+                        Status: DocumentStatus.Pending,
+                        ArticleId: articleId,
+                        SourceDocumentId: existingDoc.Id
+                    );
+                    await repository.AddDocumentAsync(stagingJobDoc);
                 }
 
                 queue.QueueBackgroundWorkItem(async token =>
@@ -449,7 +455,7 @@ public static class DocumentEndpoints
                 });
 
                 var responseDoc = isCompletedDoc
-                    ? existingDoc! with { Status = DocumentStatus.Processing, FilePath = physicalPath }
+                    ? existingDoc! with { Status = DocumentStatus.Processing }
                     : new Document(
                         Id: documentId,
                         FileName: file.FileName,
@@ -466,8 +472,17 @@ public static class DocumentEndpoints
             {
                 logger.LogInformation("Uploading and processing file synchronously: {FileName}", file.FileName);
 
+                var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(file.FileName);
+                var existingDoc = await repository.GetDocumentByFileNameAsync(file.FileName);
+                if (existingDoc == null && !string.IsNullOrWhiteSpace(sourceDocId))
+                {
+                    existingDoc = await repository.GetDocumentBySourceDocIdAsync(sourceDocId);
+                }
+                var documentId = existingDoc?.Id
+                    ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
+
                 using var stream = file.OpenReadStream();
-                var document = await processor.ProcessPdfAsync(stream, file.FileName, cancellationToken: cancellationToken);
+                var document = await processor.ProcessPdfAsync(stream, file.FileName, documentId, cancellationToken: cancellationToken);
                 Program.DirFileCache.Clear();
                 TechnicalRagOrchestrator.InvalidateQueryCache();
 

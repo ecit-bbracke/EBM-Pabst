@@ -94,7 +94,7 @@ public class DocumentProcessor : IDocumentProcessor
         var (articleId, sourceDocId) = ArticleDocumentNameParser.Parse(fileName);
         var lockKey = (!string.IsNullOrWhiteSpace(sourceDocId)
             ? sourceDocId
-            : (!string.IsNullOrWhiteSpace(documentId) ? documentId : fileName)).Trim().ToLowerInvariant();
+            : (!string.IsNullOrWhiteSpace(fileName) ? Path.GetFileName(fileName) : (documentId ?? Guid.NewGuid().ToString()))).Trim().ToLowerInvariant();
 
         using var docLock = await AcquireDocumentLockAsync(lockKey, cancellationToken);
 
@@ -361,6 +361,7 @@ public class DocumentProcessor : IDocumentProcessor
                     if (existingDoc != null)
                     {
                         await _documentRepository.AddDocumentAsync(document);
+                        try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
                     }
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
@@ -399,6 +400,7 @@ public class DocumentProcessor : IDocumentProcessor
                     if (existingDoc != null)
                     {
                         await _documentRepository.AddDocumentAsync(document);
+                        try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
                     }
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
