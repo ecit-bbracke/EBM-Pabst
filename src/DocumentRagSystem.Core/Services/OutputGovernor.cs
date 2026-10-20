@@ -90,15 +90,34 @@ You are the Output Governor. Verify if the Proposed Answer is factually supporte
         catch (Exception ex)
         {
             stopwatch.Stop();
-            _logger?.LogWarning(ex, "[OutputGovernor] Error after {DurationMs}ms: {Message}. Falling back to default approved.", stopwatch.ElapsedMilliseconds, ex.Message);
-            Console.WriteLine($"Error in OutputGovernor: {ex.Message}");
+            _logger?.LogError(ex, "[OutputGovernor] Error after {DurationMs}ms: {Message}. Output verification failed.", stopwatch.ElapsedMilliseconds, ex.Message);
+
+            return new OutputGovernorResult(
+                Approved: false,
+                Issues: new List<OutputGovernorIssue>
+                {
+                    new OutputGovernorIssue(
+                        Type: "VALIDATION_PROVIDER_ERROR",
+                        Claim: $"Svarvalidering fejlede: {ex.Message}",
+                        Severity: "HIGH"
+                    )
+                },
+                Action: "FAIL_SAFE"
+            );
         }
 
-        // Safe fallback
+        // Safe fallback when result is unexpectedly null
         return new OutputGovernorResult(
-            Approved: true,
-            Issues: new List<OutputGovernorIssue>(),
-            Action: "APPROVE"
+            Approved: false,
+            Issues: new List<OutputGovernorIssue>
+            {
+                new OutputGovernorIssue(
+                    Type: "EMPTY_VALIDATION_RESULT",
+                    Claim: "Valideringsudbyderen returnerede et tomt resultat.",
+                    Severity: "HIGH"
+                )
+            },
+            Action: "FAIL_SAFE"
         );
     }
 }

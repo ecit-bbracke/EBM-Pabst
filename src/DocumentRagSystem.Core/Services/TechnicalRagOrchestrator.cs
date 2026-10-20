@@ -826,7 +826,25 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         timings["AnswerStreamDuration"] = stageStopwatch.ElapsedMilliseconds;
 
         var finalAnswer = answerSb.ToString();
-        var govOutputResult = new OutputGovernorResult(Approved: true, Issues: new List<OutputGovernorIssue>(), Action: "APPROVE");
+
+        // 8. Output Governor Validation
+        stageStopwatch.Restart();
+        OutputGovernorResult govOutputResult;
+        if (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting || string.IsNullOrWhiteSpace(finalAnswer))
+        {
+            govOutputResult = new OutputGovernorResult(Approved: true, Issues: new List<OutputGovernorIssue>(), Action: "APPROVE");
+        }
+        else
+        {
+            govOutputResult = await _outputGovernor.ValidateOutputAsync(effectiveQuestion, finalAnswer, chunksForComposer);
+            if (!govOutputResult.Approved)
+            {
+                _logger?.LogWarning(
+                    "[Orchestrator] Streamed answer for '{Question}' flagged by OutputGovernor (Action: {Action}, Issues: {Count}). Withholding caching.",
+                    effectiveQuestion, govOutputResult.Action, govOutputResult.Issues?.Count ?? 0);
+            }
+        }
+        timings["OutputGovernorValidation"] = stageStopwatch.ElapsedMilliseconds;
 
         // 9. Update Conversation State
         stageStopwatch.Restart();
@@ -857,7 +875,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             PromptTraces: promptTraces
         );
 
-        if (canUseCache && workflowType != WorkflowType.Clarification && !string.IsNullOrWhiteSpace(finalAnswer))
+        if (canUseCache && workflowType != WorkflowType.Clarification && govOutputResult.Approved && !string.IsNullOrWhiteSpace(finalAnswer))
         {
             CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
         }
