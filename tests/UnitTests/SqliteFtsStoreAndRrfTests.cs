@@ -136,4 +136,55 @@ public class SqliteFtsStoreAndRrfTests
             }
         }
     }
+
+    [Fact]
+    public async Task SqliteFtsStore_WhenUpgradingSchemaWithoutPageNumber_MigratesRowsWithoutDataLoss()
+    {
+        // Arrange: Create database and an old ChunkFts table WITHOUT PageNumber
+        var dbPath = Path.Combine(Path.GetTempPath(), $"fts_migration_{Guid.NewGuid():N}.db");
+        var connStr = $"Data Source={dbPath}";
+        var factory = new TestDbContextFactory(connStr);
+
+        try
+        {
+            using (var initContext = factory.CreateDbContext())
+            {
+                var conn = initContext.Database.GetDbConnection();
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE VIRTUAL TABLE ChunkFts USING fts5(
+                        ChunkId UNINDEXED, 
+                        DocumentId UNINDEXED, 
+                        IndexNumber UNINDEXED,
+                        FileName, 
+                        FilePath UNINDEXED,
+                        Text, 
+                        ArticleId, 
+                        SourceDocumentId,
+                        tokenize='unicode61 remove_diacritics 2'
+                    );
+                    INSERT INTO ChunkFts (ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId)
+                    VALUES ('oldChunk1', 'docOld', 0, 'legacy.pdf', '/uploads/legacy.pdf', 'Legacy ebm-papst fan motor winding specification', 'art1', 'src1');
+                ";
+                cmd.ExecuteNonQuery();
+            }
+
+            // Act: Initialize SqliteFtsStore against this existing table (triggers migration)
+            var ftsStore = new SqliteFtsStore(factory);
+            var results = (await ftsStore.SearchAsync("motor winding")).ToList();
+
+            // Assert: The legacy row was migrated transactionally and not dropped!
+            Assert.NotEmpty(results);
+            Assert.Equal("oldChunk1", results[0].Id);
+            Assert.Equal(1, results[0].PageNumber);
+        }
+        finally
+        {
+            if (File.Exists(dbPath))
+            {
+                try { File.Delete(dbPath); } catch { }
+            }
+        }
+    }
 }

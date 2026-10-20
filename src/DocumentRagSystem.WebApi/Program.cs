@@ -787,12 +787,16 @@ try
     if (repo != null && queue != null && processor != null)
     {
         var allDocs = await repo.GetAllDocumentsAsync();
-        var pendingDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending).ToList();
-        if (pendingDocs != null && pendingDocs.Count > 0)
+        var unfinishedDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending || d.Status == DocumentStatus.Processing).ToList();
+        if (unfinishedDocs != null && unfinishedDocs.Count > 0)
         {
             var servedUploads = GetServedUploadDirectories(uploadsDirectory);
-            foreach (var doc in pendingDocs)
+            foreach (var doc in unfinishedDocs)
             {
+                var targetDocId = doc.Id.StartsWith("replacement_") && !string.IsNullOrWhiteSpace(doc.SourceDocumentId)
+                    ? doc.SourceDocumentId
+                    : doc.Id;
+
                 string? physicalFilePath = null;
                 if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
                 {
@@ -814,13 +818,13 @@ try
                 if (!string.IsNullOrWhiteSpace(physicalFilePath) && File.Exists(physicalFilePath))
                 {
                     var resolvedPath = physicalFilePath;
-                    app.Logger.LogInformation("Resuming unfinished background upload on startup: {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
+                    app.Logger.LogInformation("Resuming unfinished background upload on startup: {FileName} (ID: {DocumentId})", doc.FileName, targetDocId);
                     queue.QueueBackgroundWorkItem(async token =>
                     {
                         try
                         {
                             await using var stream = File.OpenRead(resolvedPath);
-                            await processor.ProcessPdfAsync(stream, doc.FileName, doc.Id, token);
+                            await processor.ProcessPdfAsync(stream, doc.FileName, targetDocId, token);
                             Program.DirFileCache.Clear();
                             TechnicalRagOrchestrator.InvalidateQueryCache();
                         }
@@ -832,8 +836,8 @@ try
                 }
                 else
                 {
-                    app.Logger.LogWarning("Marking abandoned pending document as Failed (physical file missing on startup): {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
-                    await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Uploaden blev afbrudt under genstart, og kildestien kunne ikke findes.");
+                    app.Logger.LogWarning("Marking abandoned unfinished document as Failed (physical file missing on startup): {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
+                    await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Behandlingen blev afbrudt under genstart, og kildestien kunne ikke findes.");
                 }
             }
         }

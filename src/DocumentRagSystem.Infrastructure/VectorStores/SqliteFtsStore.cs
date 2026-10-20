@@ -57,11 +57,16 @@ public class SqliteFtsStore : IFullTextSearchStore
 
                 using var cmd = conn.CreateCommand();
 
-                // Check if ChunkFts already exists and has the PageNumber column
+                // Check if ChunkFts already exists and whether it has the PageNumber column
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ChunkFts';";
+                var tableCount = Convert.ToInt64(cmd.ExecuteScalar());
+                bool tableExists = tableCount > 0;
                 bool hasPageNumber = false;
-                cmd.CommandText = "PRAGMA table_info(\"ChunkFts\");";
-                using (var reader = cmd.ExecuteReader())
+
+                if (tableExists)
                 {
+                    cmd.CommandText = "PRAGMA table_info(\"ChunkFts\");";
+                    using var reader = cmd.ExecuteReader();
                     while (reader.Read())
                     {
                         if (string.Equals(reader.GetString(1), "PageNumber", StringComparison.OrdinalIgnoreCase))
@@ -72,11 +77,8 @@ public class SqliteFtsStore : IFullTextSearchStore
                     }
                 }
 
-                if (!hasPageNumber)
+                if (!tableExists)
                 {
-                    cmd.CommandText = "DROP TABLE IF EXISTS ChunkFts;";
-                    cmd.ExecuteNonQuery();
-
                     cmd.CommandText = @"
                         CREATE VIRTUAL TABLE IF NOT EXISTS ChunkFts USING fts5(
                             ChunkId UNINDEXED, 
@@ -91,6 +93,50 @@ public class SqliteFtsStore : IFullTextSearchStore
                             tokenize='unicode61 remove_diacritics 2'
                         );";
                     cmd.ExecuteNonQuery();
+                }
+                else if (!hasPageNumber)
+                {
+                    _logger?.LogInformation("[SqliteFtsStore] Migrating ChunkFts table to add PageNumber column without data loss...");
+                    using var tx = conn.BeginTransaction();
+                    using var migCmd = conn.CreateCommand();
+                    migCmd.Transaction = tx;
+
+                    // 1. Rename existing table
+                    migCmd.CommandText = "ALTER TABLE ChunkFts RENAME TO ChunkFts_old;";
+                    migCmd.ExecuteNonQuery();
+
+                    // 2. Create new virtual table with PageNumber
+                    migCmd.CommandText = @"
+                        CREATE VIRTUAL TABLE ChunkFts USING fts5(
+                            ChunkId UNINDEXED, 
+                            DocumentId UNINDEXED, 
+                            IndexNumber UNINDEXED,
+                            FileName, 
+                            FilePath UNINDEXED,
+                            Text, 
+                            ArticleId, 
+                            SourceDocumentId,
+                            PageNumber UNINDEXED,
+                            tokenize='unicode61 remove_diacritics 2'
+                        );";
+                    migCmd.ExecuteNonQuery();
+
+                    // 3. Migrate all existing rows transactionally, populating PageNumber from IndexNumber + 1
+                    migCmd.CommandText = @"
+                        INSERT INTO ChunkFts(
+                            ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId, PageNumber
+                        )
+                        SELECT 
+                            ChunkId, DocumentId, IndexNumber, FileName, FilePath, Text, ArticleId, SourceDocumentId, (IndexNumber + 1)
+                        FROM ChunkFts_old;";
+                    migCmd.ExecuteNonQuery();
+
+                    // 4. Drop backup table
+                    migCmd.CommandText = "DROP TABLE ChunkFts_old;";
+                    migCmd.ExecuteNonQuery();
+
+                    tx.Commit();
+                    _logger?.LogInformation("[SqliteFtsStore] Successfully migrated existing ChunkFts rows with PageNumber column.");
                 }
 
                 _initializedDatabases[connStr] = true;
