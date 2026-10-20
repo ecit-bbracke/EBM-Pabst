@@ -67,10 +67,11 @@ public record ConversationState(
     [property: JsonPropertyName("last_intent")] string? LastIntent = null,
     [property: JsonPropertyName("last_effective_question")] string? LastEffectiveQuestion = null,
     [property: JsonPropertyName("topic_version")] int TopicVersion = 1,
-    [property: JsonPropertyName("turn_count")] int TurnCount = 0
+    [property: JsonPropertyName("turn_count")] int TurnCount = 0,
+    [property: JsonPropertyName("owner_user_id")] string? OwnerUserId = null
 )
 {
-    public static ConversationState CreateNew(string? conversationId = null, string topic = "general")
+    public static ConversationState CreateNew(string? conversationId = null, string topic = "general", string? ownerUserId = null)
     {
         return new ConversationState(
             ConversationId: conversationId ?? Guid.NewGuid().ToString(),
@@ -84,7 +85,8 @@ public record ConversationState(
             LastIntent: null,
             LastEffectiveQuestion: null,
             TopicVersion: 1,
-            TurnCount: 0
+            TurnCount: 0,
+            OwnerUserId: ownerUserId
         );
     }
 }

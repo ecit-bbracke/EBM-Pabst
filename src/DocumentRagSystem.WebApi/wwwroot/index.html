@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="da">
 <head>
     <meta charset="UTF-8">
@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Marked for real-time Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify for strict XSS sanitization -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <!-- Chart.js for interactive curves and comparison charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
@@ -97,7 +99,7 @@
         <div class="container mx-auto px-6 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-3">
                 <div class="bg-brand-500 p-2 rounded-lg text-white">
-                    <i class="fa-solid fa-brain text-xl"></i>
+                    <i class="fa-solid fa-robot text-xl"></i>
                 </div>
                 <div>
                     <h1 class="text-xl font-bold tracking-tight">Søgning i produkt dokumentation</h1>
@@ -109,7 +111,7 @@
                     <span>Chat Assistent</span>
                 </span>
                 <a href="documents.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
-                    <i class="fa-solid fa-folder-gear text-xs"></i>
+                    <i class="fa-solid fa-file text-xs"></i>
                     <span>Dokumenter</span>
                 </a>
                 <a href="databeregning.html" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-2 border border-brand-700/40">
@@ -148,7 +150,7 @@
                     </button>
                 </div>
 
-                <div class="flex-1 overflow-y-auto space-y-1.5 py-3 pr-1 min-h-[200px]" id="chat-list-container">
+                <div class="flex-1 overflow-y-auto space-y-1.5 py-3 min-h-[200px]" id="chat-list-container">
                     <!-- Dynamic Chat History Items Inserted Here -->
                 </div>
 
@@ -220,7 +222,7 @@
                 </div>
 
                 <!-- Chat Log Container (natural growth, no inner scrollbar) -->
-                <div class="p-6 space-y-6" id="chat-scroll-container">
+                <div class="p-4 space-y-4" id="chat-scroll-container">
                     <!-- Samtaleloggen -->
                     <div id="chat-conversation" class="space-y-6">
                         <!-- Loaded dynamically via JavaScript -->
@@ -609,7 +611,7 @@
                         <i class="fa-solid fa-robot text-lg"></i>
                     </div>
                     <div class="space-y-3 w-full">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">System</span>
+                        <span class="text-xs font-bold text-brand-600 tracking-wider block mb-1">Mutti</span>
                         <div class="text-slate-700 text-sm leading-relaxed">
                             Hej! Jeg er din intelligente tekniske assistent for ebm-papst ventilatorer. Hvad vil du gerne have hjælp til i dag?
                         </div>
@@ -666,12 +668,12 @@
 
                         chatLog.innerHTML += `
                             <div class="flex items-start space-x-3.5 p-5 rounded-xl bg-white border border-slate-200/80 shadow-sm">
-                                <div class="bg-amber-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
+                                <div class="bg-brand-500 text-white p-2.5 rounded-lg shrink-0 flex items-center justify-center w-10 h-10 shadow-sm">
                                     <i class="fa-solid fa-robot text-lg"></i>
                                 </div>
                                 <div class="space-y-1 flex-1 min-w-0">
                                     <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
-                                        <span class="text-xs font-bold text-amber-600 uppercase tracking-wider">Svar</span>
+                                        <span class="text-xs font-bold text-brand-600 tracking-wider">Mutti</span>
                                         <div class="flex items-center space-x-2">
                                             ${durationBadge}
                                             <button onclick="copyMessageText(this)" class="text-slate-400 hover:text-brand-600 transition p-1 rounded hover:bg-slate-100 flex items-center space-x-1 text-xs" title="Kopier svar til udklipsholder">
@@ -728,16 +730,16 @@
                 const activeClasses = isActive ? 'bg-slate-200 text-slate-900 font-semibold' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-900';
 
                 const item = document.createElement('div');
-                item.className = `chat-history-item group flex items-start justify-between px-3 py-2.5 rounded-lg text-sm transition cursor-pointer ${activeClasses}`;
+                item.className = `chat-history-item group flex items-center justify-between px-3 py-1 rounded-lg text-sm transition cursor-pointer ${activeClasses}`;
                 item.setAttribute('data-id', chat.id);
                 item.onclick = () => loadConversation(chat.id);
 
                 item.innerHTML = `
-                    <div class="flex items-start space-x-2.5 min-w-0 flex-1 pr-1.5">
-                        <i class="fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-xs shrink-0 mt-1"></i>
+                    <div class="flex items-center space-x-2.5 min-w-0 flex-1 pr-1.5">
+                        <i class="fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-xs shrink-0"></i>
                         <span class="block text-xs leading-relaxed break-words text-slate-700" title="${escapeHtml(chat.title)}">${escapeHtml(chat.title)}</span>
                     </div>
-                    <button onclick="deleteConversation('${chat.id}', event)" class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-slate-300 text-slate-400 hover:text-red-600 transition shrink-0 self-center" title="Slet samtale">
+                    <button onclick="deleteConversation('${chat.id}', event)" class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-slate-300 text-slate-400 hover:text-red-600 transition shrink-0 flex items-center justify-center" title="Slet samtale">
                         <i class="fa-regular fa-trash-can text-xs"></i>
                     </button>
                 `;

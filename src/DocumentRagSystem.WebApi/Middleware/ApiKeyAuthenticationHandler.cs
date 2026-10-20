@@ -71,7 +71,8 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         var claims = new[]
         {
             new Claim(ClaimTypes.Name, "ApiKeyClient"),
-            new Claim(ClaimTypes.Role, "ApiUser"),
+            new Claim(ClaimTypes.Role, "ApiUploadUser"),
+            new Claim("scope", "documents:upload"),
             new Claim("auth_method", "api_key")
         };
         var identity = new ClaimsIdentity(claims, Scheme.Name);
@@ -79,5 +80,17 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+
+    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    }
+
+    protected override Task HandleForbiddenAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
     }
 }

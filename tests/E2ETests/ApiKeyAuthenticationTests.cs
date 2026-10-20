@@ -45,62 +45,161 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
                 var mockStore = new Mock<IVectorStore>();
                 mockStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>())).ReturnsAsync(Array.Empty<Document>());
                 services.AddSingleton<IVectorStore>(mockStore.Object);
+
+                var procDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IDocumentProcessor));
+                if (procDescriptor != null) services.Remove(procDescriptor);
+                var mockProcessor = new Mock<IDocumentProcessor>();
+                mockProcessor.Setup(x => x.ProcessPdfAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new Document("doc-test", "test.pdf", "/uploads/test.pdf", DateTime.UtcNow, DocumentStatus.Processed));
+                services.AddSingleton<IDocumentProcessor>(mockProcessor.Object);
             });
         });
     }
 
+    private static MultipartFormDataContent CreateTestPdfContent()
+    {
+        var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent("%PDF-1.4 sample test content"u8.ToArray());
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        content.Add(fileContent, "file", "sample_upload.pdf");
+        return content;
+    }
+
     [Fact]
-    public async Task GetDocuments_WithValidXApiKeyHeader_ReturnsSuccess()
+    public async Task UploadDocument_WithValidXApiKeyHeader_ReturnsSuccess()
     {
         // Arrange
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
 
-        // Act
-        var response = await client.GetAsync("/api/documents");
+        // Act - API key MUST be allowed on document upload
+        using var content = CreateTestPdfContent();
+        var response = await client.PostAsync("/api/documents/upload", content);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
-    public async Task GetDocuments_WithValidBearerAuthorizationHeader_ReturnsSuccess()
+    public async Task UploadDocument_WithValidBearerAuthorizationHeader_ReturnsSuccess()
     {
         // Arrange
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ValidTestApiKey);
 
-        // Act
-        var response = await client.GetAsync("/api/documents");
+        // Act - API key via Bearer header MUST be allowed on document upload
+        using var content = CreateTestPdfContent();
+        var response = await client.PostAsync("/api/documents/upload", content);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
-    public async Task GetDocuments_WithInvalidApiKey_ReturnsUnauthorized()
+    public async Task GetDocumentStatus_WithValidApiKey_ReturnsSuccess()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - API key MUST be allowed on document upload status checks
+        var response = await client.GetAsync("/api/documents/status?fileName=test.pdf");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetDocuments_WithApiKey_ReturnsForbidden()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - API key MUST NOT have access to general document listing/search
+        var response = await client.GetAsync("/api/documents");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostQuery_WithApiKey_ReturnsForbidden()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - API key MUST NOT have access to chat queries
+        var response = await client.PostAsJsonAsync("/api/query", new QueryRequest("Spænding?"));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAdminUsers_WithApiKey_ReturnsForbidden()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - API key MUST NOT have administrative access
+        var response = await client.GetAsync("/api/admin/users");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UploadDocument_WithInvalidApiKey_ReturnsUnauthorized()
     {
         // Arrange
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", "wrong-secret-key-12345");
 
         // Act
-        var response = await client.GetAsync("/api/documents");
+        using var content = CreateTestPdfContent();
+        var response = await client.PostAsync("/api/documents/upload", content);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
-    public async Task GetDocuments_WithoutAnyApiKeyOrCookie_ReturnsUnauthorized()
+    public async Task UploadDocument_WithoutAnyApiKeyOrCookie_ReturnsUnauthorized()
     {
         // Arrange
         var client = _factory.CreateClient();
 
         // Act
-        var response = await client.GetAsync("/api/documents");
+        using var content = CreateTestPdfContent();
+        var response = await client.PostAsync("/api/documents/upload", content);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/uploads/../../appsettings.json")]
+    [InlineData("/uploads/..%2f..%2fappsettings.json")]
+    [InlineData("/uploads/%2e%2e%2f%2e%2e%2fappsettings.json")]
+    [InlineData("/uploads/subfolder/../../secret.pdf")]
+    public async Task Uploads_PathTraversal_ReturnsNotFound(string traversalUrl)
+    {
+        // Arrange
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true,
+            AllowAutoRedirect = false
+        });
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResponse.EnsureSuccessStatusCode();
+
+        // Act - Attempt path traversal outside uploads directory
+        var response = await client.GetAsync(traversalUrl);
+
+        // Assert - Path traversal MUST be rejected with 404 Not Found
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }
