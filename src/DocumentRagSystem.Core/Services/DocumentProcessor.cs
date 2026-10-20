@@ -20,12 +20,13 @@ public class DocumentProcessor : IDocumentProcessor
     private readonly IDocumentRepository? _documentRepository;
     private readonly ILanguageDetector _languageDetector;
     private readonly ILogger<DocumentProcessor>? _logger;
+    private readonly string _uploadsDirectory;
 
     // Constructor to support the exact Unit Test signature from prompt
     public DocumentProcessor(
         ITextExtractor textExtractor,
         IChunkingService chunkingService)
-        : this(textExtractor, chunkingService, null, null, null, null, null, null)
+        : this(textExtractor, chunkingService, null, null, null, null, null, null, null)
     {
     }
 
@@ -36,7 +37,7 @@ public class DocumentProcessor : IDocumentProcessor
         IEmbeddingService? embeddingService,
         IVectorStore? vectorStore,
         IDocumentRepository? documentRepository)
-        : this(textExtractor, chunkingService, embeddingService, vectorStore, documentRepository, null, null, null)
+        : this(textExtractor, chunkingService, embeddingService, vectorStore, documentRepository, null, null, null, null)
     {
     }
 
@@ -49,7 +50,8 @@ public class DocumentProcessor : IDocumentProcessor
         IDocumentRepository? documentRepository,
         ILanguageDetector? languageDetector,
         ILogger<DocumentProcessor>? logger = null,
-        IFullTextSearchStore? ftsStore = null)
+        IFullTextSearchStore? ftsStore = null,
+        string? uploadsDirectory = null)
     {
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _chunkingService = chunkingService ?? throw new ArgumentNullException(nameof(chunkingService));
@@ -59,11 +61,14 @@ public class DocumentProcessor : IDocumentProcessor
         _languageDetector = languageDetector ?? new DefaultLanguageDetector();
         _logger = logger;
         _ftsStore = ftsStore;
+        _uploadsDirectory = !string.IsNullOrWhiteSpace(uploadsDirectory)
+            ? uploadsDirectory
+            : Path.Combine(AppContext.BaseDirectory, "uploads");
     }
 
-    public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null)
+    public async Task<Document> ProcessPdfAsync(Stream pdfStream, string fileName, string? documentId = null, CancellationToken cancellationToken = default)
     {
-        var uploadsDir = Path.Combine(AppContext.BaseDirectory, "uploads");
+        var uploadsDir = _uploadsDirectory;
         if (!Directory.Exists(uploadsDir))
         {
             Directory.CreateDirectory(uploadsDir);
@@ -118,69 +123,15 @@ public class DocumentProcessor : IDocumentProcessor
             ?? existingDoc?.Id
             ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
 
-        // 2. Remove old physical file if overwriting
-        if (existingDoc != null && !string.IsNullOrWhiteSpace(existingDoc.FilePath))
-        {
-            try
-            {
-                var oldDiskName = Path.GetFileName(Uri.UnescapeDataString(existingDoc.FilePath));
-                var oldDiskPath = Path.Combine(uploadsDir, oldDiskName);
-                if (File.Exists(oldDiskPath))
-                {
-                    File.Delete(oldDiskPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Could not delete old file {FilePath} during document overwrite.", existingDoc.FilePath);
-            }
-        }
-
-        // 3. Delete old chunks from vector store and FTS store if overwriting
-        if (existingDoc != null)
-        {
-            if (_vectorStore != null)
-            {
-                try
-                {
-                    await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id);
-                    if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to delete old chunks for document {DocumentId} during overwrite.", existingDoc.Id);
-                }
-            }
-
-            if (_ftsStore != null)
-            {
-                try
-                {
-                    await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id);
-                    if (!string.Equals(existingDoc.Id, targetDocumentId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        await _ftsStore.DeleteChunksByDocumentIdAsync(targetDocumentId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to delete old FTS5 chunks for document {DocumentId} during overwrite.", existingDoc.Id);
-                }
-            }
-        }
-
         var safeFileName = Path.GetFileName(fileName);
         var uniqueFileName = $"{Guid.NewGuid()}_{safeFileName}";
         var filePath = Path.Combine(uploadsDir, uniqueFileName);
         var documentUrl = $"/uploads/{Uri.EscapeDataString(uniqueFileName)}";
 
-        // Copy stream to file
+        // Copy stream to staged file first
         using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
         {
-            await pdfStream.CopyToAsync(fileStream);
+            await pdfStream.CopyToAsync(fileStream, cancellationToken);
         }
 
         var document = new Document(
@@ -229,6 +180,15 @@ public class DocumentProcessor : IDocumentProcessor
                 var message = $"Dokumentet '{fileName}' indeholder ingen digital tekst (f.eks. indscannet billede eller tegning uden OCR-lag) og kan ikke indekseres til AI-søgning.";
                 _logger?.LogWarning("[DocumentProcessor] File '{FileName}' contains no extractable text. Setting status to Failed.", fileName);
 
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+                    }
+                }
+                catch { }
+
                 document = document with
                 {
                     Status = DocumentStatus.Failed,
@@ -264,27 +224,56 @@ public class DocumentProcessor : IDocumentProcessor
 
                 if (_embeddingService != null && _vectorStore != null && chunksWithMetaList.Count > 0)
                 {
-                    // Generate embeddings and store in vector store concurrently (throttled to 6 parallel tasks)
-                    using var semaphore = new SemaphoreSlim(6);
-                    var embeddingTasks = chunksWithMetaList.Select(async chunkWithMeta =>
+                    // Generate embeddings in batch via batchEmbedContents
+                    var texts = chunksWithMetaList.Select(c => c.Text).ToList();
+                    IList<float[]>? embeddings = null;
+                    try
                     {
-                        await semaphore.WaitAsync();
-                        try
-                        {
-                            var embedding = await _embeddingService.GenerateEmbeddingAsync(chunkWithMeta.Text);
-                            await _vectorStore.AddChunkAsync(chunkWithMeta, embedding);
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    });
+                        embeddings = await _embeddingService.GenerateEmbeddingsAsync(texts, cancellationToken);
+                    }
+                    catch
+                    {
+                        // Fallback to sequential GenerateEmbeddingAsync
+                    }
 
-                    await Task.WhenAll(embeddingTasks);
+                    if (embeddings == null || embeddings.Count == 0 || embeddings.Any(e => e == null || e.Length == 0))
+                    {
+                        var fallbackList = new List<float[]>(texts.Count);
+                        foreach (var text in texts)
+                        {
+                            var emb = await _embeddingService.GenerateEmbeddingAsync(text, cancellationToken);
+                            if (emb == null || emb.Length == 0)
+                            {
+                                emb = await _embeddingService.GenerateEmbeddingAsync(text);
+                            }
+                            fallbackList.Add((emb != null && emb.Length > 0) ? emb : new float[768]);
+                        }
+                        embeddings = fallbackList;
+                    }
+
+                    var chunksWithEmbeddings = new List<(DocumentChunk Chunk, float[] Embedding)>(chunksWithMetaList.Count);
+                    for (int i = 0; i < chunksWithMetaList.Count && i < embeddings.Count; i++)
+                    {
+                        chunksWithEmbeddings.Add((chunksWithMetaList[i], embeddings[i]));
+                    }
+
+                    // Clear old chunks before inserting updated chunks
+                    if (existingDoc != null)
+                    {
+                        try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                    }
+
+                    // Upsert all points into vector store in a single batch
+                    await _vectorStore.AddChunksAsync(chunksWithEmbeddings, cancellationToken);
                 }
 
                 if (_ftsStore != null && chunksWithMetaList.Count > 0)
                 {
+                    if (existingDoc != null)
+                    {
+                        try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                    }
+
                     try
                     {
                         await _ftsStore.AddChunksAsync(chunksWithMetaList);
@@ -327,9 +316,36 @@ public class DocumentProcessor : IDocumentProcessor
                     await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
+
+            // Safe cleanup: Now that overwrite has succeeded, clean up previous physical file
+            if (existingDoc != null && !string.IsNullOrWhiteSpace(existingDoc.FilePath) && !string.Equals(existingDoc.FilePath, documentUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var oldDiskName = Path.GetFileName(Uri.UnescapeDataString(existingDoc.FilePath));
+                    var oldDiskPath = Path.Combine(uploadsDir, oldDiskName);
+                    if (File.Exists(oldDiskPath))
+                    {
+                        File.Delete(oldDiskPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Could not delete old file {FilePath} after successful document overwrite.", existingDoc.FilePath);
+                }
+            }
         }
         catch (Exception ex)
         {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+            catch { }
+
             document = document with { Status = DocumentStatus.Failed, ErrorMessage = ex.Message };
             if (_documentRepository != null)
             {

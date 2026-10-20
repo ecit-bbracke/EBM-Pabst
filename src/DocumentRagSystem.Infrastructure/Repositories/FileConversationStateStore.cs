@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -12,7 +13,7 @@ namespace DocumentRagSystem.Infrastructure.Repositories;
 public class FileConversationStateStore : IConversationStateStore
 {
     private readonly string _storageDirectory;
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _conversationLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true,
@@ -26,6 +27,11 @@ public class FileConversationStateStore : IConversationStateStore
         {
             Directory.CreateDirectory(_storageDirectory);
         }
+    }
+
+    private SemaphoreSlim GetLock(string conversationId)
+    {
+        return _conversationLocks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
     }
 
     private string GetFilePath(string conversationId)
@@ -43,9 +49,13 @@ public class FileConversationStateStore : IConversationStateStore
         if (!File.Exists(path))
             return null;
 
-        await _lock.WaitAsync();
+        var convLock = GetLock(conversationId);
+        await convLock.WaitAsync();
         try
         {
+            if (!File.Exists(path))
+                return null;
+
             var json = await File.ReadAllTextAsync(path);
             var state = JsonSerializer.Deserialize<ConversationState>(json, _jsonOptions);
             // Touch file write time to update last accessed time
@@ -58,7 +68,7 @@ public class FileConversationStateStore : IConversationStateStore
         }
         finally
         {
-            _lock.Release();
+            convLock.Release();
         }
     }
 
@@ -72,14 +82,15 @@ public class FileConversationStateStore : IConversationStateStore
         var path = GetFilePath(conversationId);
         var json = JsonSerializer.Serialize(state, _jsonOptions);
 
-        await _lock.WaitAsync();
+        var convLock = GetLock(conversationId);
+        await convLock.WaitAsync();
         try
         {
             await File.WriteAllTextAsync(path, json);
         }
         finally
         {
-            _lock.Release();
+            convLock.Release();
         }
     }
 
@@ -89,17 +100,19 @@ public class FileConversationStateStore : IConversationStateStore
             return;
 
         var path = GetFilePath(conversationId);
-        await _lock.WaitAsync();
+        var convLock = GetLock(conversationId);
+        await convLock.WaitAsync();
         try
         {
             if (File.Exists(path))
             {
                 File.Delete(path);
             }
+            _conversationLocks.TryRemove(conversationId, out _);
         }
         finally
         {
-            _lock.Release();
+            convLock.Release();
         }
     }
 
@@ -127,29 +140,35 @@ public class FileConversationStateStore : IConversationStateStore
 
         var cutoff = DateTime.UtcNow - ttl;
 
-        await _lock.WaitAsync();
-        try
+        var files = Directory.GetFiles(_storageDirectory, "*.json");
+        foreach (var file in files)
         {
-            var files = Directory.GetFiles(_storageDirectory, "*.json");
-            foreach (var file in files)
+            try
             {
-                try
+                var lastWrite = File.GetLastWriteTimeUtc(file);
+                if (lastWrite < cutoff)
                 {
-                    var lastWrite = File.GetLastWriteTimeUtc(file);
-                    if (lastWrite < cutoff)
+                    var convId = Path.GetFileNameWithoutExtension(file);
+                    var convLock = GetLock(convId);
+                    await convLock.WaitAsync();
+                    try
                     {
-                        File.Delete(file);
+                        if (File.Exists(file))
+                        {
+                            File.Delete(file);
+                        }
+                        _conversationLocks.TryRemove(convId, out _);
+                    }
+                    finally
+                    {
+                        convLock.Release();
                     }
                 }
-                catch
-                {
-                    // Ignore single file cleanup errors
-                }
             }
-        }
-        finally
-        {
-            _lock.Release();
+            catch
+            {
+                // Ignore single file cleanup errors
+            }
         }
     }
 }

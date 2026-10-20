@@ -48,6 +48,8 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
 // Set up Language Detector & overall DocumentProcessor
 builder.Services.AddSingleton<ILanguageDetector, DefaultLanguageDetector>();
 
+var uploadsDirectory = builder.Configuration["Uploads:Directory"];
+
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
     new DocumentProcessor(
         sp.GetRequiredService<ITextExtractor>(),
@@ -56,7 +58,9 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>(sp =>
         sp.GetRequiredService<IVectorStore>(),
         sp.GetRequiredService<IDocumentRepository>(),
         sp.GetRequiredService<ILanguageDetector>(),
-        sp.GetService<Microsoft.Extensions.Logging.ILogger<DocumentProcessor>>()
+        sp.GetService<Microsoft.Extensions.Logging.ILogger<DocumentProcessor>>(),
+        null,
+        uploadsDirectory
     ));
 
 builder.Services.AddHostedService<Worker>();

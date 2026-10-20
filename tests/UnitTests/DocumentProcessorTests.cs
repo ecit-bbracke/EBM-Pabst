@@ -74,8 +74,8 @@ public class DocumentProcessorTests
         Assert.NotNull(result);
         Assert.Equal(DocumentStatus.Processed, result.Status);
         Assert.Equal("en", result.Language);
-        mockEmbeddingService.Verify(x => x.GenerateEmbeddingAsync(It.IsAny<string>()), Times.Once);
-        mockVectorStore.Verify(x => x.AddChunkAsync(It.Is<DocumentChunk>(c => c.OriginalFileName == "fan_datasheet_en.pdf" && c.FileName == "fan_datasheet_en.pdf"), It.IsAny<float[]>()), Times.Once);
+        mockVectorStore.Verify(x => x.AddChunksAsync(It.Is<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>(list =>
+            list.Any(item => item.Chunk.OriginalFileName == "fan_datasheet_en.pdf" && item.Chunk.FileName == "fan_datasheet_en.pdf"))), Times.Once);
         mockRepo.Verify(x => x.UpdateDocumentStatusAsync(result.Id, DocumentStatus.Processed, null, "en"), Times.Once);
     }
 
@@ -174,9 +174,9 @@ public class DocumentProcessorTests
         Assert.Equal("9293512011", result.ArticleId);
         Assert.Equal("3258_J_2H3PU-011_PDB_EN", result.SourceDocumentId);
 
-        mockVectorStore.Verify(x => x.AddChunkAsync(
-            It.Is<DocumentChunk>(c => c.ArticleId == "9293512011" && c.SourceDocumentId == "3258_J_2H3PU-011_PDB_EN"),
-            It.IsAny<float[]>()), Times.Once);
+        mockVectorStore.Verify(x => x.AddChunksAsync(
+            It.Is<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>(list =>
+                list.Any(c => c.Chunk.ArticleId == "9293512011" && c.Chunk.SourceDocumentId == "3258_J_2H3PU-011_PDB_EN"))), Times.Once);
     }
 
     [Fact]
@@ -249,8 +249,8 @@ public class DocumentProcessorTests
         // 2. Old chunks in vector store should be deleted
         mockVectorStore.Verify(x => x.DeleteDocumentChunksAsync("existing-doc-id"), Times.Once);
 
-        // 3. New chunks should be inserted
-        mockVectorStore.Verify(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()), Times.Once);
+        // 3. New chunks should be inserted in batch
+        mockVectorStore.Verify(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>()), Times.Once);
 
         // 4. Repository should be updated
         mockRepo.Verify(x => x.UpdateDocumentStatusAsync("existing-doc-id", DocumentStatus.Processed, null, "en"), Times.Once);
@@ -345,7 +345,7 @@ public class DocumentProcessorTests
     }
 
     [Fact]
-    public async Task ProcessPdfAsync_WhenMultipleChunks_GeneratesEmbeddingsConcurrently_WithThrottling()
+    public async Task ProcessPdfAsync_WhenMultipleChunks_GeneratesEmbeddingsInBatch_AndUpsertsBatchToVectorStore()
     {
         // Arrange
         var mockTextExtractor = new Mock<ITextExtractor>();
@@ -363,32 +363,15 @@ public class DocumentProcessorTests
         mockChunkingService.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(chunks);
 
-        int currentConcurrency = 0;
-        int maxObservedConcurrency = 0;
-        object lockObj = new();
-
         var mockEmbeddingService = new Mock<IEmbeddingService>();
-        mockEmbeddingService.Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>()))
-            .Returns(async () =>
+        mockEmbeddingService.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<IList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IList<string> texts, CancellationToken _) =>
             {
-                var current = System.Threading.Interlocked.Increment(ref currentConcurrency);
-                lock (lockObj)
-                {
-                    if (current > maxObservedConcurrency)
-                    {
-                        maxObservedConcurrency = current;
-                    }
-                }
-
-                // Small delay to simulate API round-trip and measure concurrency
-                await Task.Delay(30);
-
-                System.Threading.Interlocked.Decrement(ref currentConcurrency);
-                return new float[] { 0.1f, 0.2f, 0.3f };
+                return texts.Select(_ => new float[] { 0.1f, 0.2f, 0.3f }).ToList();
             });
 
         var mockVectorStore = new Mock<IVectorStore>();
-        mockVectorStore.Setup(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()))
+        mockVectorStore.Setup(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var mockRepo = new Mock<IDocumentRepository>();
@@ -414,15 +397,11 @@ public class DocumentProcessorTests
         Assert.NotNull(result);
         Assert.Equal(DocumentStatus.Processed, result.Status);
 
-        // 1. All 15 chunks must be embedded
-        mockEmbeddingService.Verify(x => x.GenerateEmbeddingAsync(It.IsAny<string>()), Times.Exactly(15));
-        mockVectorStore.Verify(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()), Times.Exactly(15));
+        // 1. All 15 chunks must be passed to GenerateEmbeddingsAsync in a single batch call
+        mockEmbeddingService.Verify(x => x.GenerateEmbeddingsAsync(It.Is<IList<string>>(l => l.Count == 15), It.IsAny<CancellationToken>()), Times.Once);
 
-        // 2. Concurrency must be greater than 1 (proving parallel execution, not sequential)
-        Assert.True(maxObservedConcurrency > 1, $"Expected parallel execution (concurrency > 1), but observed {maxObservedConcurrency}");
-
-        // 3. Concurrency must be throttled to <= 6 (proving the SemaphoreSlim throttling works)
-        Assert.True(maxObservedConcurrency <= 6, $"Expected throttled concurrency <= 6, but observed {maxObservedConcurrency}");
+        // 2. All 15 chunks must be upserted to vector store in a single batch call
+        mockVectorStore.Verify(x => x.AddChunksAsync(It.Is<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>(l => l.Count() == 15), It.IsAny<CancellationToken>()), Times.Once);
 
         // Clean up file
         var diskName = Path.GetFileName(Uri.UnescapeDataString(result.FilePath));

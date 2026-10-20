@@ -133,6 +133,40 @@ public class TimingAndPromptLoggingTests
     }
 
     [Fact]
+    public async Task GeminiEmbeddingService_ShouldGenerateBatchEmbeddings_AndCacheResults()
+    {
+        // Arrange
+        var logger = new TestLogger<GeminiEmbeddingService>();
+        var service = new GeminiEmbeddingService(null, logger: logger);
+
+        var texts = new List<string>
+        {
+            "Text chunk 1",
+            "Text chunk 2",
+            "Text chunk 3"
+        };
+
+        // Act 1: Initial batch generation
+        var embeddings = await service.GenerateEmbeddingsAsync(texts);
+
+        // Assert 1
+        Assert.NotNull(embeddings);
+        Assert.Equal(3, embeddings.Count);
+        foreach (var emb in embeddings)
+        {
+            Assert.Equal(768, emb.Length);
+        }
+
+        // Act 2: Second call should retrieve from cache
+        var cachedEmbeddings = await service.GenerateEmbeddingsAsync(texts);
+
+        // Assert 2: Vectors must match perfectly
+        Assert.Equal(embeddings[0], cachedEmbeddings[0]);
+        Assert.Equal(embeddings[1], cachedEmbeddings[1]);
+        Assert.Equal(embeddings[2], cachedEmbeddings[2]);
+    }
+
+    [Fact]
     public async Task InputGovernor_And_EvidenceEvaluator_ShouldLogPromptsAndTimings()
     {
         // Arrange

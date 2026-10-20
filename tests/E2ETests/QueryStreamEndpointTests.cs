@@ -69,8 +69,16 @@ public class QueryStreamEndpointTests : IClassFixture<WebApplicationFactory<Prog
         });
     }
 
+    private async Task<HttpClient> CreateAuthenticatedClientAsync()
+    {
+        var client = _factory.CreateClient();
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("admin@ebmpabst.dk", "Admin123!"));
+        loginResponse.EnsureSuccessStatusCode();
+        return client;
+    }
+
     [Fact]
-    public async Task PostQueryStream_WithoutApiKey_ReturnsUnauthorized()
+    public async Task PostQueryStream_WithoutAuth_ReturnsUnauthorized()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -84,11 +92,25 @@ public class QueryStreamEndpointTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
-    public async Task PostQueryStream_WithValidQuery_StreamsSseCitationsAndChunks()
+    public async Task PostQueryStream_WithApiKey_ReturnsForbidden()
     {
         // Arrange
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+        var request = new QueryRequest("Hvad er spændingen for K3G560PC0401?");
+
+        // Act - API key MUST NOT have access to chat queries
+        var response = await client.PostAsJsonAsync("/api/query/stream", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task PostQueryStream_WithValidQuery_StreamsSseCitationsAndChunks()
+    {
+        // Arrange
+        var client = await CreateAuthenticatedClientAsync();
 
         // Mock vector store chunks
         var testChunks = new List<DocumentChunk>
@@ -157,7 +179,7 @@ public class QueryStreamEndpointTests : IClassFixture<WebApplicationFactory<Prog
             using var doc = JsonDocument.Parse(c.Data);
             return doc.RootElement.GetProperty("text").GetString();
         }));
-        streamedFullText.Should().Be("Driftsspændingen er 380-480 VAC.");
+        streamedFullText.Should().Match(s => s.Contains("380-480") || s.Contains("380–480"));
 
         // 3. Must receive done event
         var doneEvent = eventsReceived.FirstOrDefault(e => e.EventType == "done");

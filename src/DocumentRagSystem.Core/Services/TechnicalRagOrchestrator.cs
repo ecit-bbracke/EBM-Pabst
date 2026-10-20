@@ -210,7 +210,21 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var effectiveConvId = conversationId ?? initialConversationState?.ConversationId ?? Guid.NewGuid().ToString();
         _logger?.LogInformation("Starting RAG query processing for question: \"{Question}\" (ConversationId: {ConversationId})", question, effectiveConvId);
 
-        // 1. Load Conversation State
+        // 0. Speculatively initiate initial hybrid/vector search in parallel with conversation state loading and query refinement
+        var rawImmediateProducts = _ebmParser.ExtractProductsFromText(question);
+        var rawProductCodes = rawImmediateProducts.Select(p => p.CleanCode).Distinct().ToList();
+
+        Task<IEnumerable<DocumentChunk>>? speculativeSearchTask = null;
+        if ((rawProductCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        {
+            speculativeSearchTask = PerformHybridSearchAsync(question, rawProductCodes, vectorStore, _documentRepository);
+        }
+        else
+        {
+            speculativeSearchTask = vectorStore.SearchAsync(question);
+        }
+
+        // 1. Load Conversation State (runs concurrently with speculative search)
         var currentState = initialConversationState ?? await _stateStore.GetStateAsync(effectiveConvId) ?? ConversationState.CreateNew(effectiveConvId);
         var stateBefore = currentState;
         timings["StateLoad"] = stageStopwatch.ElapsedMilliseconds;
@@ -302,7 +316,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var productCodes = immediateProducts.Select(p => p.CleanCode).Distinct().ToList();
 
         Task<IEnumerable<DocumentChunk>> initialSearchTask;
-        if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        if (string.Equals(effectiveQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase) && speculativeSearchTask != null)
+        {
+            initialSearchTask = speculativeSearchTask;
+        }
+        else if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
         {
             initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, productCodes, vectorStore, _documentRepository);
         }
@@ -573,6 +591,20 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var effectiveConvId = conversationId ?? initialConversationState?.ConversationId ?? Guid.NewGuid().ToString();
         _logger?.LogInformation("Starting streaming RAG query processing for question: \"{Question}\" (ConversationId: {ConversationId})", question, effectiveConvId);
 
+        // 0. Speculatively initiate initial hybrid/vector search in parallel with conversation state loading and query refinement
+        var rawImmediateProducts = _ebmParser.ExtractProductsFromText(question);
+        var rawProductCodes = rawImmediateProducts.Select(p => p.CleanCode).Distinct().ToList();
+
+        Task<IEnumerable<DocumentChunk>>? speculativeSearchTask = null;
+        if ((rawProductCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        {
+            speculativeSearchTask = PerformHybridSearchAsync(question, rawProductCodes, vectorStore, _documentRepository);
+        }
+        else
+        {
+            speculativeSearchTask = vectorStore.SearchAsync(question);
+        }
+
         // 1. Load Conversation State
         var currentState = initialConversationState ?? await _stateStore.GetStateAsync(effectiveConvId) ?? ConversationState.CreateNew(effectiveConvId);
         var stateBefore = currentState;
@@ -669,7 +701,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var productCodes = immediateProducts.Select(p => p.CleanCode).Distinct().ToList();
 
         Task<IEnumerable<DocumentChunk>> initialSearchTask;
-        if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
+        if (string.Equals(effectiveQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase) && speculativeSearchTask != null)
+        {
+            initialSearchTask = speculativeSearchTask;
+        }
+        else if ((productCodes.Count > 0 && _documentRepository != null) || _ftsStore != null)
         {
             initialSearchTask = PerformHybridSearchAsync(effectiveQuestion, productCodes, vectorStore, _documentRepository);
         }

@@ -177,4 +177,46 @@ public class ConversationStateStoreTests : IDisposable
         // Assert
         Assert.Null(cleared);
     }
+
+    [Fact]
+    public async Task FileConversationStateStore_ConcurrentAccessToDifferentConversations_ExecutesConcurrentlyWithoutErrors()
+    {
+        // Arrange
+        var store = new FileConversationStateStore(_testTempDir);
+        var tasks = new List<Task>();
+
+        // Act - Simulate 20 concurrent tasks saving and reading 20 different conversations
+        for (int i = 0; i < 20; i++)
+        {
+            int turn = i;
+            var convId = $"conv-concurrent-{turn}";
+            var state = new ConversationState(
+                ConversationId: convId,
+                Topic: $"topic-{turn}",
+                ActiveEntities: new List<ConversationEntity> { new("fan", $"Model-{turn}") },
+                ActiveConstraints: new List<ConversationConstraint>(),
+                TurnCount: turn
+            );
+
+            tasks.Add(Task.Run(async () =>
+            {
+                await store.SaveStateAsync(convId, state);
+                var reloaded = await store.GetStateAsync(convId);
+                Assert.NotNull(reloaded);
+                Assert.Equal(convId, reloaded.ConversationId);
+                Assert.Equal(turn, reloaded.TurnCount);
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Assert - All 20 conversations exist and are intact
+        for (int i = 0; i < 20; i++)
+        {
+            var convId = $"conv-concurrent-{i}";
+            var state = await store.GetStateAsync(convId);
+            Assert.NotNull(state);
+            Assert.Equal($"topic-{i}", state.Topic);
+        }
+    }
 }
