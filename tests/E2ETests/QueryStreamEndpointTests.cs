@@ -39,6 +39,12 @@ public class QueryStreamEndpointTests : IClassFixture<WebApplicationFactory<Prog
         _mockResolver.Setup(x => x.Resolve(It.IsAny<string>()))
             .Returns(_mockLlmClient.Object);
 
+        _mockLlmClient
+            .Setup(x => x.GenerateStructuredAsync<OutputGovernorResult>(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlmStructuredResult<OutputGovernorResult>(
+                new OutputGovernorResult(true, new List<OutputGovernorIssue>(), "APPROVE"),
+                new LlmExecutionMetadata("Mock", "mock-model", 10, 10, 10, true, 1)));
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_stream_{Guid.NewGuid():N}.db");

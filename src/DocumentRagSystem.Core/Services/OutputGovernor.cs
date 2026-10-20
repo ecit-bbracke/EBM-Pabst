@@ -76,7 +76,7 @@ You are the Output Governor. Verify if the Proposed Answer is factually supporte
             var structuredRes = await _llmClient.GenerateStructuredAsync<OutputGovernorResult>(req);
             stopwatch.Stop();
 
-            var result = structuredRes.Value;
+            var result = structuredRes?.Value;
             if (result != null)
             {
                 var issues = result.Issues ?? new List<OutputGovernorIssue>();
