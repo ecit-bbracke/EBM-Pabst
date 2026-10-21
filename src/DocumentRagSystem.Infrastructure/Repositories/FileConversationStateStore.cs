@@ -153,11 +153,12 @@ public class FileConversationStateStore : IConversationStateStore
                     await convLock.WaitAsync();
                     try
                     {
-                        if (File.Exists(file))
+                        // Recheck expiration under the lock to prevent deleting fresh saves that completed while waiting
+                        if (File.Exists(file) && File.GetLastWriteTimeUtc(file) < cutoff)
                         {
                             File.Delete(file);
+                            _conversationLocks.TryRemove(convId, out _);
                         }
-                        _conversationLocks.TryRemove(convId, out _);
                     }
                     finally
                     {

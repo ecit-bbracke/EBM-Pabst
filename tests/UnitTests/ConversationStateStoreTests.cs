@@ -219,4 +219,35 @@ public class ConversationStateStoreTests : IDisposable
             Assert.Equal($"topic-{i}", state.Topic);
         }
     }
+
+    [Fact]
+    public async Task FileConversationStateStore_WhenFileRefreshedDuringLockAcquisition_DoesNotDeleteFreshState()
+    {
+        // Arrange
+        var store = new FileConversationStateStore(_testTempDir);
+        var convId = "conv-refresh-lock-test";
+        var state = new ConversationState(
+            ConversationId: convId,
+            Topic: "industrial fans",
+            ActiveEntities: new List<ConversationEntity>(),
+            ActiveConstraints: new List<ConversationConstraint>(),
+            TurnCount: 1
+        );
+
+        await store.SaveStateAsync(convId, state);
+        var filePath = Path.Combine(_testTempDir, $"{convId}.json");
+        Assert.True(File.Exists(filePath));
+
+        // Simulate a fresh write that updated the file timestamp
+        File.SetLastWriteTimeUtc(filePath, DateTime.UtcNow);
+
+        // Act: Run cleanup with 7-day TTL
+        await store.ClearExpiredStatesAsync(TimeSpan.FromDays(7));
+
+        // Assert: File must NOT have been deleted because it was rechecked under the lock
+        Assert.True(File.Exists(filePath));
+        var retrieved = await store.GetStateAsync(convId);
+        Assert.NotNull(retrieved);
+        Assert.Equal("industrial fans", retrieved.Topic);
+    }
 }
