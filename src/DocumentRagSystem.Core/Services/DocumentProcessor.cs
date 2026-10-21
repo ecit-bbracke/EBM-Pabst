@@ -147,8 +147,8 @@ public class DocumentProcessor : IDocumentProcessor
             }
         }
 
-        var targetDocumentId = documentId
-            ?? existingDoc?.Id
+        var targetDocumentId = existingDoc?.Id
+            ?? documentId
             ?? (!string.IsNullOrWhiteSpace(sourceDocId) ? sourceDocId : Guid.NewGuid().ToString());
 
         bool isOverwritingCompletedDoc = existingDoc != null && (existingDoc.Status == DocumentStatus.Processed || existingDoc.Status == DocumentStatus.Skipped);
@@ -439,7 +439,7 @@ public class DocumentProcessor : IDocumentProcessor
             catch { }
 
             document = document with { Status = DocumentStatus.Failed, ErrorMessage = ex.Message };
-            if (_documentRepository != null)
+            if (_documentRepository != null && !isOverwritingCompletedDoc)
             {
                 await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Failed, ex.Message);
             }

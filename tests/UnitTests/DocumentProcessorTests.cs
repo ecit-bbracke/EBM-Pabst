@@ -598,4 +598,116 @@ public class DocumentProcessorTests
         // Assert: Concurrency for the same document key was strictly serialized (maxConcurrency == 1)
         Assert.Equal(1, maxConcurrency);
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenExistingDocumentFoundInsideLock_ReusesCanonicalIdInsteadOfPreallocatedId()
+    {
+        // Arrange
+        var existingDoc = new Document(
+            Id: "canonical-doc-id-999",
+            FileName: "concurrent_target.pdf",
+            FilePath: "/uploads/old_target.pdf",
+            UploadedAt: DateTime.UtcNow.AddHours(-1),
+            Status: DocumentStatus.Processed
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Sample technical text for document");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("c1", "canonical-doc-id-999", "Sample text", 0) });
+
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<float[]> { new float[] { 0.1f, 0.2f } });
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.GetChunksByDocumentAndIndicesAsync("canonical-doc-id-999", It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk>());
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("concurrent_target.pdf"))
+            .ReturnsAsync(existingDoc);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunker.Object,
+            mockEmbedding.Object,
+            mockVector.Object,
+            mockRepo.Object
+        );
+
+        // Act: Endpoint passed a preallocated new GUID "preallocated-ephemeral-id"
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2 }), "concurrent_target.pdf", "preallocated-ephemeral-id");
+
+        // Assert: It must reuse the canonical ID "canonical-doc-id-999" and NOT create a new record with "preallocated-ephemeral-id"
+        Assert.NotNull(result);
+        Assert.Equal("canonical-doc-id-999", result.Id);
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync("canonical-doc-id-999", DocumentStatus.Processed, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        mockRepo.Verify(x => x.AddDocumentAsync(It.Is<Document>(d => d.Id == "preallocated-ephemeral-id")), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenReplacementFails_PreservesValidOriginalDocumentStatus()
+    {
+        // Arrange: Existing document is Processed and valid
+        var existingDoc = new Document(
+            Id: "valid-original-doc-777",
+            FileName: "valid_fan.pdf",
+            FilePath: "/uploads/valid_fan.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-2),
+            Status: DocumentStatus.Processed
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("New replacement content");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("c1", "valid-original-doc-777", "New text", 0) });
+
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<float[]> { new float[] { 0.1f, 0.2f } });
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.GetChunksByDocumentAndIndicesAsync("valid-original-doc-777", It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk>());
+        // Vector store fails during replacement upsert
+        mockVector.Setup(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Qdrant connection dropped during upsert"));
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("valid_fan.pdf"))
+            .ReturnsAsync(existingDoc);
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("valid-original-doc-777"))
+            .ReturnsAsync(existingDoc);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunker.Object,
+            mockEmbedding.Object,
+            mockVector.Object,
+            mockRepo.Object
+        );
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2 }), "valid_fan.pdf", "valid-original-doc-777");
+        });
+
+        // The valid original document must NOT be marked Failed in the repository!
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(
+            "valid-original-doc-777",
+            DocumentStatus.Failed,
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>()
+        ), Times.Never);
+    }
 }
