@@ -835,8 +835,82 @@ public class DocumentProcessorTests
             await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "meta_fail.pdf", "doc-meta-fail");
         });
 
-        // Verification: Extended rollback executed and restored the original vectors!
+        // Verification: Extended rollback executed and restored the original vectors and original metadata!
         Assert.True(vectorRestored);
         mockVector.Verify(x => x.DeleteDocumentChunksAsync("doc-meta-fail", It.IsAny<CancellationToken>()), Times.AtLeast(2)); // Deleted before upsert and deleted before restoration
+        mockRepo.Verify(x => x.AddDocumentAsync(existingDoc), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenNonEnglishReplacementMetadataWriteFails_RestoresOriginalVectorsAndMetadata()
+    {
+        // Arrange
+        var existingDoc = new Document(
+            Id: "doc-non-english-fail",
+            FileName: "danish_fail.pdf",
+            FilePath: "/uploads/orig_english.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-2),
+            Status: DocumentStatus.Processed
+        );
+
+        var originalChunks = new List<DocumentChunk>
+        {
+            new("orig_chunk_da", "doc-non-english-fail", "Original English text", 0)
+        };
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Dette er en dansk tekst til dokumentet");
+
+        var mockChunker = new Mock<IChunkingService>();
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<float[]> { new float[] { 0.7f } });
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.GetAllChunksByDocumentIdAsync("doc-non-english-fail", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(originalChunks);
+
+        bool vectorRestored = false;
+        mockVector.Setup(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()))
+            .Returns<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>, CancellationToken>((chunks, token) =>
+            {
+                var list = chunks.ToList();
+                if (list.Any(c => c.Chunk.Id == "orig_chunk_da"))
+                {
+                    vectorRestored = true;
+                }
+                return Task.CompletedTask;
+            });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("danish_fail.pdf")).ReturnsAsync(existingDoc);
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("doc-non-english-fail")).ReturnsAsync(existingDoc);
+        // Metadata write throws exception in non-English branch!
+        mockRepo.Setup(x => x.AddDocumentAsync(It.Is<Document>(d => d.Status == DocumentStatus.Skipped)))
+            .ThrowsAsync(new InvalidOperationException("Disk full on SQLite metadata write"));
+
+        var mockLanguageDetector = new Mock<ILanguageDetector>();
+        mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new LanguageDetectionResult("da", false, 0.99));
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunker.Object,
+            mockEmbedding.Object,
+            mockVector.Object,
+            mockRepo.Object,
+            mockLanguageDetector.Object
+        );
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "danish_fail.pdf", "doc-non-english-fail");
+        });
+
+        // Verification: The original vectors and original metadata are restored!
+        Assert.True(vectorRestored);
+        mockRepo.Verify(x => x.AddDocumentAsync(existingDoc), Times.AtLeastOnce);
     }
 }

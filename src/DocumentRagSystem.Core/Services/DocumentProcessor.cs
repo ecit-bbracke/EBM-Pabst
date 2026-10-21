@@ -239,6 +239,26 @@ public class DocumentProcessor : IDocumentProcessor
                 "[DocumentProcessor] Language detection for '{FileName}': '{Language}' (IsEnglish: {IsEnglish}, Confidence: {Confidence:P1}).",
                 fileName, languageResult.Language, languageResult.IsEnglish, languageResult.Confidence);
 
+            // Snapshot existing vectors and FTS chunks before replacement to ensure rollback restoration on failure
+            // across both English and non-English replacement branches
+            List<(DocumentChunk Chunk, float[] Embedding)>? existingVectorSnapshot = null;
+            List<DocumentChunk>? existingFtsSnapshot = null;
+            if (isOverwritingCompletedDoc && _vectorStore != null && _embeddingService != null)
+            {
+                var oldChunks = (await _vectorStore.GetAllChunksByDocumentIdAsync(existingDoc!.Id, cancellationToken))?.ToList();
+                if (oldChunks != null && oldChunks.Count > 0)
+                {
+                    var oldTexts = oldChunks.Select(c => c.Text).ToList();
+                    var oldEmbeddings = await _embeddingService.GenerateEmbeddingsAsync(oldTexts, cancellationToken);
+                    if (oldEmbeddings == null || oldEmbeddings.Count != oldChunks.Count)
+                    {
+                        throw new InvalidOperationException($"Cannot safely replace document '{existingDoc.Id}': failed to capture backup snapshot of existing vectors before replacement.");
+                    }
+                    existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
+                    existingFtsSnapshot = oldChunks;
+                }
+            }
+
             if (languageResult.IsEnglish)
             {
                 var rawChunks = _chunkingService.ChunkText(extractedText, targetDocumentId).ToList();
@@ -285,25 +305,6 @@ public class DocumentProcessor : IDocumentProcessor
                     for (int i = 0; i < chunksWithMetaList.Count && i < embeddings.Count; i++)
                     {
                         chunksWithEmbeddings.Add((chunksWithMetaList[i], embeddings[i]));
-                    }
-
-                    // Snapshot existing vectors and FTS chunks before replacement to ensure rollback restoration on failure
-                    List<(DocumentChunk Chunk, float[] Embedding)>? existingVectorSnapshot = null;
-                    List<DocumentChunk>? existingFtsSnapshot = null;
-                    if (isOverwritingCompletedDoc && _vectorStore != null && _embeddingService != null)
-                    {
-                        var oldChunks = (await _vectorStore.GetAllChunksByDocumentIdAsync(existingDoc!.Id, cancellationToken))?.ToList();
-                        if (oldChunks != null && oldChunks.Count > 0)
-                        {
-                            var oldTexts = oldChunks.Select(c => c.Text).ToList();
-                            var oldEmbeddings = await _embeddingService.GenerateEmbeddingsAsync(oldTexts, cancellationToken);
-                            if (oldEmbeddings == null || oldEmbeddings.Count != oldChunks.Count)
-                            {
-                                throw new InvalidOperationException($"Cannot safely replace document '{existingDoc.Id}': failed to capture backup snapshot of existing vectors before replacement.");
-                            }
-                            existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
-                            existingFtsSnapshot = oldChunks;
-                        }
                     }
 
                     try
@@ -358,7 +359,7 @@ public class DocumentProcessor : IDocumentProcessor
                     catch (Exception)
                     {
                         // Extended rollback: If vector upsert, FTS upsert, OR metadata write fails,
-                        // restore original vectors and FTS chunks so storage remains 100% consistent with the original PDF!
+                        // restore original vectors, FTS chunks, AND original repository metadata!
                         if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
                         {
                             try
@@ -379,6 +380,11 @@ public class DocumentProcessor : IDocumentProcessor
                             catch { }
                         }
 
+                        if (existingDoc != null && _documentRepository != null)
+                        {
+                            try { await _documentRepository.AddDocumentAsync(existingDoc); } catch { }
+                        }
+
                         throw;
                     }
                 }
@@ -390,36 +396,69 @@ public class DocumentProcessor : IDocumentProcessor
                     "[DocumentProcessor] File '{FileName}' was saved to '{FilePath}', but skipped from vector database because language is '{Language}'.",
                     fileName, filePath, languageResult.Language);
 
-                // Finding 3: Clear old vector and FTS chunks when committing a non-English replacement
-                if (existingDoc != null)
+                try
                 {
-                    if (_vectorStore != null)
-                    {
-                        try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
-                    }
-                    if (_ftsStore != null)
-                    {
-                        try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
-                    }
-                }
-
-                document = document with
-                {
-                    Status = DocumentStatus.Skipped,
-                    Language = languageResult.Language,
-                    ErrorMessage = message,
-                    ProductCode = productCode,
-                    ProductCategory = productCategory
-                };
-
-                if (_documentRepository != null)
-                {
+                    // Clear old vector and FTS chunks when committing a non-English replacement
                     if (existingDoc != null)
                     {
-                        await _documentRepository.AddDocumentAsync(document);
-                        try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
+                        if (_vectorStore != null)
+                        {
+                            try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                        }
+                        if (_ftsStore != null)
+                        {
+                            try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                        }
                     }
-                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
+
+                    document = document with
+                    {
+                        Status = DocumentStatus.Skipped,
+                        Language = languageResult.Language,
+                        ErrorMessage = message,
+                        ProductCode = productCode,
+                        ProductCategory = productCategory
+                    };
+
+                    if (_documentRepository != null)
+                    {
+                        if (existingDoc != null)
+                        {
+                            await _documentRepository.AddDocumentAsync(document);
+                            try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
+                        }
+                        await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Rollback for non-English replacements: restore original vectors, FTS chunks, and metadata!
+                    if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
+                    {
+                        try
+                        {
+                            await _vectorStore.DeleteDocumentChunksAsync(existingDoc!.Id, CancellationToken.None);
+                            await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                        }
+                        catch { }
+                    }
+
+                    if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && _ftsStore != null)
+                    {
+                        try
+                        {
+                            await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc!.Id, CancellationToken.None);
+                            await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                        }
+                        catch { }
+                    }
+
+                    if (existingDoc != null && _documentRepository != null)
+                    {
+                        try { await _documentRepository.AddDocumentAsync(existingDoc); } catch { }
+                    }
+
+                    throw;
                 }
             }
 
