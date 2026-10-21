@@ -992,4 +992,72 @@ public class DocumentProcessorTests
             }
         }
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenSkippedDocumentReplacedAndMetadataFails_ClearsNewlyWrittenVectorsAndFtsChunks()
+    {
+        // Arrange: Existing document was Skipped (empty vector index)
+        var existingDoc = new Document(
+            Id: "doc-skipped-orig",
+            FileName: "danish_was_skipped.pdf",
+            FilePath: "/uploads/danish_was_skipped.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-3),
+            Status: DocumentStatus.Skipped
+        );
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Now replacing with valid English content for technical specifications");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("chunk_new_1", "doc-skipped-orig", "English text", 0) });
+
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<float[]> { new float[] { 0.4f, 0.5f } });
+
+        var mockVector = new Mock<IVectorStore>();
+        // Original skipped document had NO chunks in vector store!
+        mockVector.Setup(x => x.GetAllChunksByDocumentIdAsync("doc-skipped-orig", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk>());
+
+        int deleteCalls = 0;
+        mockVector.Setup(x => x.DeleteDocumentChunksAsync("doc-skipped-orig", It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                deleteCalls++;
+                return Task.CompletedTask;
+            });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("danish_was_skipped.pdf")).ReturnsAsync(existingDoc);
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("doc-skipped-orig")).ReturnsAsync(existingDoc);
+        // Metadata write throws exception after vector insertion!
+        mockRepo.Setup(x => x.AddDocumentAsync(It.Is<Document>(d => d.Status == DocumentStatus.Processed)))
+            .ThrowsAsync(new InvalidOperationException("SQLite constraint failure on metadata write"));
+
+        var mockLanguageDetector = new Mock<ILanguageDetector>();
+        mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new LanguageDetectionResult("en", true, 0.99));
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunker.Object,
+            mockEmbedding.Object,
+            mockVector.Object,
+            mockRepo.Object,
+            mockLanguageDetector.Object
+        );
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "danish_was_skipped.pdf", "doc-skipped-orig");
+        });
+
+        // Verification: Even though original snapshot was empty, DeleteDocumentChunksAsync was called on rollback to clear the newly written vectors!
+        Assert.True(deleteCalls >= 1);
+        mockRepo.Verify(x => x.AddDocumentAsync(existingDoc), Times.AtLeastOnce);
+    }
 }

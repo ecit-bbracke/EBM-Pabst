@@ -359,23 +359,29 @@ public class DocumentProcessor : IDocumentProcessor
                     catch (Exception)
                     {
                         // Extended rollback: If vector upsert, FTS upsert, OR metadata write fails,
-                        // restore original vectors, FTS chunks, AND original repository metadata!
-                        if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
+                        // clear newly written chunks from vector store and FTS store!
+                        if (_vectorStore != null)
                         {
                             try
                             {
-                                await _vectorStore.DeleteDocumentChunksAsync(existingDoc!.Id, CancellationToken.None);
-                                await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                                await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId, CancellationToken.None);
+                                if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && existingDoc != null)
+                                {
+                                    await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                                }
                             }
                             catch { }
                         }
 
-                        if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && _ftsStore != null)
+                        if (_ftsStore != null)
                         {
                             try
                             {
-                                await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc!.Id, CancellationToken.None);
-                                await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                                await _ftsStore.DeleteChunksByDocumentIdAsync(targetDocumentId, CancellationToken.None);
+                                if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && existingDoc != null)
+                                {
+                                    await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                                }
                             }
                             catch { }
                         }
@@ -433,22 +439,28 @@ public class DocumentProcessor : IDocumentProcessor
                 catch (Exception)
                 {
                     // Rollback for non-English replacements: restore original vectors, FTS chunks, and metadata!
-                    if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
+                    if (_vectorStore != null)
                     {
                         try
                         {
-                            await _vectorStore.DeleteDocumentChunksAsync(existingDoc!.Id, CancellationToken.None);
-                            await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                            await _vectorStore.DeleteDocumentChunksAsync(targetDocumentId, CancellationToken.None);
+                            if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && existingDoc != null)
+                            {
+                                await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
+                            }
                         }
                         catch { }
                     }
 
-                    if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && _ftsStore != null)
+                    if (_ftsStore != null)
                     {
                         try
                         {
-                            await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc!.Id, CancellationToken.None);
-                            await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                            await _ftsStore.DeleteChunksByDocumentIdAsync(targetDocumentId, CancellationToken.None);
+                            if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && existingDoc != null)
+                            {
+                                await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                            }
                         }
                         catch { }
                     }
