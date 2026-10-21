@@ -835,4 +835,61 @@ public class ConversationalMultiTurnOrchestratorTests
         Assert.Equal("supply_voltage", state.ActiveConstraints[0].Attribute);
         Assert.Equal("48 V", state.ActiveConstraints[0].Value);
     }
+
+    [Fact]
+    public async Task Orchestrator_WhenRangeConstraintsProvided_PreservesBothLowerAndUpperBounds()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+
+        // Refiner returns range bounds: supply_voltage >= 24 V and supply_voltage <= 48 V
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Refiner")), true))
+            .ReturnsAsync("""{"effective_query": "K3G560 between 24 V and 48 V", "relationship_to_previous_turn": "CONTINUES", "active_entities": [{"type": "fan", "name": "K3G560"}], "active_constraints": [{"attribute": "supply_voltage", "operator": ">=", "value": "24 V"}, {"attribute": "supply_voltage", "operator": "<=", "value": "48 V"}], "candidate_set": [], "referenced_facts": []}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [">= 24 V", "<= 48 V"], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Verified answer: Operating range is 24 V to 48 V.");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 specs", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var priorState = new ConversationState(
+            ConversationId: "conv-range-test",
+            Topic: "fan selection",
+            ActiveEntities: new List<ConversationEntity> { new("fan", "K3G560") },
+            ActiveConstraints: new List<ConversationConstraint>(),
+            TurnCount: 1,
+            LastEffectiveQuestion: "Specs for K3G560?"
+        );
+        await stateStore.SaveStateAsync("conv-range-test", priorState);
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            queryRefiner: new ConversationalQueryRefiner(mockLlm.Object),
+            stateStore: stateStore
+        );
+
+        // Act: User specifies range 24 V to 48 V
+        await orchestrator.ProcessQueryAsync("Between 24 V and 48 V?", mockVectorStore.Object, "conv-range-test");
+        var state = await stateStore.GetStateAsync("conv-range-test");
+
+        // Assert: Both bounds must survive!
+        Assert.NotNull(state);
+        Assert.Equal(2, state.ActiveConstraints.Count);
+        Assert.Contains(state.ActiveConstraints, c => c.Attribute == "supply_voltage" && c.Operator == ">=" && c.Value == "24 V");
+        Assert.Contains(state.ActiveConstraints, c => c.Attribute == "supply_voltage" && c.Operator == "<=" && c.Value == "48 V");
+    }
 }

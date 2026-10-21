@@ -1139,9 +1139,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             foreach (var added in refinement.ConstraintsAdded)
             {
                 if (added == null) continue;
-                // If this is replacing an existing attribute with a new value, replace it
-                updatedConstraints.RemoveAll(c => string.Equals(c.Attribute, added.Attribute, StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Value, added.Value, StringComparison.OrdinalIgnoreCase));
-                if (!updatedConstraints.Any(c => string.Equals(c.Attribute, added.Attribute, StringComparison.OrdinalIgnoreCase) && string.Equals(c.Value, added.Value, StringComparison.OrdinalIgnoreCase)))
+                updatedConstraints.RemoveAll(c => AreConstraintsConflicting(c, added));
+                if (!updatedConstraints.Any(c => string.Equals(c.Attribute, added.Attribute, StringComparison.OrdinalIgnoreCase) &&
+                                                 string.Equals(c.Value, added.Value, StringComparison.OrdinalIgnoreCase) &&
+                                                 string.Equals(c.Operator, added.Operator, StringComparison.OrdinalIgnoreCase)))
                 {
                     updatedConstraints.Add(added with { SourceTurn = newTurnCount });
                 }
@@ -1149,15 +1150,15 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         }
 
         // If refinement has explicit active constraints, reconcile them against updated constraints:
-        // Any incoming active constraint replaces an existing constraint with the same attribute but different value/operator
+        // Conflicting constraints (e.g. replacing a single value or an old bound) are removed, while compatible range bounds remain!
         foreach (var active in refinementConstraints)
         {
             if (active == null) continue;
-            updatedConstraints.RemoveAll(c => string.Equals(c.Attribute, active.Attribute, StringComparison.OrdinalIgnoreCase) &&
-                                              (!string.Equals(c.Value, active.Value, StringComparison.OrdinalIgnoreCase) ||
-                                               !string.Equals(c.Operator, active.Operator, StringComparison.OrdinalIgnoreCase)));
+            updatedConstraints.RemoveAll(c => AreConstraintsConflicting(c, active));
 
-            if (!updatedConstraints.Any(c => string.Equals(c.Attribute, active.Attribute, StringComparison.OrdinalIgnoreCase) && string.Equals(c.Value, active.Value, StringComparison.OrdinalIgnoreCase)))
+            if (!updatedConstraints.Any(c => string.Equals(c.Attribute, active.Attribute, StringComparison.OrdinalIgnoreCase) &&
+                                             string.Equals(c.Value, active.Value, StringComparison.OrdinalIgnoreCase) &&
+                                             string.Equals(c.Operator, active.Operator, StringComparison.OrdinalIgnoreCase)))
             {
                 updatedConstraints.Add(active with { SourceTurn = newTurnCount });
             }
@@ -1266,6 +1267,40 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         }
 
         return facts;
+    }
+
+    private static bool AreConstraintsConflicting(ConversationConstraint existing, ConversationConstraint incoming)
+    {
+        if (!string.Equals(existing.Attribute, incoming.Attribute, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var op1 = (existing.Operator ?? "eq").Trim().ToLowerInvariant();
+        var op2 = (incoming.Operator ?? "eq").Trim().ToLowerInvariant();
+
+        bool isLowerBound(string op) => op is ">=" or ">" or "gte" or "gt" or "min";
+        bool isUpperBound(string op) => op is "<=" or "<" or "lte" or "lt" or "max";
+
+        // Lower bound and upper bound for the same attribute are complementary range bounds, not conflicting!
+        if ((isLowerBound(op1) && isUpperBound(op2)) || (isUpperBound(op1) && isLowerBound(op2)))
+        {
+            return false;
+        }
+
+        // Two lower bounds conflict: incoming replaces existing
+        if (isLowerBound(op1) && isLowerBound(op2))
+        {
+            return true;
+        }
+
+        // Two upper bounds conflict: incoming replaces existing
+        if (isUpperBound(op1) && isUpperBound(op2))
+        {
+            return true;
+        }
+
+        // Equality/exact match conflicts if value or operator differ
+        return !string.Equals(existing.Value, incoming.Value, StringComparison.OrdinalIgnoreCase) ||
+               !string.Equals(op1, op2, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<IEnumerable<DocumentChunk>> PerformHybridSearchAsync(string query, List<string> productCodes, IVectorStore vectorStore, IDocumentRepository? repository)
