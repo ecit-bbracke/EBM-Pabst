@@ -179,6 +179,17 @@ var geminiFastLlmModel = builder.Configuration["Gemini:FastLlmModel"] ?? geminiL
 var qdrantConnString = builder.Configuration["Qdrant:ConnectionString"] ?? "http://localhost:6334";
 var qdrantCollection = builder.Configuration["Qdrant:CollectionName"] ?? "document-chunks";
 var uploadsDirectory = GetUploadsDirectory(builder.Configuration["Uploads:Directory"]);
+if (!Directory.Exists(uploadsDirectory))
+{
+    try
+    {
+        Directory.CreateDirectory(uploadsDirectory);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Warning] Failed to ensure uploads directory '{uploadsDirectory}': {ex.Message}");
+    }
+}
 var servedUploadDirectories = GetServedUploadDirectories(uploadsDirectory).ToList();
 
 // Configure LLM Options
@@ -794,8 +805,49 @@ app.Lifetime.ApplicationStarted.Register(() =>
                 var unfinishedDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending || d.Status == DocumentStatus.Processing).ToList();
                 if (unfinishedDocs != null && unfinishedDocs.Count > 0)
                 {
+                    // Group unfinished jobs by target document identity. If multiple pending/processing jobs target the same document,
+                    // discard older superseded jobs and keep only the newest one.
+                    var grouped = unfinishedDocs
+                        .GroupBy(d => d.Id.StartsWith("replacement_") && !string.IsNullOrWhiteSpace(d.SourceDocumentId)
+                            ? d.SourceDocumentId!
+                            : d.Id)
+                        .ToList();
+
+                    var jobsToRun = new List<Document>();
+                    foreach (var group in grouped)
+                    {
+                        var orderedGroup = group.OrderBy(d => d.UploadedAt).ToList();
+                        var newestJob = orderedGroup.Last();
+                        jobsToRun.Add(newestJob);
+
+                        // Discard and clean up older superseded jobs
+                        foreach (var superseded in orderedGroup.Take(orderedGroup.Count - 1))
+                        {
+                            app.Logger.LogInformation(
+                                "Discarding superseded background job {JobId} for target document {TargetId} (superseded by {NewestJobId})",
+                                superseded.Id, group.Key, newestJob.Id);
+
+                            if (superseded.Id.StartsWith("replacement_"))
+                            {
+                                try { await repo.DeleteDocumentAsync(superseded.Id); } catch { }
+                            }
+                            else
+                            {
+                                await repo.UpdateDocumentStatusAsync(superseded.Id, DocumentStatus.Failed, errorMessage: "Jobbet blev overflødiggjort af en nyere erstatningsupload.");
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(superseded.FilePath) && File.Exists(superseded.FilePath))
+                            {
+                                try { File.Delete(superseded.FilePath); } catch { }
+                            }
+                        }
+                    }
+
+                    // Process remaining distinct jobs chronologically
+                    jobsToRun = jobsToRun.OrderBy(d => d.UploadedAt).ToList();
+
                     var servedUploads = GetServedUploadDirectories(uploadsDirectory);
-                    foreach (var doc in unfinishedDocs)
+                    foreach (var doc in jobsToRun)
                     {
                         var isReplacement = doc.Id.StartsWith("replacement_") && !string.IsNullOrWhiteSpace(doc.SourceDocumentId);
                         var targetDocId = isReplacement ? doc.SourceDocumentId! : doc.Id;
@@ -874,9 +926,16 @@ static IEnumerable<string> GetServedUploadDirectories(string uploadsDirectory)
 {
     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    if (Directory.Exists(uploadsDirectory) && seen.Add(uploadsDirectory))
+    if (!string.IsNullOrWhiteSpace(uploadsDirectory))
     {
-        yield return uploadsDirectory;
+        if (!Directory.Exists(uploadsDirectory))
+        {
+            try { Directory.CreateDirectory(uploadsDirectory); } catch { }
+        }
+        if (seen.Add(uploadsDirectory))
+        {
+            yield return uploadsDirectory;
+        }
     }
 
     var workerUploadsDirectory = Path.GetFullPath(Path.Combine(
