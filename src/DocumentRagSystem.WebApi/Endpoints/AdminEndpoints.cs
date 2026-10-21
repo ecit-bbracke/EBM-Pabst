@@ -337,20 +337,30 @@ public static class AdminEndpoints
         app.MapPost("/api/admin/clean-orphans", async (
             ClaimsPrincipal currentUser,
             IDocumentRepository repository,
-            IVectorStore vectorStore) =>
+            IVectorStore vectorStore,
+            ILoggerFactory loggerFactory) =>
         {
             if (!UserSecurityHelper.IsUserAdmin(currentUser))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            var logger = loggerFactory.CreateLogger("AdminEndpoints");
             var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
-            List<Document> vectorDocs = new();
+            List<Document> vectorDocs;
             try
             {
                 vectorDocs = (await vectorStore.GetDocumentsAsync(100_000))?.ToList() ?? new List<Document>();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Oprydning af forældreløse dokumenter afbrudt: Vektordatabasen er utilgængelig.");
+                return Results.Problem(
+                    title: "Vektordatabasen er utilgængelig",
+                    detail: $"Kunne ikke verificere eksisterende vektorer i søgeindekset: {ex.Message}. Oprydningen er afbrudt for at forhindre utilsigtet sletning af metadata.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
             var vectorDocIds = new HashSet<string>(vectorDocs.Select(d => d.Id), StringComparer.OrdinalIgnoreCase);
 
             var deletedCount = 0;

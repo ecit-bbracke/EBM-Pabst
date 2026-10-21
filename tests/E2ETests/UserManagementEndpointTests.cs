@@ -15,12 +15,23 @@ namespace DocumentRagSystem.E2ETests;
 public class UserManagementEndpointTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly Moq.Mock<IVectorStore> _mockVectorStore = new();
 
     public UserManagementEndpointTests(WebApplicationFactory<Program> factory)
     {
+        _mockVectorStore
+            .Setup(x => x.GetDocumentsAsync(It.IsAny<int>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(new List<Document>());
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:IdentityDb", $"Data Source=identity_user_{Guid.NewGuid():N}.db");
+            builder.ConfigureServices(services =>
+            {
+                var storeDescriptor = System.Linq.Enumerable.SingleOrDefault(services, d => d.ServiceType == typeof(IVectorStore));
+                if (storeDescriptor != null) services.Remove(storeDescriptor);
+                services.AddSingleton<IVectorStore>(_mockVectorStore.Object);
+            });
         });
     }
 
@@ -146,5 +157,46 @@ public class UserManagementEndpointTests : IClassFixture<WebApplicationFactory<P
         // Assert: The orphan document was removed from repository because its physical file and vectors are gone
         var retrieved = await repo.GetDocumentByIdAsync(orphanId);
         Assert.Null(retrieved);
+    }
+
+    [Fact]
+    public async Task CleanOrphanedDocuments_WhenVectorStoreThrows_ReturnsServiceUnavailableAndDeletesNoRecords()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        var docId = $"orphan_fail_{Guid.NewGuid():N}";
+        var doc = new Document(
+            Id: docId,
+            FileName: "missing_store_down.pdf",
+            FilePath: "/uploads/missing_store_down.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-10),
+            Status: DocumentStatus.Processed
+        );
+        await repo.AddDocumentAsync(doc);
+
+        _mockVectorStore
+            .Setup(x => x.GetDocumentsAsync(It.IsAny<int>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Qdrant connection dropped"));
+
+        try
+        {
+            // Act: Run orphan cleanup when Qdrant is down
+            var response = await client.PostAsync("/api/admin/clean-orphans", null);
+
+            // Assert: Must return 503 Service Unavailable and abort cleanup without deleting metadata!
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+            var stillExists = await repo.GetDocumentByIdAsync(docId);
+            Assert.NotNull(stillExists);
+        }
+        finally
+        {
+            // Reset mock
+            _mockVectorStore
+                .Setup(x => x.GetDocumentsAsync(It.IsAny<int>(), It.IsAny<System.Threading.CancellationToken>()))
+                .ReturnsAsync(new List<Document>());
+        }
     }
 }
