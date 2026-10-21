@@ -278,9 +278,12 @@ public sealed class LocalLlmClient : ILlmClient, IDisposable
 
         var model = request.Model ?? _options.Model;
 
+        using var timeoutCts = CreateTimeoutCancellationTokenSource(cancellationToken);
+        var linkedToken = timeoutCts.Token;
+
         if (_concurrencySemaphore != null)
         {
-            await _concurrencySemaphore.WaitAsync(cancellationToken);
+            await _concurrencySemaphore.WaitAsync(linkedToken);
         }
 
         HttpResponseMessage? response = null;
@@ -298,18 +301,18 @@ public sealed class LocalLlmClient : ILlmClient, IDisposable
             };
             ApplyAuthentication(httpRequest);
 
-            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, linkedToken);
             if (!response.IsSuccessStatusCode)
             {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                var error = await response.Content.ReadAsStringAsync(linkedToken);
                 throw new LlmProviderUnavailableException(ProviderName, model, $"Stream request failed with status {(int)response.StatusCode}: {error}", (int)response.StatusCode);
             }
 
-            stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            stream = await response.Content.ReadAsStreamAsync(linkedToken);
             reader = new StreamReader(stream, Encoding.UTF8);
 
             string? line;
-            while (!cancellationToken.IsCancellationRequested && (line = await reader.ReadLineAsync(cancellationToken)) != null)
+            while ((line = await ReadNextLineAsync(reader, linkedToken, timeoutCts, cancellationToken, model)) != null)
             {
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
@@ -351,6 +354,23 @@ public sealed class LocalLlmClient : ILlmClient, IDisposable
             stream?.Dispose();
             response?.Dispose();
             _concurrencySemaphore?.Release();
+        }
+    }
+
+    private async Task<string?> ReadNextLineAsync(
+        StreamReader reader,
+        CancellationToken linkedToken,
+        CancellationTokenSource timeoutCts,
+        CancellationToken callerToken,
+        string model)
+    {
+        try
+        {
+            return await reader.ReadLineAsync(linkedToken);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !callerToken.IsCancellationRequested)
+        {
+            throw new LlmProviderUnavailableException(ProviderName, model, $"Streaming timed out after {_options.TimeoutSeconds}s.");
         }
     }
 

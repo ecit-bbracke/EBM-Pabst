@@ -273,4 +273,59 @@ public class LocalLlmClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             client.GenerateTextAsync(LlmRequest.FromPrompt("Cancel test"), cts.Token));
     }
+
+    [Fact]
+    public async Task StreamTextAsync_ShouldThrowLlmProviderUnavailableException_WhenStreamingTimesOut()
+    {
+        // Arrange: Timeout is 1 second, but stream stalls during body reading
+        var handler = new MockHttpMessageHandler();
+        var blockingStream = new BlockingTestStream();
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(blockingStream)
+        };
+        handler.EnqueueCallback(req => response);
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:8000") };
+        var options = new LocalLlmOptions { BaseUrl = "http://localhost:8000", Model = "local-model", TimeoutSeconds = 1, MaxConcurrency = 1 };
+        var client = new LocalLlmClient(options, httpClient);
+
+        // Act & Assert: Must time out and throw LlmProviderUnavailableException!
+        var ex = await Assert.ThrowsAsync<LlmProviderUnavailableException>(async () =>
+        {
+            await foreach (var token in client.StreamTextAsync(LlmRequest.FromPrompt("Stalled stream")))
+            {
+                // Should not produce tokens
+            }
+        });
+
+        Assert.Contains("timed out", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Assert: Concurrency slot was released in finally block! A subsequent request can acquire the slot immediately.
+        handler.EnqueueResponse(HttpStatusCode.OK, """{ "choices": [{ "index": 0, "message": { "role": "assistant", "content": "Next call succeeded" } }] }""");
+        var nextResult = await client.GenerateTextAsync(LlmRequest.FromPrompt("Next call"));
+        Assert.Equal("Next call succeeded", nextResult.Content);
+    }
+
+    private class BlockingTestStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            var tcs = new TaskCompletionSource<int>();
+            using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
+            {
+                return await tcs.Task;
+            }
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }
