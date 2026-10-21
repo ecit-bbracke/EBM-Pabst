@@ -388,7 +388,7 @@ public static class DocumentEndpoints
                     Directory.CreateDirectory(targetUploadsDir);
                 }
 
-                var physicalFileName = $"{Guid.NewGuid():N}_{file.FileName}";
+                var physicalFileName = $"{Guid.NewGuid()}_{file.FileName}";
                 var physicalPath = Path.Combine(targetUploadsDir, physicalFileName);
 
                 await using (var fileStream = File.Create(physicalPath))
@@ -410,6 +410,7 @@ public static class DocumentEndpoints
                 bool isCompletedDoc = existingDoc != null &&
                     (existingDoc.Status == DocumentStatus.Processed || existingDoc.Status == DocumentStatus.Skipped);
 
+                string? stagingJobId = null;
                 if (!isCompletedDoc)
                 {
                     var tempDocument = new Document(
@@ -425,10 +426,10 @@ public static class DocumentEndpoints
                 }
                 else
                 {
-                    // Keep existing completed document untouched in repository to preserve completed-document status and vector backups.
-                    // Store staging job metadata as a separate pending job record so restarts can recover it without corrupting the completed document.
+                    // Assign each replacement job a unique identity so older completed jobs don't delete newer queued jobs
+                    stagingJobId = $"replacement_{existingDoc!.Id}_{Guid.NewGuid():N}";
                     var stagingJobDoc = new Document(
-                        Id: $"replacement_{existingDoc!.Id}",
+                        Id: stagingJobId,
                         FileName: file.FileName,
                         FilePath: physicalPath,
                         UploadedAt: DateTime.UtcNow,
@@ -443,8 +444,17 @@ public static class DocumentEndpoints
                 {
                     try
                     {
-                        await using var readStream = File.OpenRead(physicalPath);
-                        await processor.ProcessPdfAsync(readStream, file.FileName, documentId, token);
+                        await using (var readStream = File.OpenRead(physicalPath))
+                        {
+                            await processor.ProcessPdfAsync(readStream, file.FileName, documentId, token);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(stagingJobId))
+                        {
+                            try { await repository.DeleteDocumentAsync(stagingJobId); } catch { }
+                        }
+                        try { if (File.Exists(physicalPath)) File.Delete(physicalPath); } catch { }
+
                         Program.DirFileCache.Clear();
                         TechnicalRagOrchestrator.InvalidateQueryCache();
                     }
@@ -546,7 +556,7 @@ public static class DocumentEndpoints
                 }
             }
 
-            // Only match files prefixed with a validated 36-character GUID followed by '_'
+            // Match files prefixed with either 36-char or 32-char hex GUID followed by '_'
             if (!string.IsNullOrWhiteSpace(fileName))
             {
                 var targetName = Path.GetFileName(fileName);
@@ -556,9 +566,14 @@ public static class DocumentEndpoints
                     foreach (var file in files)
                     {
                         var fname = Path.GetFileName(file);
-                        if (fname.Length > 37 && fname[36] == '_' &&
-                            Guid.TryParse(fname.Substring(0, 36), out _) &&
-                            string.Equals(fname.Substring(37), targetName, StringComparison.OrdinalIgnoreCase))
+                        bool isGuidPrefixed = (fname.Length > 37 && fname[36] == '_' &&
+                                               Guid.TryParse(fname.Substring(0, 36), out _) &&
+                                               string.Equals(fname.Substring(37), targetName, StringComparison.OrdinalIgnoreCase))
+                                           || (fname.Length > 33 && fname[32] == '_' &&
+                                               Guid.TryParseExact(fname.Substring(0, 32), "N", out _) &&
+                                               string.Equals(fname.Substring(33), targetName, StringComparison.OrdinalIgnoreCase));
+
+                        if (isGuidPrefixed)
                         {
                             try { File.Delete(file); } catch { }
                         }

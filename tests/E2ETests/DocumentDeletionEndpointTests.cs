@@ -172,4 +172,48 @@ public class DocumentDeletionEndpointTests : IClassFixture<WebApplicationFactory
         retained.Should().NotBeNull();
         retained!.Id.Should().Be(docId);
     }
+
+    [Fact]
+    public async Task DeleteDocument_DeletesBothCompletedFile_AndAnyStagedGuidPrefixedFiles()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+
+        var docId = $"doc_staged_{Guid.NewGuid():N}";
+        var fileName = "staging_cleanup_target.pdf";
+        var completedDiskFileName = $"{Guid.NewGuid()}_{fileName}";
+        var completedPath = Path.Combine(_testUploadsDir, completedDiskFileName);
+        await File.WriteAllTextAsync(completedPath, "%PDF-1.4 completed");
+
+        // Staging files left by background uploads (both 36-char and 32-char GUIDs)
+        var staged36 = Path.Combine(_testUploadsDir, $"{Guid.NewGuid()}_{fileName}");
+        await File.WriteAllTextAsync(staged36, "%PDF-1.4 staged 36");
+
+        var staged32 = Path.Combine(_testUploadsDir, $"{Guid.NewGuid():N}_{fileName}");
+        await File.WriteAllTextAsync(staged32, "%PDF-1.4 staged 32");
+
+        var doc = new Document(
+            Id: docId,
+            FileName: fileName,
+            FilePath: $"/uploads/{completedDiskFileName}",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed
+        );
+
+        await _repository.AddDocumentAsync(doc);
+
+        _mockVectorStore
+            .Setup(x => x.DeleteDocumentChunksAsync(docId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var response = await client.DeleteAsync($"/api/documents/{docId}");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // All variations must be deleted from disk
+        File.Exists(completedPath).Should().BeFalse();
+        File.Exists(staged36).Should().BeFalse();
+        File.Exists(staged32).Should().BeFalse();
+    }
 }
