@@ -1148,10 +1148,15 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             }
         }
 
-        // If refinement has explicit active constraints, ensure they are present
+        // If refinement has explicit active constraints, reconcile them against updated constraints:
+        // Any incoming active constraint replaces an existing constraint with the same attribute but different value/operator
         foreach (var active in refinementConstraints)
         {
             if (active == null) continue;
+            updatedConstraints.RemoveAll(c => string.Equals(c.Attribute, active.Attribute, StringComparison.OrdinalIgnoreCase) &&
+                                              (!string.Equals(c.Value, active.Value, StringComparison.OrdinalIgnoreCase) ||
+                                               !string.Equals(c.Operator, active.Operator, StringComparison.OrdinalIgnoreCase)));
+
             if (!updatedConstraints.Any(c => string.Equals(c.Attribute, active.Attribute, StringComparison.OrdinalIgnoreCase) && string.Equals(c.Value, active.Value, StringComparison.OrdinalIgnoreCase)))
             {
                 updatedConstraints.Add(active with { SourceTurn = newTurnCount });

@@ -777,4 +777,62 @@ public class ConversationalMultiTurnOrchestratorTests
         Assert.Contains("Fresh updated answer", ans2);
         Assert.DoesNotContain("Stale answer", ans2);
     }
+
+    [Fact]
+    public async Task Orchestrator_WhenConstraintValueModifiedAcrossTurns_ReplacesOldConstraintAndDoesNotRetainBoth()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+
+        // Turn 2 Refiner: returns MODIFIES with 48 V in active_constraints
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Refiner")), true))
+            .ReturnsAsync("""{"effective_query": "K3G560 with 48 V", "relationship_to_previous_turn": "MODIFIES", "active_entities": [{"type": "fan", "name": "K3G560"}], "active_constraints": [{"attribute": "supply_voltage", "operator": "eq", "value": "48 V"}], "candidate_set": [], "referenced_facts": []}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": ["48 V"], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Verified answer: Operating voltage is documented as 48 V.");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 specs", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        // Prior state has 24 V constraint
+        var priorState = new ConversationState(
+            ConversationId: "conv-modify-c",
+            Topic: "fan selection",
+            ActiveEntities: new List<ConversationEntity> { new("fan", "K3G560") },
+            ActiveConstraints: new List<ConversationConstraint> { new("supply_voltage", "eq", "24 V", "V", 1) },
+            TurnCount: 1,
+            LastEffectiveQuestion: "Voltage for K3G560 with 24 V?"
+        );
+        await stateStore.SaveStateAsync("conv-modify-c", priorState);
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            queryRefiner: new ConversationalQueryRefiner(mockLlm.Object),
+            stateStore: stateStore
+        );
+
+        // Act: User modifies constraint to 48 V
+        await orchestrator.ProcessQueryAsync("Actually what if we use 48 V?", mockVectorStore.Object, "conv-modify-c");
+        var state = await stateStore.GetStateAsync("conv-modify-c");
+
+        // Assert: Must contain ONLY 48 V, and NOT both 24 V and 48 V!
+        Assert.NotNull(state);
+        Assert.Single(state.ActiveConstraints);
+        Assert.Equal("supply_voltage", state.ActiveConstraints[0].Attribute);
+        Assert.Equal("48 V", state.ActiveConstraints[0].Value);
+    }
 }
