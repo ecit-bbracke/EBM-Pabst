@@ -21,5 +21,7 @@ public interface IVectorStore
     Task<IEnumerable<DocumentChunk>> SearchAsync(string query, int limit = 3, CancellationToken cancellationToken = default);
     Task<IEnumerable<Document>> GetDocumentsAsync(int limit = 1000, CancellationToken cancellationToken = default);
     Task<IEnumerable<DocumentChunk>> GetChunksByDocumentAndIndicesAsync(string documentId, IEnumerable<int> indices, CancellationToken cancellationToken = default);
+    Task<IEnumerable<DocumentChunk>> GetAllChunksByDocumentIdAsync(string documentId, CancellationToken cancellationToken = default)
+        => GetChunksByDocumentAndIndicesAsync(documentId, System.Linq.Enumerable.Range(0, 100_000), cancellationToken);
     Task DeleteDocumentChunksAsync(string documentId, CancellationToken cancellationToken = default);
 }

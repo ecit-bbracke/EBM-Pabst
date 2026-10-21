@@ -465,6 +465,64 @@ public class QdrantVectorStore : IVectorStore
         return chunks.OrderBy(c => c.Index).ToList();
     }
 
+    public async Task<IEnumerable<DocumentChunk>> GetAllChunksByDocumentIdAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return Array.Empty<DocumentChunk>();
+
+        var filter = new Filter
+        {
+            Must =
+            {
+                new Condition
+                {
+                    Field = new FieldCondition
+                    {
+                        Key = "document_id",
+                        Match = new Match { Keyword = documentId }
+                    }
+                }
+            }
+        };
+
+        var chunks = new List<DocumentChunk>();
+        PointId? offset = null;
+
+        do
+        {
+            var response = await _client.ScrollAsync(
+                collectionName: _collectionName,
+                filter: filter,
+                limit: 256,
+                offset: offset,
+                payloadSelector: true,
+                vectorsSelector: false,
+                cancellationToken: cancellationToken);
+
+            foreach (var point in response.Result)
+            {
+                var idx = point.Payload.TryGetValue("index", out var idxVal) ? (int)idxVal.IntegerValue : -1;
+                var chunkId = point.Payload.TryGetValue("chunk_id", out var idVal) ? idVal.StringValue : point.Id.ToString();
+                var docId = point.Payload.TryGetValue("document_id", out var docVal) ? docVal.StringValue : documentId;
+                var text = point.Payload.TryGetValue("text", out var textVal) ? textVal.StringValue : string.Empty;
+                var fileName = point.Payload.TryGetValue("file_name", out var fileNameVal) ? fileNameVal.StringValue : null;
+                var originalFileName = point.Payload.TryGetValue("original_file_name", out var origVal) ? origVal.StringValue : fileName;
+                var articleId = point.Payload.TryGetValue("article_id", out var artVal) ? artVal.StringValue : null;
+                var sourceDocId = point.Payload.TryGetValue("source_document_id", out var sDocVal) ? sDocVal.StringValue : null;
+                var filePath = point.Payload.TryGetValue("file_path", out var filePathVal) ? filePathVal.StringValue : null;
+                var uploadedAt = TryGetUploadedAt(point.Payload);
+                var pageNumber = point.Payload.TryGetValue("page_number", out var pgVal) ? (int)pgVal.IntegerValue : (int?)null;
+
+                chunks.Add(new DocumentChunk(chunkId, docId, text, idx, fileName, filePath, uploadedAt, originalFileName, articleId, sourceDocId, pageNumber));
+            }
+
+            offset = response.NextPageOffset;
+            if (response.Result.Count == 0) break;
+        }
+        while (offset != null);
+
+        return chunks.OrderBy(c => c.Index).ToList();
+    }
+
     public async Task DeleteDocumentChunksAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId))
