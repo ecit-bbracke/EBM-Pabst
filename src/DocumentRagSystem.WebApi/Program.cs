@@ -777,76 +777,89 @@ finally
     _dbInitLock.Release();
 }
 
-// Resume unfinished background uploads on startup
-try
+// Resume unfinished background uploads on startup once consumer hosted services are running
+app.Lifetime.ApplicationStarted.Register(() =>
 {
-    using var startupScope = app.Services.CreateScope();
-    var repo = startupScope.ServiceProvider.GetService<IDocumentRepository>();
-    var queue = startupScope.ServiceProvider.GetService<IDocumentQueue>();
-    var processor = startupScope.ServiceProvider.GetService<IDocumentProcessor>();
-    if (repo != null && queue != null && processor != null)
+    _ = Task.Run(async () =>
     {
-        var allDocs = await repo.GetAllDocumentsAsync();
-        var unfinishedDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending || d.Status == DocumentStatus.Processing).ToList();
-        if (unfinishedDocs != null && unfinishedDocs.Count > 0)
+        try
         {
-            var servedUploads = GetServedUploadDirectories(uploadsDirectory);
-            foreach (var doc in unfinishedDocs)
+            using var startupScope = app.Services.CreateScope();
+            var repo = startupScope.ServiceProvider.GetService<IDocumentRepository>();
+            var queue = startupScope.ServiceProvider.GetService<IDocumentQueue>();
+            var processor = startupScope.ServiceProvider.GetService<IDocumentProcessor>();
+            if (repo != null && queue != null && processor != null)
             {
-                var targetDocId = doc.Id.StartsWith("replacement_") && !string.IsNullOrWhiteSpace(doc.SourceDocumentId)
-                    ? doc.SourceDocumentId
-                    : doc.Id;
-
-                string? physicalFilePath = null;
-                if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+                var allDocs = await repo.GetAllDocumentsAsync();
+                var unfinishedDocs = allDocs?.Where(d => d.Status == DocumentStatus.Pending || d.Status == DocumentStatus.Processing).ToList();
+                if (unfinishedDocs != null && unfinishedDocs.Count > 0)
                 {
-                    physicalFilePath = doc.FilePath;
-                }
-                else
-                {
-                    foreach (var uploadDir in servedUploads)
+                    var servedUploads = GetServedUploadDirectories(uploadsDirectory);
+                    foreach (var doc in unfinishedDocs)
                     {
-                        var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
-                        if (File.Exists(candidate))
+                        var isReplacement = doc.Id.StartsWith("replacement_") && !string.IsNullOrWhiteSpace(doc.SourceDocumentId);
+                        var targetDocId = isReplacement ? doc.SourceDocumentId! : doc.Id;
+                        var jobId = doc.Id;
+
+                        string? physicalFilePath = null;
+                        if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
                         {
-                            physicalFilePath = candidate;
-                            break;
+                            physicalFilePath = doc.FilePath;
+                        }
+                        else
+                        {
+                            foreach (var uploadDir in servedUploads)
+                            {
+                                var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
+                                if (File.Exists(candidate))
+                                {
+                                    physicalFilePath = candidate;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(physicalFilePath) && File.Exists(physicalFilePath))
+                        {
+                            var resolvedPath = physicalFilePath;
+                            app.Logger.LogInformation("Resuming unfinished background upload on startup: {FileName} (ID: {DocumentId})", doc.FileName, targetDocId);
+                            await queue.QueueBackgroundWorkItemAsync(async token =>
+                            {
+                                try
+                                {
+                                    await using (var stream = File.OpenRead(resolvedPath))
+                                    {
+                                        await processor.ProcessPdfAsync(stream, doc.FileName, targetDocId, token);
+                                    }
+                                    if (isReplacement)
+                                    {
+                                        try { await repo.DeleteDocumentAsync(jobId); } catch { }
+                                    }
+                                    try { if (File.Exists(resolvedPath)) File.Delete(resolvedPath); } catch { }
+                                    Program.DirFileCache.Clear();
+                                    TechnicalRagOrchestrator.InvalidateQueryCache();
+                                }
+                                catch (Exception ex)
+                                {
+                                    app.Logger.LogError(ex, "Failed to process resumed background document: {FileName}", doc.FileName);
+                                }
+                            });
+                        }
+                        else
+                        {
+                            app.Logger.LogWarning("Marking abandoned unfinished document as Failed (physical file missing on startup): {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
+                            await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Behandlingen blev afbrudt under genstart, og kildestien kunne ikke findes.");
                         }
                     }
                 }
-
-                if (!string.IsNullOrWhiteSpace(physicalFilePath) && File.Exists(physicalFilePath))
-                {
-                    var resolvedPath = physicalFilePath;
-                    app.Logger.LogInformation("Resuming unfinished background upload on startup: {FileName} (ID: {DocumentId})", doc.FileName, targetDocId);
-                    queue.QueueBackgroundWorkItem(async token =>
-                    {
-                        try
-                        {
-                            await using var stream = File.OpenRead(resolvedPath);
-                            await processor.ProcessPdfAsync(stream, doc.FileName, targetDocId, token);
-                            Program.DirFileCache.Clear();
-                            TechnicalRagOrchestrator.InvalidateQueryCache();
-                        }
-                        catch (Exception ex)
-                        {
-                            app.Logger.LogError(ex, "Failed to process resumed background document: {FileName}", doc.FileName);
-                        }
-                    });
-                }
-                else
-                {
-                    app.Logger.LogWarning("Marking abandoned unfinished document as Failed (physical file missing on startup): {FileName} (ID: {DocumentId})", doc.FileName, doc.Id);
-                    await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Behandlingen blev afbrudt under genstart, og kildestien kunne ikke findes.");
-                }
             }
         }
-    }
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "Failed to check or resume pending background uploads on startup.");
-}
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Failed to check or resume pending background uploads on startup.");
+        }
+    });
+});
 
 app.Run();
 

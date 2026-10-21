@@ -30,6 +30,14 @@ public class DocumentQueue : IDocumentQueue
         }
     }
 
+    public async ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, ValueTask> workItem, CancellationToken cancellationToken = default)
+    {
+        if (workItem == null)
+            throw new ArgumentNullException(nameof(workItem));
+
+        await _queue.Writer.WriteAsync(workItem, cancellationToken);
+    }
+
     public async Task<Func<CancellationToken, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
     {
         return await _queue.Reader.ReadAsync(cancellationToken);
