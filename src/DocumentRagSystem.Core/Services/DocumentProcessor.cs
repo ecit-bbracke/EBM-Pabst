@@ -312,7 +312,7 @@ public class DocumentProcessor : IDocumentProcessor
                         // 1. Clear old chunks before inserting updated chunks
                         if (existingDoc != null && _vectorStore != null)
                         {
-                            try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                            await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken);
                         }
 
                         // 2. Upsert all points into vector store in a single batch
@@ -326,7 +326,7 @@ public class DocumentProcessor : IDocumentProcessor
                         {
                             if (existingDoc != null)
                             {
-                                try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                                await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken);
                             }
 
                             try
@@ -403,11 +403,11 @@ public class DocumentProcessor : IDocumentProcessor
                     {
                         if (_vectorStore != null)
                         {
-                            try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
+                            await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken);
                         }
                         if (_ftsStore != null)
                         {
-                            try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                            await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken);
                         }
                     }
 

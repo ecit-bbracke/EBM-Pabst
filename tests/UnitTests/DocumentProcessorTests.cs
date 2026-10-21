@@ -913,4 +913,83 @@ public class DocumentProcessorTests
         Assert.True(vectorRestored);
         mockRepo.Verify(x => x.AddDocumentAsync(existingDoc), Times.AtLeastOnce);
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenNonEnglishReplacementIndexDeletionFails_ThrowsExceptionAndAborts()
+    {
+        // Arrange
+        var uploadsDir = Path.Combine(Path.GetTempPath(), $"uploads_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(uploadsDir);
+        var originalPdfPath = Path.Combine(uploadsDir, "orig_dan_target.pdf");
+        await File.WriteAllTextAsync(originalPdfPath, "%PDF-1.4 original english pdf");
+
+        try
+        {
+            var existingDoc = new Document(
+                Id: "doc-del-fail",
+                FileName: "danish_del_fail.pdf",
+                FilePath: $"/uploads/{Path.GetFileName(originalPdfPath)}",
+                UploadedAt: DateTime.UtcNow.AddDays(-2),
+                Status: DocumentStatus.Processed
+            );
+
+            var originalChunks = new List<DocumentChunk>
+            {
+                new("orig_chunk_1", "doc-del-fail", "Original English text", 0)
+            };
+
+            var mockTextExtractor = new Mock<ITextExtractor>();
+            mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+                .ReturnsAsync("Dette er en dansk tekst");
+
+            var mockChunker = new Mock<IChunkingService>();
+            var mockEmbedding = new Mock<IEmbeddingService>();
+            mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<float[]> { new float[] { 0.9f } });
+
+            var mockVector = new Mock<IVectorStore>();
+            mockVector.Setup(x => x.GetAllChunksByDocumentIdAsync("doc-del-fail", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(originalChunks);
+            // Qdrant fails during index deletion!
+            mockVector.Setup(x => x.DeleteDocumentChunksAsync("doc-del-fail", It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Qdrant connection dropped during deletion"));
+
+            var mockRepo = new Mock<IDocumentRepository>();
+            mockRepo.Setup(x => x.GetDocumentByFileNameAsync("danish_del_fail.pdf")).ReturnsAsync(existingDoc);
+            mockRepo.Setup(x => x.GetDocumentByIdAsync("doc-del-fail")).ReturnsAsync(existingDoc);
+
+            var mockLanguageDetector = new Mock<ILanguageDetector>();
+            mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync(new LanguageDetectionResult("da", false, 0.99));
+
+            var processor = new DocumentProcessor(
+                mockTextExtractor.Object,
+                mockChunker.Object,
+                mockEmbedding.Object,
+                mockVector.Object,
+                mockRepo.Object,
+                mockLanguageDetector.Object,
+                uploadsDirectory: uploadsDir
+            );
+
+            // Act & Assert: Must NOT swallow the index deletion failure!
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "danish_del_fail.pdf", "doc-del-fail");
+            });
+
+            // The original physical PDF must NOT be deleted!
+            Assert.True(File.Exists(originalPdfPath));
+
+            // The document must NOT be updated to Skipped in the repository!
+            mockRepo.Verify(x => x.UpdateDocumentStatusAsync("doc-del-fail", DocumentStatus.Skipped, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        }
+        finally
+        {
+            if (Directory.Exists(uploadsDir))
+            {
+                try { Directory.Delete(uploadsDir, true); } catch { }
+            }
+        }
+    }
 }
