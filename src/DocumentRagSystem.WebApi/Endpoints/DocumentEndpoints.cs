@@ -82,6 +82,7 @@ public static class DocumentEndpoints
 
             return Results.NotFound();
         })
+        .RequireAuthorization()
         .WithName("GetUploadedFile");
 
         // GET ALL DOCUMENTS ENDPOINT (Supports pagination and filtering)

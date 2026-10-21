@@ -202,4 +202,18 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
         // Assert - Path traversal MUST be rejected with 404 Not Found
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Uploads_WhenRequestedWithApiKey_ReturnsForbidden()
+    {
+        // Arrange: Client authenticated via upload-only API key
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act: Attempt to download/view a protected PDF via /uploads
+        var response = await client.GetAsync("/uploads/sample.pdf");
+
+        // Assert: Upload-only API key MUST be rejected with 403 Forbidden
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
 }

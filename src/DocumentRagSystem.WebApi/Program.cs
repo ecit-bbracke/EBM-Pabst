@@ -481,6 +481,16 @@ app.Use(async (context, next) =>
         return;
     }
 
+    // Enforce authorization for upload-only API key clients: block them from accessing /uploads
+    bool isApiKey = context.User.HasClaim("auth_method", "api_key") ||
+                    string.Equals(context.User.Identity?.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
+
+    if (isApiKey && path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
     // Restrict /users.html strictly to Admins
     if (path.Equals("/users.html", StringComparison.OrdinalIgnoreCase))
     {
