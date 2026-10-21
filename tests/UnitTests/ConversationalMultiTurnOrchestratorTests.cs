@@ -624,4 +624,60 @@ public class ConversationalMultiTurnOrchestratorTests
         await orchestrator.ProcessQueryAsync("What is the current of K3G560?", mockVectorStore.Object, convId);
         mockLlm.Verify(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true), Times.Exactly(2));
     }
+
+    [Fact]
+    public async Task Orchestrator_OnCacheHit_DoesNotLeakPromptTracesOrPreviousQueryRefinement()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Verified answer: Operating voltage is 400V.");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 voltage 400V", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            stateStore: stateStore
+        );
+
+        // User A runs first query in Session A
+        var (ans1, _, trace1) = await orchestrator.ProcessQueryAsync("Voltage of K3G560?", mockVectorStore.Object, "session-A");
+        Assert.NotNull(trace1);
+
+        // User B runs the same query in Session B (hits cache!)
+        var (ans2, _, trace2) = await orchestrator.ProcessQueryAsync("Voltage of K3G560?", mockVectorStore.Object, "session-B");
+
+        // Assert: Diagnostic prompts from Session A are NOT leaked into Session B's trace
+        Assert.NotNull(trace2.PromptTraces);
+        Assert.Empty(trace2.PromptTraces);
+        Assert.Equal("Voltage of K3G560?", trace2.Question);
+    }
+
+    [Fact]
+    public void IsUserAdmin_WhenUserHasAdminEmail_WithoutAdminRole_ReturnsFalse()
+    {
+        var identity = new System.Security.Claims.ClaimsIdentity(new[]
+        {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "admin@ebmpabst.dk")
+        }, "TestAuth");
+
+        var principal = new System.Security.Claims.ClaimsPrincipal(identity);
+
+        Assert.False(DocumentRagSystem.WebApi.UserSecurityHelper.IsUserAdmin(principal));
+    }
 }

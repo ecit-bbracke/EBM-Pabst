@@ -306,13 +306,23 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             var cachedStateAfter = UpdateConversationState(currentState, refinement, cachedEntry.Trace.InputGovernor, cachedEntry.Trace.Evidence, effectiveQuestion);
             await _stateStore.SaveStateAsync(effectiveConvId, cachedStateAfter);
 
-            var updatedTrace = cachedEntry.Trace with
-            {
-                OriginalQuestion = question,
-                Question = effectiveQuestion,
-                ConversationStateBefore = stateBefore,
-                ConversationStateAfter = cachedStateAfter
-            };
+            var updatedTrace = new ExecutionTrace(
+                Question: effectiveQuestion,
+                InputGovernor: cachedEntry.Trace.InputGovernor,
+                Workflow: cachedEntry.Trace.Workflow,
+                Retrievals: cachedEntry.Trace.Retrievals,
+                Evidence: cachedEntry.Trace.Evidence,
+                DraftAnswer: cachedEntry.Trace.DraftAnswer,
+                OutputGovernor: cachedEntry.Trace.OutputGovernor,
+                FinalAnswer: cachedEntry.Answer,
+                OriginalQuestion: question,
+                ConversationStateBefore: stateBefore,
+                QueryRefinement: refinementTrace,
+                ConversationStateAfter: cachedStateAfter,
+                Timings: new Dictionary<string, long> { ["CacheHit"] = totalStopwatch.ElapsedMilliseconds },
+                TotalDurationMs: totalStopwatch.ElapsedMilliseconds,
+                PromptTraces: new List<PromptTrace>()
+            );
             return (cachedEntry.Answer, cachedEntry.Chunks, updatedTrace);
         }
 
@@ -724,13 +734,23 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             var cachedStateAfter = UpdateConversationState(currentState, refinement, cachedEntry.Trace.InputGovernor, cachedEntry.Trace.Evidence, effectiveQuestion);
             await _stateStore.SaveStateAsync(effectiveConvId, cachedStateAfter);
 
-            var updatedTrace = cachedEntry.Trace with
-            {
-                OriginalQuestion = question,
-                Question = effectiveQuestion,
-                ConversationStateBefore = stateBefore,
-                ConversationStateAfter = cachedStateAfter
-            };
+            var updatedTrace = new ExecutionTrace(
+                Question: effectiveQuestion,
+                InputGovernor: cachedEntry.Trace.InputGovernor,
+                Workflow: cachedEntry.Trace.Workflow,
+                Retrievals: cachedEntry.Trace.Retrievals,
+                Evidence: cachedEntry.Trace.Evidence,
+                DraftAnswer: cachedEntry.Trace.DraftAnswer,
+                OutputGovernor: cachedEntry.Trace.OutputGovernor,
+                FinalAnswer: cachedEntry.Answer,
+                OriginalQuestion: question,
+                ConversationStateBefore: stateBefore,
+                QueryRefinement: refinementTrace,
+                ConversationStateAfter: cachedStateAfter,
+                Timings: new Dictionary<string, long> { ["CacheHit"] = totalStopwatch.ElapsedMilliseconds },
+                TotalDurationMs: totalStopwatch.ElapsedMilliseconds,
+                PromptTraces: new List<PromptTrace>()
+            );
 
             yield return new OrchestrationStreamEvent("citations", null, cachedEntry.Chunks, effectiveConvId);
             yield return new OrchestrationStreamEvent("chunk", cachedEntry.Answer);
