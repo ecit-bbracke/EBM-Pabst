@@ -8,6 +8,7 @@ using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.WebApi.DTOs;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace DocumentRagSystem.E2ETests;
