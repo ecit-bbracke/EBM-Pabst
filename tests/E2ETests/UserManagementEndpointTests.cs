@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
+using DocumentRagSystem.Core.Interfaces;
+using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.WebApi.DTOs;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DocumentRagSystem.E2ETests;
@@ -117,5 +120,31 @@ public class UserManagementEndpointTests : IClassFixture<WebApplicationFactory<P
 
         var response = await client.DeleteAsync($"/api/admin/users/{defaultAdmin!.Id}");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CleanOrphanedDocuments_RemovesRecordsWithMissingUploadFilesAndNoVectors()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        var orphanId = $"orphan_{Guid.NewGuid():N}";
+        var orphanDoc = new Document(
+            Id: orphanId,
+            FileName: "completely_missing.pdf",
+            FilePath: "/uploads/completely_missing.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-10),
+            Status: DocumentStatus.Processed
+        );
+        await repo.AddDocumentAsync(orphanDoc);
+
+        // Act: Run orphan cleanup
+        var response = await client.PostAsync("/api/admin/clean-orphans", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Assert: The orphan document was removed from repository because its physical file and vectors are gone
+        var retrieved = await repo.GetDocumentByIdAsync(orphanId);
+        Assert.Null(retrieved);
     }
 }

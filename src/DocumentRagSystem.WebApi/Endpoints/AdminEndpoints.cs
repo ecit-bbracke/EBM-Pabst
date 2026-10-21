@@ -236,15 +236,44 @@ public static class AdminEndpoints
                 {
                     resolvedPath = doc.FilePath;
                 }
-                else if (!string.IsNullOrWhiteSpace(doc.FileName))
+                else
                 {
+                    var urlName = Path.GetFileName(Uri.UnescapeDataString(doc.FilePath ?? string.Empty));
+                    var cleanName = Path.GetFileName(Uri.UnescapeDataString(doc.FileName ?? string.Empty));
+
                     foreach (var dir in servedUploadDirectories)
                     {
-                        var candidate = Path.Combine(dir, doc.FileName);
-                        if (File.Exists(candidate))
+                        if (!Directory.Exists(dir)) continue;
+
+                        if (!string.IsNullOrWhiteSpace(urlName))
                         {
-                            resolvedPath = candidate;
-                            break;
+                            var candidate = Path.Combine(dir, urlName);
+                            if (File.Exists(candidate))
+                            {
+                                resolvedPath = candidate;
+                                break;
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(cleanName))
+                        {
+                            var candidate = Path.Combine(dir, cleanName);
+                            if (File.Exists(candidate))
+                            {
+                                resolvedPath = candidate;
+                                break;
+                            }
+
+                            var suffixMatch = DocumentUrlResolver.ResolveUploadSuffixMatch(dir, cleanName);
+                            if (!string.IsNullOrWhiteSpace(suffixMatch))
+                            {
+                                var fullSuffix = Path.Combine(dir, suffixMatch);
+                                if (File.Exists(fullSuffix))
+                                {
+                                    resolvedPath = fullSuffix;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -316,14 +345,19 @@ public static class AdminEndpoints
             }
 
             var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
-            var vectorDocs = (await vectorStore.GetDocumentsAsync(100_000))?.ToList() ?? new List<Document>();
+            List<Document> vectorDocs = new();
+            try
+            {
+                vectorDocs = (await vectorStore.GetDocumentsAsync(100_000))?.ToList() ?? new List<Document>();
+            }
+            catch { }
             var vectorDocIds = new HashSet<string>(vectorDocs.Select(d => d.Id), StringComparer.OrdinalIgnoreCase);
 
             var deletedCount = 0;
 
             foreach (var doc in allDocs)
             {
-                var resolvedUrl = ResolveDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories);
+                var resolvedUrl = DocumentUrlResolver.ToDocumentUrl(doc.FilePath, doc.FileName, servedUploadDirectories);
                 if (string.IsNullOrWhiteSpace(resolvedUrl) && !vectorDocIds.Contains(doc.Id))
                 {
                     await repository.DeleteDocumentAsync(doc.Id);
@@ -347,37 +381,5 @@ public static class AdminEndpoints
         .WithName("CleanOrphanedDocuments");
 
         return app;
-    }
-
-    private static string ResolveDocumentUrl(string? filePath, string? fileName, IEnumerable<string> uploadDirectories)
-    {
-        if (!string.IsNullOrWhiteSpace(filePath) && filePath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
-        {
-            return filePath;
-        }
-
-        var normalizedFileName = Path.GetFileName(filePath ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(normalizedFileName))
-        {
-            normalizedFileName = Path.GetFileName(fileName ?? string.Empty);
-        }
-
-        if (string.IsNullOrWhiteSpace(normalizedFileName))
-        {
-            return string.Empty;
-        }
-
-        foreach (var dir in uploadDirectories)
-        {
-            if (!Directory.Exists(dir)) continue;
-
-            var direct = Path.Combine(dir, normalizedFileName);
-            if (File.Exists(direct))
-            {
-                return $"/uploads/{Uri.EscapeDataString(normalizedFileName)}";
-            }
-        }
-
-        return string.Empty;
     }
 }
