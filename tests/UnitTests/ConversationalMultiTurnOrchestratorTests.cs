@@ -726,4 +726,55 @@ public class ConversationalMultiTurnOrchestratorTests
         Assert.Contains("24V", ans2);
         Assert.DoesNotContain("230V model", ans2);
     }
+
+    [Fact]
+    public async Task Orchestrator_WhenCacheInvalidatedWhileQueryIsInFlight_DoesNotCacheStaleResult()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        // When Answer Composer runs, an upload/deletion occurs and invalidates the cache while the query is in flight!
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .Returns<string, bool>((prompt, isJson) =>
+            {
+                // In-flight invalidation occurs here!
+                TechnicalRagOrchestrator.InvalidateQueryCache();
+                return Task.FromResult("Stale answer from old document version.");
+            });
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-old", "doc-deleted", "Old document text", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            queryRefiner: new ConversationalQueryRefiner(mockLlm.Object),
+            stateStore: stateStore
+        );
+
+        // Act: Run query 1, which suffers an in-flight cache invalidation
+        var (ans1, _, _) = await orchestrator.ProcessQueryAsync("Voltage for K3G560?", mockVectorStore.Object, "flight-1");
+        Assert.Contains("Stale answer", ans1);
+
+        // Now setup mock for Query 2 with a new fresh answer
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Fresh updated answer from new document version.");
+
+        // Query 2: Must NOT receive the stale answer from cache! It must run again because the in-flight write was rejected.
+        var (ans2, _, _) = await orchestrator.ProcessQueryAsync("Voltage for K3G560?", mockVectorStore.Object, "flight-2");
+        Assert.Contains("Fresh updated answer", ans2);
+        Assert.DoesNotContain("Stale answer", ans2);
+    }
 }

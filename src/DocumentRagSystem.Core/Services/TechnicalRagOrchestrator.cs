@@ -53,9 +53,11 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     private static readonly ConcurrentDictionary<string, QueryCacheEntry> _queryResponseCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
     private const int MaxCacheSize = 5000;
+    private static long _cacheGeneration = 0;
 
     public static void InvalidateQueryCache()
     {
+        Interlocked.Increment(ref _cacheGeneration);
         _queryResponseCache.Clear();
     }
 
@@ -211,6 +213,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var stageStopwatch = Stopwatch.StartNew();
         var timings = new Dictionary<string, long>();
         var promptTraces = new List<PromptTrace>();
+        var queryGeneration = Interlocked.Read(ref _cacheGeneration);
 
         var effectiveConvId = conversationId ?? initialConversationState?.ConversationId ?? Guid.NewGuid().ToString();
         _logger?.LogInformation("Starting RAG query processing for question: \"{Question}\" (ConversationId: {ConversationId})", question, effectiveConvId);
@@ -624,7 +627,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         if (canUseCache && workflowType != WorkflowType.Clarification && (govOutputResult?.Approved ?? false) && !string.IsNullOrWhiteSpace(finalAnswer))
         {
-            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
+            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace, queryGeneration);
         }
 
         return (finalAnswer, chunksForComposer, trace);
@@ -645,6 +648,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var stageStopwatch = Stopwatch.StartNew();
         var timings = new Dictionary<string, long>();
         var promptTraces = new List<PromptTrace>();
+        var queryGeneration = Interlocked.Read(ref _cacheGeneration);
 
         var effectiveConvId = conversationId ?? initialConversationState?.ConversationId ?? Guid.NewGuid().ToString();
         _logger?.LogInformation("Starting streaming RAG query processing for question: \"{Question}\" (ConversationId: {ConversationId})", question, effectiveConvId);
@@ -946,14 +950,20 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         if (canUseCache && workflowType != WorkflowType.Clarification && govOutputResult.Approved && !string.IsNullOrWhiteSpace(finalAnswer))
         {
-            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace);
+            CacheQueryResult(cacheKey, finalAnswer, chunksForComposer, trace, queryGeneration);
         }
 
         yield return new OrchestrationStreamEvent("done", null, chunksForComposer, effectiveConvId, trace);
     }
 
-    private static void CacheQueryResult(string key, string answer, List<DocumentChunk> chunks, ExecutionTrace trace)
+    private static void CacheQueryResult(string key, string answer, List<DocumentChunk> chunks, ExecutionTrace trace, long queryGeneration)
     {
+        if (queryGeneration != Interlocked.Read(ref _cacheGeneration))
+        {
+            // Cache was invalidated while this query was in flight: discard stale answer!
+            return;
+        }
+
         if (_queryResponseCache.Count >= MaxCacheSize)
         {
             var oldKeys = _queryResponseCache
