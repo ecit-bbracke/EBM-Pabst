@@ -287,11 +287,12 @@ public class DocumentProcessor : IDocumentProcessor
                         chunksWithEmbeddings.Add((chunksWithMetaList[i], embeddings[i]));
                     }
 
-                    // Snapshot existing vectors before replacement to ensure rollback restoration on failure
+                    // Snapshot existing vectors and FTS chunks before replacement to ensure rollback restoration on failure
                     List<(DocumentChunk Chunk, float[] Embedding)>? existingVectorSnapshot = null;
+                    List<DocumentChunk>? existingFtsSnapshot = null;
                     if (isOverwritingCompletedDoc && _vectorStore != null && _embeddingService != null)
                     {
-                        var oldChunks = (await _vectorStore.GetChunksByDocumentAndIndicesAsync(existingDoc!.Id, Enumerable.Range(0, 1000), cancellationToken))?.ToList();
+                        var oldChunks = (await _vectorStore.GetAllChunksByDocumentIdAsync(existingDoc!.Id, cancellationToken))?.ToList();
                         if (oldChunks != null && oldChunks.Count > 0)
                         {
                             var oldTexts = oldChunks.Select(c => c.Text).ToList();
@@ -301,69 +302,85 @@ public class DocumentProcessor : IDocumentProcessor
                                 throw new InvalidOperationException($"Cannot safely replace document '{existingDoc.Id}': failed to capture backup snapshot of existing vectors before replacement.");
                             }
                             existingVectorSnapshot = oldChunks.Zip(oldEmbeddings, (c, e) => (c, e)).ToList();
+                            existingFtsSnapshot = oldChunks;
                         }
                     }
 
                     try
                     {
-                        // Clear old chunks before inserting updated chunks
+                        // 1. Clear old chunks before inserting updated chunks
                         if (existingDoc != null && _vectorStore != null)
                         {
                             try { await _vectorStore.DeleteDocumentChunksAsync(existingDoc.Id, cancellationToken); } catch { }
                         }
 
-                        // Upsert all points into vector store in a single batch
+                        // 2. Upsert all points into vector store in a single batch
                         if (_vectorStore != null)
                         {
                             await _vectorStore.AddChunksAsync(chunksWithEmbeddings, cancellationToken);
                         }
+
+                        // 3. Update SQLite FTS5 store
+                        if (_ftsStore != null && chunksWithMetaList.Count > 0)
+                        {
+                            if (existingDoc != null)
+                            {
+                                try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
+                            }
+
+                            try
+                            {
+                                await _ftsStore.AddChunksAsync(chunksWithMetaList);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger?.LogWarning(ex, "Failed to index chunks into SQLite FTS5 for document {DocumentId}.", targetDocumentId);
+                            }
+                        }
+
+                        // 4. Update document metadata in SQLite repository
+                        document = document with
+                        {
+                            Status = DocumentStatus.Processed,
+                            Language = languageResult.Language
+                        };
+
+                        if (_documentRepository != null)
+                        {
+                            if (existingDoc != null)
+                            {
+                                await _documentRepository.AddDocumentAsync(document);
+                                try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
+                            }
+                            await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
+                        }
                     }
                     catch (Exception)
                     {
-                        // Restore the original index on failure so vectors are never lost
+                        // Extended rollback: If vector upsert, FTS upsert, OR metadata write fails,
+                        // restore original vectors and FTS chunks so storage remains 100% consistent with the original PDF!
                         if (existingVectorSnapshot != null && existingVectorSnapshot.Count > 0 && _vectorStore != null)
                         {
                             try
                             {
+                                await _vectorStore.DeleteDocumentChunksAsync(existingDoc!.Id, CancellationToken.None);
                                 await _vectorStore.AddChunksAsync(existingVectorSnapshot, CancellationToken.None);
                             }
                             catch { }
                         }
+
+                        if (existingFtsSnapshot != null && existingFtsSnapshot.Count > 0 && _ftsStore != null)
+                        {
+                            try
+                            {
+                                await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc!.Id, CancellationToken.None);
+                                await _ftsStore.AddChunksAsync(existingFtsSnapshot, CancellationToken.None);
+                            }
+                            catch { }
+                        }
+
                         throw;
                     }
-                }
-
-                if (_ftsStore != null && chunksWithMetaList.Count > 0)
-                {
-                    if (existingDoc != null)
-                    {
-                        try { await _ftsStore.DeleteChunksByDocumentIdAsync(existingDoc.Id, cancellationToken); } catch { }
-                    }
-
-                    try
-                    {
-                        await _ftsStore.AddChunksAsync(chunksWithMetaList);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogWarning(ex, "Failed to index chunks into SQLite FTS5 for document {DocumentId}.", targetDocumentId);
-                    }
-                }
-
-                document = document with
-                {
-                    Status = DocumentStatus.Processed,
-                    Language = languageResult.Language
-                };
-
-                if (_documentRepository != null)
-                {
-                    if (existingDoc != null)
-                    {
-                        await _documentRepository.AddDocumentAsync(document);
-                        try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
-                    }
-                    await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
                 }
             }
             else

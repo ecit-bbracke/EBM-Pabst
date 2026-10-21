@@ -710,4 +710,133 @@ public class DocumentProcessorTests
             It.IsAny<string>()
         ), Times.Never);
     }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenDocumentExceeds1000Chunks_CapturesAndRestoresAllChunksOnFailure()
+    {
+        // Arrange: Document with 1,005 chunks
+        var existingDoc = new Document(
+            Id: "large-doc-1005",
+            FileName: "large_manual.pdf",
+            FilePath: "/uploads/large_manual.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-1),
+            Status: DocumentStatus.Processed
+        );
+
+        var originalChunks = Enumerable.Range(0, 1005)
+            .Select(i => new DocumentChunk($"c_{i}", "large-doc-1005", $"Content of chunk {i}", i))
+            .ToList();
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("New content for large document");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("new_1", "large-doc-1005", "New content", 0) });
+
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string> texts, CancellationToken _) => texts.Select(_ => new float[] { 0.1f }).ToList());
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.GetAllChunksByDocumentIdAsync("large-doc-1005", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(originalChunks);
+
+        IEnumerable<(DocumentChunk Chunk, float[] Embedding)>? restoredSnapshot = null;
+        mockVector.Setup(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()))
+            .Returns<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>, CancellationToken>((chunks, token) =>
+            {
+                var list = chunks.ToList();
+                // If it's the replacement upsert (1 chunk), fail it!
+                if (list.Count == 1)
+                {
+                    throw new InvalidOperationException("Simulated insertion failure");
+                }
+                // Otherwise it's the rollback restoration:
+                restoredSnapshot = list;
+                return Task.CompletedTask;
+            });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("large_manual.pdf")).ReturnsAsync(existingDoc);
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("large-doc-1005")).ReturnsAsync(existingDoc);
+
+        var processor = new DocumentProcessor(mockTextExtractor.Object, mockChunker.Object, mockEmbedding.Object, mockVector.Object, mockRepo.Object);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "large_manual.pdf", "large-doc-1005");
+        });
+
+        // Verification: Rollback restored ALL 1,005 chunks (not just 1,000)!
+        Assert.NotNull(restoredSnapshot);
+        Assert.Equal(1005, restoredSnapshot!.Count());
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenMetadataUpdateFailsAfterVectorUpsert_RestoresOriginalVectors()
+    {
+        // Arrange
+        var existingDoc = new Document(
+            Id: "doc-meta-fail",
+            FileName: "meta_fail.pdf",
+            FilePath: "/uploads/meta_fail.pdf",
+            UploadedAt: DateTime.UtcNow.AddDays(-1),
+            Status: DocumentStatus.Processed
+        );
+
+        var originalChunks = new List<DocumentChunk>
+        {
+            new("orig_1", "doc-meta-fail", "Original text 1", 0)
+        };
+
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("New replacement content");
+
+        var mockChunker = new Mock<IChunkingService>();
+        mockChunker.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk> { new("new_1", "doc-meta-fail", "New replacement text", 0) });
+
+        var mockEmbedding = new Mock<IEmbeddingService>();
+        mockEmbedding.Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string> texts, CancellationToken _) => texts.Select(_ => new float[] { 0.5f }).ToList());
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.GetAllChunksByDocumentIdAsync("doc-meta-fail", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(originalChunks);
+
+        bool vectorRestored = false;
+        mockVector.Setup(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()))
+            .Returns<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>, CancellationToken>((chunks, token) =>
+            {
+                var list = chunks.ToList();
+                if (list.Any(c => c.Chunk.Id == "orig_1"))
+                {
+                    vectorRestored = true;
+                }
+                return Task.CompletedTask;
+            });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentByFileNameAsync("meta_fail.pdf")).ReturnsAsync(existingDoc);
+        mockRepo.Setup(x => x.GetDocumentByIdAsync("doc-meta-fail")).ReturnsAsync(existingDoc);
+        // Metadata update throws exception!
+        mockRepo.Setup(x => x.UpdateDocumentStatusAsync("doc-meta-fail", DocumentStatus.Processed, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("SQLite metadata write failed"));
+
+        var processor = new DocumentProcessor(mockTextExtractor.Object, mockChunker.Object, mockEmbedding.Object, mockVector.Object, mockRepo.Object);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1 }), "meta_fail.pdf", "doc-meta-fail");
+        });
+
+        // Verification: Extended rollback executed and restored the original vectors!
+        Assert.True(vectorRestored);
+        mockVector.Verify(x => x.DeleteDocumentChunksAsync("doc-meta-fail", It.IsAny<CancellationToken>()), Times.AtLeast(2)); // Deleted before upsert and deleted before restoration
+    }
 }
