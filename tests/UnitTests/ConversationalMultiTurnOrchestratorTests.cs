@@ -680,4 +680,50 @@ public class ConversationalMultiTurnOrchestratorTests
 
         Assert.False(DocumentRagSystem.WebApi.UserSecurityHelper.IsUserAdmin(principal));
     }
+
+    [Fact]
+    public async Task Orchestrator_WhenQueryHasNewlyRefinedConstraints_BypassesCache()
+    {
+        // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var mockLlm = new Mock<ILlmService>();
+        // Query 1 has no constraints -> returns generic 230V answer and gets cached
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor") && !s.Contains("24V")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        // Query 2 adds 24V constraint in refinement
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor") && s.Contains("24V")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.95, "entities": [{"type": "fan", "name": "K3G560"}], "requested_attributes": [], "constraints": [{"attribute": "supply_voltage", "operator": "eq", "value": "24V"}], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        mockLlm.SetupSequence(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Generic answer: 230V model.")
+            .ReturnsAsync("Specific answer: 24V DC model.");
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk> { new("chunk-1", "doc-1", "K3G560 230V AC and 24V DC options", 0) });
+
+        var stateStore = new InMemoryConversationStateStore();
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            stateStore: stateStore
+        );
+
+        // Turn 1: Generic query without constraints -> caches 230V answer
+        var (ans1, _, _) = await orchestrator.ProcessQueryAsync("Voltage for K3G560?", mockVectorStore.Object, "session-constraints");
+        Assert.Contains("230V", ans1);
+
+        // Turn 2: Query with newly refined 24V constraint -> MUST NOT return the cached 230V answer!
+        var (ans2, _, _) = await orchestrator.ProcessQueryAsync("Voltage for K3G560 with 24V?", mockVectorStore.Object, "session-constraints");
+        Assert.Contains("24V", ans2);
+        Assert.DoesNotContain("230V model", ans2);
+    }
 }

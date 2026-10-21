@@ -296,7 +296,14 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             return (clarificationDraft, new List<DocumentChunk>(), clarificationTrace);
         }
 
-        bool canUseCache = (currentState.ActiveConstraints == null || currentState.ActiveConstraints.Count == 0) &&
+        bool hasPreviousConstraints = currentState.ActiveConstraints != null && currentState.ActiveConstraints.Count > 0;
+        bool hasRefinedConstraints = refinement.ActiveConstraints != null && refinement.ActiveConstraints.Count > 0;
+        bool hasContextDependencies = (refinement.CandidateSet != null && refinement.CandidateSet.Count > 0) ||
+                                       (currentState.CandidateSet != null && currentState.CandidateSet.Members.Count > 0);
+
+        bool canUseCache = !hasPreviousConstraints &&
+                           !hasRefinedConstraints &&
+                           !hasContextDependencies &&
                            !refinement.ClarificationRequired;
         var cacheKey = effectiveQuestion.Trim().ToLowerInvariant();
 
@@ -724,7 +731,14 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             yield break;
         }
 
-        bool canUseCache = (currentState.ActiveConstraints == null || currentState.ActiveConstraints.Count == 0) &&
+        bool hasPreviousConstraints = currentState.ActiveConstraints != null && currentState.ActiveConstraints.Count > 0;
+        bool hasRefinedConstraints = refinement.ActiveConstraints != null && refinement.ActiveConstraints.Count > 0;
+        bool hasContextDependencies = (refinement.CandidateSet != null && refinement.CandidateSet.Count > 0) ||
+                                       (currentState.CandidateSet != null && currentState.CandidateSet.Members.Count > 0);
+
+        bool canUseCache = !hasPreviousConstraints &&
+                           !hasRefinedConstraints &&
+                           !hasContextDependencies &&
                            !refinement.ClarificationRequired;
         var cacheKey = effectiveQuestion.Trim().ToLowerInvariant();
 
