@@ -570,8 +570,8 @@
                         constraintsList.innerHTML = state.active_constraints.map(c => `
                             <span class="inline-flex items-center bg-slate-100 text-slate-800 text-xs px-2.5 py-0.5 rounded-full border border-slate-200 font-medium shadow-2xs">
                                 <span><strong>${escapeHtml(c.attribute)}</strong>: ${escapeHtml(c.value)}${c.unit ? ' ' + escapeHtml(c.unit) : ''}</span>
-                                <button onclick="removeConstraint('${escapeHtml(c.attribute)}')" class="ml-1.5 text-slate-400 hover:text-red-600 transition p-0.5" title="Fjern dette krav">
-                                    <i class="fa-solid fa-xmark text-[10px]"></i>
+                                <button class="remove-constraint-btn ml-1.5 text-slate-400 hover:text-red-600 transition p-0.5" data-attribute="${encodeURIComponent(c.attribute || '')}" title="Fjern dette krav">
+                                    <i class="fa-solid fa-xmark text-[10px] pointer-events-none"></i>
                                 </button>
                             </span>
                         `).join('');
@@ -919,9 +919,12 @@
             let citationsHtml = '';
             let citationIndex = 1;
             uniqueCitationsMap.forEach((cit) => {
-                const fileName = escapeHtml(cit.filename || cit.documentId);
+                const rawName = cit.filename || cit.documentId || '';
+                const fileName = escapeHtml(rawName);
                 const citationLink = isDocumentUrl(cit.filepath)
-                    ? `<a href="#" onclick="openPdfModal('${escapeHtml(cit.filepath)}', '${fileName}'); return false;" class="text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm">
+                    ? `<a href="#" class="open-pdf-citation text-brand-700 hover:text-brand-800 hover:underline font-semibold text-sm"
+                          data-filepath="${encodeURIComponent(cit.filepath)}"
+                          data-filename="${encodeURIComponent(rawName)}">
                            ${fileName}
                        </a>`
                     : `<span class="font-semibold text-slate-700 text-sm">${fileName}</span>`;
@@ -1767,6 +1770,26 @@
                 }
             }
         }
+
+        // Secure event delegation: handle citation links and constraint removal without inline code evaluation
+        document.addEventListener('click', (e) => {
+            const pdfBtn = e.target.closest('.open-pdf-citation');
+            if (pdfBtn) {
+                e.preventDefault();
+                const filepath = decodeURIComponent(pdfBtn.getAttribute('data-filepath') || '');
+                const filename = decodeURIComponent(pdfBtn.getAttribute('data-filename') || '');
+                openPdfModal(filepath, filename);
+                return;
+            }
+
+            const remBtn = e.target.closest('.remove-constraint-btn');
+            if (remBtn) {
+                e.preventDefault();
+                const attr = decodeURIComponent(remBtn.getAttribute('data-attribute') || '');
+                removeConstraint(attr);
+                return;
+            }
+        });
     </script>
 </body>
 </html>

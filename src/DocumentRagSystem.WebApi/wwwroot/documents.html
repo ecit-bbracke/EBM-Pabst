@@ -564,8 +564,11 @@
                                     <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold ${statusColor}">
                                         ${statusText}
                                     </span>
-                                    <button onclick="deleteDocument('${escapeHtml(doc.id)}', '${fileName}')" title="Slet dokument og chunks" class="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150">
-                                        <i class="fa-solid fa-trash-can text-sm"></i>
+                                    <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150"
+                                            data-id="${encodeURIComponent(doc.id || '')}"
+                                            data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
+                                            title="Slet dokument og chunks">
+                                        <i class="fa-solid fa-trash-can text-sm pointer-events-none"></i>
                                     </button>
                                 </div>
                             </div>
@@ -683,6 +686,17 @@
             } catch {}
             window.location.href = '/login.html';
         }
+
+        // Secure event delegation: handle document deletion without inline code evaluation
+        document.addEventListener('click', (e) => {
+            const delBtn = e.target.closest('.delete-doc-btn');
+            if (delBtn) {
+                e.preventDefault();
+                const id = decodeURIComponent(delBtn.getAttribute('data-id') || '');
+                const filename = decodeURIComponent(delBtn.getAttribute('data-filename') || '');
+                deleteDocument(id, filename);
+            }
+        });
     </script>
 </body>
 </html>
