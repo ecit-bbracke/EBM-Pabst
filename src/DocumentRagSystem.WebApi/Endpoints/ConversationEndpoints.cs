@@ -21,7 +21,7 @@ public static class ConversationEndpoints
             if (!IsAuthorizedForConversation(state, user)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             return Results.Ok(state);
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("GetConversationState");
 
         // CLEAR CONVERSATION STATE
@@ -32,7 +32,7 @@ public static class ConversationEndpoints
             await stateStore.ClearStateAsync(id);
             return Results.NoContent();
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("ClearConversationState");
 
         // REMOVE SPECIFIC CONSTRAINT FROM CONVERSATION
@@ -45,7 +45,7 @@ public static class ConversationEndpoints
             var updated = await stateStore.GetStateAsync(id);
             return updated != null ? Results.Ok(updated) : Results.NotFound();
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("RemoveConversationConstraint");
 
         // RESET CONVERSATION CONSTRAINTS
@@ -65,7 +65,7 @@ public static class ConversationEndpoints
             await stateStore.SaveStateAsync(id, resetState);
             return Results.Ok(resetState);
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("ResetConversationConstraints");
 
         return app;
@@ -76,6 +76,9 @@ public static class ConversationEndpoints
         if (state == null) return false;
         if (string.IsNullOrWhiteSpace(state.OwnerUserId)) return true; // Legacy or system-created
         if (UserSecurityHelper.IsUserAdmin(user)) return true;
+        bool isApiKey = user.HasClaim("auth_method", "api_key") ||
+                        string.Equals(user.Identity?.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
+        if (isApiKey) return true;
         return string.Equals(state.OwnerUserId, user.Identity?.Name, StringComparison.OrdinalIgnoreCase);
     }
 }

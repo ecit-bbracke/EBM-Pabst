@@ -450,7 +450,7 @@ public static class QueryEndpoints
             var text = await sttService.TranscribeAudioAsync(audioStream, resolvedMime, lang, cancellationToken);
             return Results.Ok(new { text });
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("TranscribeAudio");
 
         return app;
