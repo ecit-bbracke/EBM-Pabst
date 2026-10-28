@@ -1,0 +1,444 @@
+{
+  "info": {
+    "_postman_id": "ebm-papst-rag-system-api-v2",
+    "name": "ebm-papst Document RAG System API",
+    "description": "Komplet Postman Collection for ebm-papst Technical Document RAG System (185.158.62.152:8080).\n\n### 🔑 Autentificering i Postman:\nSystemet benytter to former for adgang:\n1. **Bruger-session (Anbefalet til Chat, Query og Admin):**\n   - Kør først `1. Authentication -> Login` med din email og adgangskode.\n   - Postman gemmer automatisk session-cookien og anvender den på alle efterfølgende kald (Query, Stream, Conversations, Admin).\n2. **API-nøgle (Upload-scope):**\n   - Bruges til automatiserede uploads og status-tjek via headeren `X-API-KEY: {{apiKey}}`.\n   - Chat- og admin-kald kræver en logget-ind brugerkonto for at beskytte data og sessionshistorik.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://185.158.62.152:8080",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "admin@ebmpabst.dk",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "IndtastDitKodeordHer",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "ebm-secret-api-key-change-me",
+      "type": "string"
+    },
+    {
+      "key": "conversationId",
+      "value": "postman_session_1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "1.1 Login (Start her)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    console.log('Login succesfuldt! Session cookie er gemt i Postman Cookie Jar.');",
+                  "} else {",
+                  "    console.error('Login fejlede. Tjek email og password i request body eller collection variables.');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"rememberMe\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "Logger ind på systemet. Postman gemmer automatisk session-cookien (.AspNetCore.Identity.Application), så du efterfølgende kan kalde alle Query-, Samtale- og Admin-endpoints direkte."
+          }
+        },
+        {
+          "name": "1.2 Get Current User (Me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me",
+            "description": "Henter profiloplysninger for den aktuelt loggede bruger (kræver at Login er kørt først)."
+          }
+        },
+        {
+          "name": "1.3 Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/logout",
+            "description": "Logger ud og rydder session-cookien."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Query & Chat (RAG)",
+      "item": [
+        {
+          "name": "2.1 Query Documents (HTML Svar - Standard)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Hvad er driftsspændingen og maksimalt omdrejningstal for K3G355HA3401?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"mode\": \"html\"\n}"
+            },
+            "url": "{{baseUrl}}/api/query",
+            "description": "Standard mode: Returnerer svaret formateret som HTML med citations-array indeholdende sidetal og links. (Default når mode er udeladt eller sat til 'html')."
+          }
+        },
+        {
+          "name": "2.2 Query Documents (JSON Svar med Base64 PDF filer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Hvad er driftsspændingen og maksimalt omdrejningstal for K3G355HA3401?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"mode\": \"json\"\n}"
+            },
+            "url": "{{baseUrl}}/api/query",
+            "description": "JSON mode: Returnerer { response: '...', files: [{ name: '...', content: 'base64...' }] }, hvor samtlige kilde-PDF datablade er Base64-indkapslet direkte i svaret."
+          }
+        },
+        {
+          "name": "2.3 Query Documents (SSE Stream)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              },
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Sammenlign specifikationerne for K3G355HA3401 og K3G355PI9302\",\n  \"conversationId\": \"{{conversationId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/query/stream",
+            "description": "Realtids Server-Sent Events (SSE) streaming af svaret. Virker direkte med X-API-KEY (eller login-session)."
+          }
+        },
+        {
+          "name": "2.4 Transcribe Audio (Speech-to-Text)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/stt/transcribe?lang=da",
+            "description": "Transskriberer en indtalt lydfil (WAV/WebM) til tekst."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Conversation Management",
+      "item": [
+        {
+          "name": "3.1 Get Conversation State",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/conversation/{{conversationId}}",
+            "description": "Henter samtaletiltanden (aktive modeller, akkumulerede krav og filtre)."
+          }
+        },
+        {
+          "name": "3.2 Remove Specific Constraint",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/conversation/{{conversationId}}/constraints/supply_voltage",
+            "description": "Fjerner et specifikt krav fra samtaletilstanden (f.eks. supply_voltage)."
+          }
+        },
+        {
+          "name": "3.3 Reset Conversation Filters",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/conversation/{{conversationId}}/reset",
+            "description": "Nulstiller alle akkumulerede filtre og enheder i samtalen."
+          }
+        },
+        {
+          "name": "3.4 Delete Conversation",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/conversation/{{conversationId}}",
+            "description": "Sletter samtaletiltanden fuldstændigt."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Document Management",
+      "item": [
+        {
+          "name": "4.1 List Documents (Paged & Filtered)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/documents?page=1&pageSize=20&search=K3G&language=en&status=Processed",
+            "description": "Viser pagineret liste over dokumenter. Kræver login-session."
+          }
+        },
+        {
+          "name": "4.2 Upload Document (Tillader API Key eller Cookie)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/documents/upload",
+            "description": "Uploader et teknisk PDF-datablad. Understøtter både X-API-KEY og login-session."
+          }
+        },
+        {
+          "name": "4.3 Get Processing Status (Tillader API Key eller Cookie)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/status",
+            "description": "Henter samlet behandlingsstatus over dokumenter (Pending, Processing, Processed, Skipped, Failed)."
+          }
+        },
+        {
+          "name": "4.4 Delete Document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/documents/target_document_id_here",
+            "description": "Sletter et dokument, dets Qdrant-vektorer, FTS-chunks og fysiske fil. Kræver login-session."
+          }
+        },
+        {
+          "name": "4.5 Download / View PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/uploads/sample.pdf",
+            "description": "Downloader eller fremviser PDF-fil. Kræver browser login-cookie (API-key-only afvises med 403 Forbidden af sikkerhedshensyn)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Administration (Admin Only)",
+      "item": [
+        {
+          "name": "5.1 List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/users",
+            "description": "Henter alle brugere. Kræver Admin-login."
+          }
+        },
+        {
+          "name": "5.2 Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nybruger@ebmpabst.dk\",\n  \"password\": \"SikkerAdgangskode123!\",\n  \"isAdmin\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/users",
+            "description": "Opretter en ny bruger. Kræver Admin-login."
+          }
+        },
+        {
+          "name": "5.3 Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/users/target_user_id_here",
+            "description": "Sletter en brugerkonto. Kræver Admin-login."
+          }
+        },
+        {
+          "name": "5.4 Unlock User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/users/target_user_id_here/unlock",
+            "description": "Ophæver midlertidig lockout på en brugerkonto. Kræver Admin-login."
+          }
+        },
+        {
+          "name": "5.5 Backfill Metadata",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/backfill-metadata",
+            "description": "Opdaterer ArticleId og ProductCode fra filnavne på alle registrerede dokumenter."
+          }
+        },
+        {
+          "name": "5.6 Backfill FTS5 Full-Text Store",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/backfill-fts",
+            "description": "Genindekserer samtlige uploadede fysiske filer i SQLite FTS5 søgeindekset."
+          }
+        },
+        {
+          "name": "5.7 Clean Orphaned Documents",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/clean-orphans",
+            "description": "Fjerner databaseposter for dokumenter, hvis fysiske fil er slettet og som ikke har vektorer i Qdrant."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Databeregning",
+      "item": [
+        {
+          "name": "6.1 Get Calculation History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/databeregning",
+            "description": "Henter beregningshistorik fra robotten. Kræver login-session."
+          }
+        },
+        {
+          "name": "6.2 Submit Calculation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Model\": \"K3G355HA3401\",\n  \"Driftspunkt_m3h\": 3500,\n  \"Driftspunkt_Pa\": 450,\n  \"Densitetskorrektion\": 1.2,\n  \"DriftstimerAar\": 8000,\n  \"ElprisKr\": 2.0\n}"
+            },
+            "url": "{{baseUrl}}/databeregning",
+            "description": "Indsender en ventilatorberegning. Kræver login-session."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Health Checks",
+      "item": [
+        {
+          "name": "7.1 Health Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health",
+            "description": "Offentlig sundhedsstatus (Healthy / Degraded / Unhealthy)."
+          }
+        },
+        {
+          "name": "7.2 Readiness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/ready",
+            "description": "Readiness probe til container-orkestrering."
+          }
+        },
+        {
+          "name": "7.3 Liveness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/live",
+            "description": "Liveness probe til container-orkestrering."
+          }
+        }
+      ]
+    }
+  ]
+}
