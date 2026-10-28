@@ -169,7 +169,13 @@
           "name": "2.4 Transcribe Audio (Speech-to-Text)",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
             "body": {
               "mode": "formdata",
               "formdata": [
@@ -181,7 +187,7 @@
               ]
             },
             "url": "{{baseUrl}}/api/stt/transcribe?lang=da",
-            "description": "Transskriberer en indtalt lydfil (WAV/WebM) til tekst."
+            "description": "Transskriberer en indtalt lydfil (WAV/WebM) til tekst. Virker direkte med X-API-KEY (eller login-session)."
           }
         }
       ]
@@ -193,36 +199,60 @@
           "name": "3.1 Get Conversation State",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/api/conversation/{{conversationId}}",
-            "description": "Henter samtaletiltanden (aktive modeller, akkumulerede krav og filtre)."
+            "description": "Henter samtaletiltanden (aktive modeller, akkumulerede krav og filtre). Virker direkte med X-API-KEY (eller login-session)."
           }
         },
         {
           "name": "3.2 Remove Specific Constraint",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/api/conversation/{{conversationId}}/constraints/supply_voltage",
-            "description": "Fjerner et specifikt krav fra samtaletilstanden (f.eks. supply_voltage)."
+            "description": "Fjerner et specifikt krav fra samtaletilstanden (f.eks. supply_voltage). Virker direkte med X-API-KEY (eller login-session)."
           }
         },
         {
           "name": "3.3 Reset Conversation Filters",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/api/conversation/{{conversationId}}/reset",
-            "description": "Nulstiller alle akkumulerede filtre og enheder i samtalen."
+            "description": "Nulstiller alle akkumulerede filtre og enheder i samtalen. Virker direkte med X-API-KEY (eller login-session)."
           }
         },
         {
           "name": "3.4 Delete Conversation",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/api/conversation/{{conversationId}}",
-            "description": "Sletter samtaletiltanden fuldstændigt."
+            "description": "Sletter samtaletiltanden fuldstændigt. Virker direkte med X-API-KEY (eller login-session)."
           }
         }
       ]
