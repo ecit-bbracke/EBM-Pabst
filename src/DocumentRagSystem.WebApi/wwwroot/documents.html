@@ -555,16 +555,16 @@
 
                     listContainer.innerHTML += `
                         <div class="p-4 bg-slate-50 border border-slate-200/60 rounded-xl hover:border-slate-300 transition duration-150 shadow-sm">
-                            <div class="flex justify-between items-start gap-4">
-                                <div class="flex items-start space-x-3 truncate flex-1">
-                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg mt-0.5 shrink-0"></i>
+                            <div class="flex justify-between items-center gap-4">
+                                <div class="flex items-center space-x-3 truncate flex-1 min-w-0">
+                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg shrink-0 flex items-center justify-center"></i>
                                     ${documentLink}
                                 </div>
                                 <div class="flex items-center space-x-2 shrink-0">
-                                    <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold ${statusColor}">
+                                    <span class="text-xs px-2.5 py-1 rounded-full font-semibold leading-none flex items-center shrink-0 ${statusColor}">
                                         ${statusText}
                                     </span>
-                                    <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150"
+                                    <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150 flex items-center justify-center shrink-0"
                                             data-id="${encodeURIComponent(doc.id || '')}"
                                             data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
                                             title="Slet dokument og chunks">

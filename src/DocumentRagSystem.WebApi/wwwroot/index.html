@@ -315,6 +315,22 @@
 
     <!-- Client-side javascript -->
     <script>
+        // Konfiguration af brugerfladefunktioner (Feature Flags)
+        window.UI_CONFIG = {
+            enableTableCharts: false // Graf-knappen er deaktiveret som standard; sæt til true for at aktivere
+        };
+
+        function isTableChartsEnabled() {
+            if (window.UI_CONFIG && typeof window.UI_CONFIG.enableTableCharts === 'boolean') {
+                return window.UI_CONFIG.enableTableCharts;
+            }
+            try {
+                if (localStorage.getItem('ui_enable_table_charts') === 'true') return true;
+                if (new URLSearchParams(window.location.search).get('charts') === 'true') return true;
+            } catch {}
+            return false;
+        }
+
         let conversations = [];
         let currentConversationId = null;
         let currentUserEmail = null;
@@ -632,8 +648,8 @@
                         <div class="flex flex-wrap gap-2 mt-2">
                             <button onclick="applySuggestion('Hvilke ventilatorer findes der i kataloget?')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Hvilke ventilatorer findes der?</button>
                             <button onclick="applySuggestion('Er K3G560PC0401 kompatibel med 400V?')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Tjek kompatibilitet (400V)</button>
-                            <button onclick="applySuggestion('Sammenlign specifikationerne for K3G560PC0401 og K3G560PB0103')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Sammenlign to modeller</button>
-                            <button onclick="applySuggestion('Beregn årlig energibesparelse og tilbagebetalingstid hvis vi udskifter 5 stk gamle AC blæsere med 250W forbrug med nye EC modeller. Drifttiden er 8000 timer årligt og prisen er 2 kr/kWh.')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Beregn energibesparelse</button>
+                            <button onclick="applySuggestion('Sammenlign specifikationerne for K3G355HA3401 og K3G355PI9302')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Sammenlign to modeller</button>
+                            <button onclick="applySuggestion('Beregn årlig energibesparelse og tilbagebetalingstid hvis vi udskifter 5 stk gamle AC blæsere med 250W forbrug med nye ebm-papst EC modeller (150W). Investeringen er 2.500 kr pr. ventilator, drifttiden er 8000 timer årligt og elprisen er 2 kr/kWh.')" class="bg-white hover:bg-brand-50 text-brand-700 text-xs px-3 py-1.5 rounded-full border border-brand-200 transition-colors shadow-sm font-medium">Beregn energibesparelse</button>
                         </div>
                     </div>
                 </div>
@@ -866,8 +882,66 @@
             return escapeHtml(cleaned).replace(/\n/g, '<br>');
         }
 
-        function buildCitationsHtml(citations) {
+        function detectLanguage(text) {
+            if (!text) return 'da';
+            const lower = text.toLowerCase();
+
+            // Distinctive Danish characters
+            if (/[æøå]/.test(lower)) return 'da';
+
+            // Distinctive German characters (umlauts and eszett)
+            if (/[äöüß]/.test(lower)) return 'de';
+
+            const deWords = [
+                'was', 'wie', 'welche', 'welcher', 'welches', 'wann', 'wo', 'warum', 'wer',
+                'ist', 'sind', 'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer',
+                'und', 'für', 'mit', 'von', 'zu', 'im', 'in', 'nicht', 'als', 'auch', 'aus',
+                'lüfter', 'ventilator', 'drehzahl', 'betriebsdaten', 'spannung', 'strom',
+                'nennspannung', 'zulässige', 'leistung', 'fördervolumen', 'motorschutz',
+                'drehrichtung', 'schutzart', 'abmessungen', 'daten', 'technische', 'kabel',
+                'gewicht', 'durchmesser', 'temperatur', 'volumenstrom', 'druck', 'vergleichen',
+                'unterschied', 'zwischen', 'maximal', 'maximale'
+            ];
+
+            const enWords = [
+                'what', 'which', 'how', 'when', 'where', 'why', 'who', 'is', 'are', 'the',
+                'for', 'with', 'and', 'fan', 'temperature', 'voltage', 'airflow', 'speed',
+                'compare', 'difference', 'specifications', 'between', 'does', 'can', 'max',
+                'maximum', 'specs', 'ambient', 'operating', 'current', 'power', 'sound'
+            ];
+
+            const daWords = [
+                'hvad', 'hvilken', 'hvilke', 'hvordan', 'hvornår', 'hvorfor', 'hvor', 'hvem',
+                'er', 'og', 'for', 'med', 'på', 'af', 'til', 'blæser', 'spænding', 'luftmængde',
+                'omdrejningstal', 'sammenlign', 'forskel', 'specifikationer', 'mellem', 'kan',
+                'maksimal', 'temperatur', 'driftsspænding', 'lydeffekt'
+            ];
+
+            let deCount = 0;
+            let enCount = 0;
+            let daCount = 0;
+
+            const tokens = lower.split(/[\s,?.!:;()]+/);
+            tokens.forEach(t => {
+                if (deWords.includes(t)) deCount++;
+                if (enWords.includes(t)) enCount++;
+                if (daWords.includes(t)) daCount++;
+            });
+
+            if (deCount > enCount && deCount > daCount) return 'de';
+            if (enCount > deCount && enCount > daCount) return 'en';
+            if (daCount > deCount && daCount > enCount) return 'da';
+
+            return 'da';
+        }
+
+        function isEnglishText(text) {
+            return detectLanguage(text) === 'en';
+        }
+
+        function buildCitationsHtml(citations, questionText = '') {
             if (!citations || citations.length === 0) return '';
+            const lang = detectLanguage(questionText);
             const uniqueCitationsMap = new Map();
 
             citations.forEach((cit) => {
@@ -898,8 +972,6 @@
                 }
                 
                 // Resolve page index robustly:
-                // 1. Try cit.index or cit.Index (0-based)
-                // 2. Fall back to parsing the suffix of chunkId (e.g. "10327430_chunk_4" -> index 4)
                 let rawIdx = cit.index ?? cit.Index;
                 if ((rawIdx === undefined || rawIdx === null) && chunkId.includes('_chunk_')) {
                     const parts = chunkId.split('_chunk_');
@@ -931,16 +1003,23 @@
 
                 const isCompanion = cit.isCompanion;
                 const sortedPages = Array.from(cit.pages).sort((a, b) => a - b);
+                
+                const pageLabel = lang === 'en' ? 'Page' : (lang === 'de' ? 'Seite' : 'Side');
+                const notSpecifiedLabel = lang === 'en' ? 'Not specified' : (lang === 'de' ? 'Nicht angegeben' : 'Ikke angivet');
+                const companionRefLabel = lang === 'en' ? 'Danish reference' : (lang === 'de' ? 'Dänische Referenz' : 'Dansk reference');
                 const pagesDisplay = isCompanion
-                    ? 'Dansk reference'
-                    : (sortedPages.length > 0 ? `Side: ${sortedPages.join(', ')}` : 'Side: Ikke angivet');
+                    ? companionRefLabel
+                    : (sortedPages.length > 0 ? `${pageLabel}: ${sortedPages.join(', ')}` : `${pageLabel}: ${notSpecifiedLabel}`);
+
+                const sourceTitle = lang === 'en' ? `Source #${citationIndex}` : (lang === 'de' ? `Quelle #${citationIndex}` : `Kilde #${citationIndex}`);
+                const companionTitle = lang === 'en' ? 'Danish companion' : (lang === 'de' ? 'Dänisches Dokument' : 'Dansk dokument');
 
                 const headerLabel = isCompanion
                     ? `<span class="text-red-700 font-bold flex items-center">
-                           <i class="fa-solid fa-file-lines mr-1.5 text-red-600"></i> Dansk dokument
+                           <i class="fa-solid fa-file-lines mr-1.5 text-red-600"></i> ${companionTitle}
                        </span>`
                     : `<span class="text-brand-600 font-bold flex items-center">
-                           <i class="fa-solid fa-file-arrow-up mr-1.5"></i> Kilde #${citationIndex}
+                           <i class="fa-solid fa-file-arrow-up mr-1.5"></i> ${sourceTitle}
                        </span>`;
 
                 const badgeClass = isCompanion
@@ -965,10 +1044,14 @@
                 }
             });
 
+            const basedOnLabel = lang === 'en' 
+                ? 'Based on the following documents:' 
+                : (lang === 'de' ? 'Basierend auf folgenden Dokumenten:' : 'Baseret på følgende dokumenter:');
+
             return `
                 <div class="border-t border-slate-100 pt-4 mt-4 space-y-3">
                     <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
-                        <i class="fa-solid fa-quote-left text-brand-500 mr-2"></i> Baseret på følgende dokumenter:
+                        <i class="fa-solid fa-quote-left text-brand-500 mr-2"></i> ${basedOnLabel}
                     </h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">${citationsHtml}</div>
                 </div>`;
@@ -999,10 +1082,21 @@
             }
 
             // Create streaming assistant message entry immediately with progressive status
+            const queryLang = detectLanguage(question);
+            const statusSearching = queryLang === 'en' 
+                ? 'Searching technical datasheets...' 
+                : (queryLang === 'de' ? 'Suche in technischen Datenblättern...' : 'Søger i tekniske datablade...');
+            const statusFound = queryLang === 'en' 
+                ? 'Sources found, composing answer...' 
+                : (queryLang === 'de' ? 'Quellen gefunden, formuliere Antwort...' : 'Kilder fundet, formulerer svar...');
+            const statusComposing = queryLang === 'en' 
+                ? 'Composing answer...' 
+                : (queryLang === 'de' ? 'Formuliere Antwort...' : 'Formulerer svar...');
+
             const assistantMsg = {
                 role: 'assistant',
                 text: '',
-                html: '<span id="active-streaming-status" class="inline-flex items-center text-brand-600 font-medium text-xs"><i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>Søger i tekniske datablade...</span>',
+                html: `<span id="active-streaming-status" class="inline-flex items-center text-brand-600 font-medium text-xs"><i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>${statusSearching}</span>`,
                 citationsHtml: '',
                 duration: null,
                 isStreaming: true
@@ -1075,7 +1169,7 @@
                                     currentConversationId = parsed.conversationId;
                                 }
                                 if (parsed.citations && parsed.citations.length > 0) {
-                                    assistantMsg.citationsHtml = buildCitationsHtml(parsed.citations);
+                                    assistantMsg.citationsHtml = buildCitationsHtml(parsed.citations, question);
                                     
                                     // Direct DOM update: Update citations element without full chat re-render
                                     const citEl = document.getElementById('active-streaming-citations');
@@ -1086,7 +1180,7 @@
                                     // Progressive status: Kilder fundet
                                     const statusEl = document.getElementById('active-streaming-status');
                                     if (statusEl && !rawAccumulatedText) {
-                                        statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>Kilder fundet, formulerer svar...';
+                                        statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>${statusFound}`;
                                     }
                                     scrollToBottom();
                                 }
@@ -1102,8 +1196,9 @@
                                             renderPending = false;
                                             const bodyEl = document.getElementById('active-streaming-body');
                                             if (bodyEl) {
-                                                // Active streaming with smooth pulsing caret
-                                                bodyEl.innerHTML = renderMarkdownToHtml(rawAccumulatedText) + '<span class="inline-block w-1.5 h-4 ml-0.5 align-middle bg-brand-500 animate-pulse rounded-xs"></span>';
+                                                // Active streaming with spinner progress indicator matching initial query state
+                                                bodyEl.innerHTML = renderMarkdownToHtml(rawAccumulatedText) +
+                                                    `<div class="mt-2.5 inline-flex items-center text-brand-600 font-medium text-xs"><i class="fa-solid fa-circle-notch fa-spin mr-2 text-brand-500"></i>${statusComposing}</div>`;
                                             }
                                             scrollToBottom();
                                         });
@@ -1168,7 +1263,7 @@
                     const endTime = performance.now();
                     assistantMsg.duration = ((endTime - startTime) / 1000).toFixed(2);
                     assistantMsg.html = data.answer;
-                    assistantMsg.citationsHtml = buildCitationsHtml(data.citations);
+                    assistantMsg.citationsHtml = buildCitationsHtml(data.citations, question);
 
                     if (data.conversationId && data.conversationId !== activeChat.id) {
                         activeChat.id = data.conversationId;
@@ -1226,13 +1321,44 @@
             }
         }
 
-        function copyMessageText(btn) {
+        async function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch {
+                    // Fall back to execCommand if clipboard API is blocked or denied
+                }
+            }
+
+            // Fallback for non-secure HTTP contexts and older browsers
+            try {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
+                textArea.setAttribute('readonly', '');
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                const success = document.execCommand('copy');
+                document.body.removeChild(textArea);
+                return success;
+            } catch (err) {
+                console.error('Kopiering via fallback mislykkedes:', err);
+                return false;
+            }
+        }
+
+        async function copyMessageText(btn) {
             const msgCard = btn.closest('.flex-1');
             if (!msgCard) return;
             const contentEl = msgCard.querySelector('.html-content');
             if (!contentEl) return;
             const textToCopy = contentEl.innerText || contentEl.textContent || '';
-            navigator.clipboard.writeText(textToCopy).then(() => {
+            const success = await copyTextToClipboard(textToCopy);
+            if (success) {
                 const label = btn.querySelector('.copy-label');
                 const icon = btn.querySelector('i');
                 if (label) label.textContent = 'Kopieret!';
@@ -1241,7 +1367,7 @@
                     if (label) label.textContent = 'Kopier';
                     if (icon) icon.className = 'fa-regular fa-copy text-xs';
                 }, 2000);
-            }).catch(e => console.error('Kopiering mislykkedes:', e));
+            }
         }
 
         let currentModalPdfUrl = '';
@@ -1270,19 +1396,20 @@
             document.body.style.overflow = 'hidden';
         }
 
-        function copyPdfDirectLink(btn) {
+        async function copyPdfDirectLink(btn) {
             if (!currentModalPdfUrl) return;
             const fullUrl = new URL(currentModalPdfUrl, window.location.origin).href;
-            navigator.clipboard.writeText(fullUrl).then(() => {
+            const success = await copyTextToClipboard(fullUrl);
+            if (success) {
                 const label = document.getElementById('pdf-modal-copy-label');
                 if (label) {
                     const orig = label.textContent;
                     label.textContent = 'Kopieret!';
                     setTimeout(() => label.textContent = orig, 2000);
                 }
-            }).catch(() => {
+            } else {
                 prompt('Kopier linket herunder:', fullUrl);
-            });
+            }
         }
 
         function closePdfModal() {
@@ -1309,7 +1436,7 @@
                     
                     const indicator = document.createElement('span');
                     indicator.className = 'sort-icon ml-1.5 text-slate-400 text-[10px] inline-block';
-                    indicator.innerHTML = '&#8597;';
+                    indicator.innerHTML = '';
                     th.appendChild(indicator);
 
                     let asc = true;
@@ -1334,7 +1461,7 @@
                         asc = !asc;
                         headers.forEach(h => {
                             const icon = h.querySelector('.sort-icon');
-                            if (icon) icon.innerHTML = '&#8597;';
+                            if (icon) icon.innerHTML = '';
                         });
                         indicator.innerHTML = asc ? '&#9660;' : '&#9650;';
 
@@ -1355,6 +1482,8 @@
             const rows = Array.from(table.querySelectorAll('tbody tr'));
             if (headers.length < 2 || rows.length < 2) return;
 
+            const chartsEnabled = isTableChartsEnabled();
+
             // Find columns that have numeric data
             const numericColIndices = [];
             for (let c = 1; c < headers.length; c++) {
@@ -1369,103 +1498,112 @@
                 }
             }
 
-            if (numericColIndices.length === 0) return;
+            const showCharts = chartsEnabled && numericColIndices.length > 0;
 
             const wrapper = document.createElement('div');
             wrapper.className = 'table-chart-toggle-wrapper my-3';
 
             const toggleBar = document.createElement('div');
-            toggleBar.className = 'flex items-center justify-between mb-2 text-xs';
+            toggleBar.className = showCharts
+                ? 'flex items-center justify-between mb-2 text-xs'
+                : 'flex items-center justify-end mb-2 text-xs';
+
+            const chartButtonsHtml = showCharts
+                ? `<div class="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-lg">
+                       <button type="button" class="btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition">
+                           <i class="fa-solid fa-table mr-1 text-[10px]"></i> Tabel
+                       </button>
+                       <button type="button" class="btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition">
+                           <i class="fa-solid fa-chart-column mr-1 text-[10px]"></i> Graf
+                       </button>
+                   </div>`
+                : '';
+
             toggleBar.innerHTML = `
-                <div class="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-lg">
-                    <button type="button" class="btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition">
-                        <i class="fa-solid fa-table mr-1 text-[10px]"></i> Tabel
-                    </button>
-                    <button type="button" class="btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition">
-                        <i class="fa-solid fa-chart-column mr-1 text-[10px]"></i> Graf
-                    </button>
-                </div>
+                ${chartButtonsHtml}
                 <button type="button" class="btn-export-csv px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold border border-emerald-200/80 transition flex items-center space-x-1.5 shadow-2xs" title="Download tabel som Excel/CSV fil">
                     <i class="fa-solid fa-file-excel text-emerald-600 text-xs"></i>
                     <span>Eksporter Excel/CSV</span>
                 </button>
             `;
 
-            const chartContainer = document.createElement('div');
-            chartContainer.className = 'chart-container hidden bg-white p-4 rounded-xl border border-slate-200/80 mb-3';
-            const canvas = document.createElement('canvas');
-            canvas.style.maxHeight = '280px';
-            chartContainer.appendChild(canvas);
-
             table.parentNode.insertBefore(wrapper, table);
             wrapper.appendChild(toggleBar);
             wrapper.appendChild(table);
-            wrapper.appendChild(chartContainer);
 
-            let chartInstance = null;
-
-            const btnTable = toggleBar.querySelector('.btn-show-table');
-            const btnChart = toggleBar.querySelector('.btn-show-chart');
             const btnExportCsv = toggleBar.querySelector('.btn-export-csv');
-
             if (btnExportCsv) {
                 btnExportCsv.onclick = () => exportTableToCsv(table);
             }
 
-            btnTable.onclick = () => {
-                table.classList.remove('hidden');
-                chartContainer.classList.add('hidden');
-                btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
-                btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
-            };
+            if (showCharts) {
+                const chartContainer = document.createElement('div');
+                chartContainer.className = 'chart-container hidden bg-white p-4 rounded-xl border border-slate-200/80 mb-3';
+                const canvas = document.createElement('canvas');
+                canvas.style.maxHeight = '280px';
+                chartContainer.appendChild(canvas);
+                wrapper.appendChild(chartContainer);
 
-            btnChart.onclick = () => {
-                table.classList.add('hidden');
-                chartContainer.classList.remove('hidden');
-                btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
-                btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
+                let chartInstance = null;
 
-                if (!chartInstance && typeof Chart !== 'undefined') {
-                    const rowLabels = rows.map(r => (r.children[0]?.innerText || '').trim());
-                    const colors = ['#0284c7', '#f59e0b', '#10b981', '#6366f1', '#ec4899'];
+                const btnTable = toggleBar.querySelector('.btn-show-table');
+                const btnChart = toggleBar.querySelector('.btn-show-chart');
 
-                    const datasets = numericColIndices.map((colIdx, i) => {
-                        const colName = headers[colIdx];
-                        const data = rows.map(r => {
-                            const val = (r.children[colIdx]?.innerText || '').trim();
-                            const num = parseFloat(val.replace(/[^0-9.,-]/g, '').replace(',', '.'));
-                            return isNaN(num) ? 0 : num;
+                btnTable.onclick = () => {
+                    table.classList.remove('hidden');
+                    chartContainer.classList.add('hidden');
+                    btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
+                    btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
+                };
+
+                btnChart.onclick = () => {
+                    table.classList.add('hidden');
+                    chartContainer.classList.remove('hidden');
+                    btnChart.className = 'btn-show-chart px-2.5 py-1 rounded-md bg-white text-slate-800 font-semibold shadow-xs transition';
+                    btnTable.className = 'btn-show-table px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 font-medium transition';
+
+                    if (!chartInstance && typeof Chart !== 'undefined') {
+                        const rowLabels = rows.map(r => (r.children[0]?.innerText || '').trim());
+                        const colors = ['#0284c7', '#f59e0b', '#10b981', '#6366f1', '#ec4899'];
+
+                        const datasets = numericColIndices.map((colIdx, i) => {
+                            const colName = headers[colIdx];
+                            const data = rows.map(r => {
+                                const val = (r.children[colIdx]?.innerText || '').trim();
+                                const num = parseFloat(val.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+                                return isNaN(num) ? 0 : num;
+                            });
+                            return {
+                                label: colName,
+                                data: data,
+                                backgroundColor: colors[i % colors.length] + 'cc',
+                                borderColor: colors[i % colors.length],
+                                borderWidth: 1.5,
+                                borderRadius: 6
+                            };
                         });
-                        return {
-                            label: colName,
-                            data: data,
-                            backgroundColor: colors[i % colors.length] + 'cc',
-                            borderColor: colors[i % colors.length],
-                            borderWidth: 1.5,
-                            borderRadius: 6
-                        };
-                    });
 
-                    chartInstance = new Chart(canvas, {
-                        type: 'bar',
-                        data: {
-                            labels: rowLabels,
-                            datasets: datasets
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+                        chartInstance = new Chart(canvas, {
+                            type: 'bar',
+                            data: {
+                                labels: rowLabels,
+                                datasets: datasets
                             },
-                            scales: {
-                                y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
-                                x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+                                },
+                                scales: {
+                                    y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
+                                    x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                                }
                             }
-                        }
-                    });
-                }
-            };
+                        });
+                    }
+                };
+            }
         }
 
         function exportTableToCsv(table, fileName = 'ebm_sammenligning.csv') {

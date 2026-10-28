@@ -110,4 +110,21 @@ public class FrontendContractTests
         html.Should().Contain("fa-regular fa-comment text-slate-400 group-hover:text-slate-600 text-xs shrink-0",
             "Speech bubble icon must not have top margin offset.");
     }
+
+    [Fact]
+    public void IndexHtml_TableCharts_ConfiguredFalseByDefault_WithToggleHelper()
+    {
+        // Arrange
+        var filePath = GetWwwrootFilePath("index.html");
+        var html = File.ReadAllText(filePath);
+
+        // Assert: UI_CONFIG exists and enableTableCharts is false by default
+        html.Should().Contain("window.UI_CONFIG = {");
+        html.Should().Contain("enableTableCharts: false");
+
+        // Assert: isTableChartsEnabled helper exists and guards chart toggle
+        html.Should().Contain("function isTableChartsEnabled()");
+        html.Should().Contain("const chartsEnabled = isTableChartsEnabled();");
+        html.Should().Contain("const showCharts = chartsEnabled && numericColIndices.length > 0;");
+    }
 }
