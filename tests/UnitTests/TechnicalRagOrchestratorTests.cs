@@ -227,6 +227,144 @@ public class TechnicalRagOrchestratorTests
     }
 
     [Fact]
+    public async Task OutputGovernor_WhenLlmOutputHasLeadingTextOrFormattingIssues_RecoversResultViaLenientParsing()
+    {
+        // Arrange: LLM returns markdown text with conversational prefix around the JSON
+        var mockClient = new Mock<ILlmClient>();
+        mockClient.Setup(x => x.GenerateStructuredAsync<OutputGovernorResult>(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlmStructuredResult<OutputGovernorResult>(
+                Value: default,
+                Metadata: new LlmExecutionMetadata("MockProvider", "mock-model", 100, 100, 100, false, 1),
+                RawContent: "Here is the technical verification:\n```json\n{\n  \"approved\": true,\n  \"issues\": [],\n  \"action\": \"APPROVE\"\n}\n```\nHope this helps!",
+                IsSuccess: false,
+                ErrorMessage: "Deserialization returned null"
+            ));
+
+        var governor = new OutputGovernor(mockClient.Object);
+        var chunks = new[] { new DocumentChunk("c1", "doc1", "Voltage: 230 V", 0) };
+
+        // Act
+        var result = await governor.ValidateOutputAsync("What is the voltage?", "230 V", chunks);
+
+        // Assert: Must successfully recover the approved validation result rather than failing safe!
+        Assert.NotNull(result);
+        Assert.True(result.Approved);
+        Assert.Equal("APPROVE", result.Action);
+        Assert.Empty(result.Issues);
+    }
+
+    [Fact]
+    public async Task OutputGovernor_UsesAdequateTokenBudgetForComplexValidation()
+    {
+        // Arrange
+        LlmRequest? capturedRequest = null;
+        var mockClient = new Mock<ILlmClient>();
+        mockClient.Setup(x => x.GenerateStructuredAsync<OutputGovernorResult>(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LlmRequest, CancellationToken>((req, token) => capturedRequest = req)
+            .ReturnsAsync(new LlmStructuredResult<OutputGovernorResult>(
+                Value: new OutputGovernorResult(true, new List<OutputGovernorIssue>(), "APPROVE"),
+                Metadata: new LlmExecutionMetadata("MockProvider", "mock-model", 100, 100, 100, true, 1),
+                RawContent: "{\"approved\": true, \"issues\": [], \"action\": \"APPROVE\"}",
+                IsSuccess: true
+            ));
+
+        var governor = new OutputGovernor(mockClient.Object);
+        var chunks = new[] { new DocumentChunk("c1", "doc1", "Complex comparison specs", 0) };
+
+        // Act
+        await governor.ValidateOutputAsync("Compare fan A and fan B", "Detailed comparison table...", chunks);
+
+        // Assert: Must request at least 1024 or 2048 maxOutputTokens to prevent truncated JSON on comparison queries!
+        Assert.NotNull(capturedRequest);
+        Assert.True(capturedRequest.MaxOutputTokens >= 1024);
+    }
+
+    [Fact]
+    public async Task OutputGovernor_WhenAnswerContainsAuthorizedGreenTechEcAdvisory_IncludesSystemInstructionDomainRules()
+    {
+        // Arrange
+        LlmRequest? capturedRequest = null;
+        var mockClient = new Mock<ILlmClient>();
+        mockClient.Setup(x => x.GenerateStructuredAsync<OutputGovernorResult>(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<LlmRequest, CancellationToken>((req, token) => capturedRequest = req)
+            .ReturnsAsync(new LlmStructuredResult<OutputGovernorResult>(
+                Value: new OutputGovernorResult(true, new List<OutputGovernorIssue>(), "APPROVE"),
+                Metadata: new LlmExecutionMetadata("MockProvider", "mock-model", 100, 100, 100, true, 1),
+                RawContent: "{\"approved\": true, \"issues\": [], \"action\": \"APPROVE\"}",
+                IsSuccess: true
+            ));
+
+        var governor = new OutputGovernor(mockClient.Object);
+        var chunks = new[] { new DocumentChunk("c1", "doc1", "Maksimal omgivelsestemperatur: +60 °C", 0, FileName: "Art_A4E300AS7201.pdf") };
+
+        var answerWithAdvisory = """
+            Maksimal tilladt omgivelsestemperatur for A4E300-AS72-01 er +60 °C.
+
+            ### 💡 Moderne EC-erstatning findes (GreenTech EC)
+            Denne model benytter ældre AC-motorteknologi. Det anbefales at overveje den tilsvarende ebm-papst GreenTech EC-serie A3G300 ved nyinstallation eller udskiftning (typisk 30-50% energibesparelse og trinløs 0-10V styring).
+            """;
+
+        // Act
+        var result = await governor.ValidateOutputAsync("Hvad er maximal temperaturen på A4E300AS7201", answerWithAdvisory, chunks);
+
+        // Assert: Governor approved and instruction explicitly contains GreenTech EC replacement domain rules
+        Assert.NotNull(result);
+        Assert.True(result.Approved);
+        Assert.NotNull(capturedRequest);
+        Assert.Contains("GreenTech EC Replacement Recommendations", capturedRequest.SystemInstruction);
+    }
+
+    [Fact]
+    public async Task TechnicalRagOrchestrator_WhenComparingTwoModels_BalancesRetrievedChunksAcrossBothModels()
+    {
+        // Arrange: Vector search returns 6 chunks for Model A and 6 chunks for Model B
+        var chunksA = Enumerable.Range(0, 6)
+            .Select(i => new DocumentChunk($"c_a_{i}", "doc-a", $"Model A (K3G355HA3401) spec chunk {i}", i, FileName: "Data_sheet_K3G355HA3401.pdf", ArticleId: "K3G355HA3401"))
+            .ToList();
+        var chunksB = Enumerable.Range(0, 6)
+            .Select(i => new DocumentChunk($"c_b_{i}", "doc-b", $"Model B (K3G355PI9302) spec chunk {i}", i, FileName: "Data_sheet_K3G355PI9302.pdf", ArticleId: "K3G355PI9302"))
+            .ToList();
+
+        var allChunks = chunksA.Concat(chunksB).ToList();
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allChunks);
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentsByArticleIdsAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new List<Document>());
+
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "SPEC_LOOKUP", "confidence": 0.98, "entities": [{"type": "fan", "name": "K3G355HA3401"}, {"type": "fan", "name": "K3G355PI9302"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Comparison table between K3G355HA3401 and K3G355PI9302");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            documentRepository: mockRepo.Object
+        );
+
+        // Act
+        var (_, citations, _) = await orchestrator.ProcessQueryAsync("Sammenlign specifikationerne for K3G355HA3401 og K3G355PI9302", mockVector.Object);
+
+        // Assert: Citations must include chunks from BOTH Model A and Model B!
+        Assert.NotEmpty(citations);
+        Assert.Contains(citations, c => c.FileName != null && c.FileName.Contains("K3G355HA3401"));
+        Assert.Contains(citations, c => c.FileName != null && c.FileName.Contains("K3G355PI9302"));
+    }
+
+    [Fact]
     public async Task TechnicalRagOrchestrator_ShouldExecuteOverviewWorkflow_WhenAskingForAvailableVentilators()
     {
         // Arrange

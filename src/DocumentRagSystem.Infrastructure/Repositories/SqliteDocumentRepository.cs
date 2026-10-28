@@ -251,7 +251,8 @@ public class SqliteDocumentRepository : IDocumentRepository
 
         await using var context = await _contextFactory.CreateDbContextAsync();
         var entities = await context.Documents
-            .Where(d => d.ArticleId != null && idList.Contains(d.ArticleId))
+            .Where(d => (d.ArticleId != null && idList.Contains(d.ArticleId)) ||
+                        (d.ProductCode != null && idList.Contains(d.ProductCode)))
             .ToListAsync();
 
         return entities.Select(ToModel).ToList();

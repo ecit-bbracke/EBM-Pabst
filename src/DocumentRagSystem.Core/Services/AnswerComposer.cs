@@ -174,6 +174,10 @@ public class AnswerComposer : IAnswerComposer
             - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like "K3G560PC0401" or "230V"), you MUST write the response in the same language as the application page itself: Danish (Dansk). NEVER reply in English when the user question is language-ambiguous or a model code.
             - NO LATEX / CLEAN TYPOGRAPHY: NEVER use LaTeX math notation or syntax (e.g. do NOT write $\pm 3%$, $I_max$, $\approx$, etc.). Always use clean plain text, standard Markdown, and standard Unicode symbols (e.g. write ± 3%, I_max = 1,1 mA, ≈, Δp, m³/h, µF, °C, Ø).
             - BRANDING / CASING REQUIREMENT: The company and brand name "ebm-papst" MUST ALWAYS be spelled with this exact casing ("ebm-papst", all lowercase). NEVER write "EBM-Papst", "Ebm-papst", "EBM-PAPST", or "ebmpapst".
+            - FACTUAL GROUNDING & MISSING MODELS:
+              * You must NEVER invent, fabricate, or assume technical specifications (such as airflow m³/h, pressure Pa, power W, voltage V, current A, speed rpm, sound dB, weight kg) that are not present in the Context chunks.
+              * If the user asks for a comparison of multiple models or asks about models where one or more are not found in the Context chunks, explicitly state in the response language which model(s) are documented and which model(s) lack datasheets in the catalog.
+              * You may explain what can be decoded from the ebm-papst product code key (e.g. fan type, motor technology, diameter), but clearly clarify that operating specifications for the missing model are not documented in the catalog.
             - Keep simple questions simple. For complex questions, make the reasoning auditable.
             """;
     }
@@ -227,10 +231,24 @@ public class AnswerComposer : IAnswerComposer
                              question.Contains("substitut", StringComparison.OrdinalIgnoreCase) ||
                              (workflowData is CompatibilityResult c && c.ReplacementAnalysis != null);
 
+        bool isEnergyCalculation = question.Contains("energibesparelse", StringComparison.OrdinalIgnoreCase) ||
+                                  question.Contains("tilbagebetaling", StringComparison.OrdinalIgnoreCase) ||
+                                  question.Contains("payback", StringComparison.OrdinalIgnoreCase) ||
+                                  question.Contains("kwh", StringComparison.OrdinalIgnoreCase);
+
         bool isGeneral = !hasAxial && !hasCentrifugal && !hasCompact;
 
         var sb = new StringBuilder();
         sb.AppendLine("Domain Rules & Guidance:");
+
+        if (isEnergyCalculation)
+        {
+            sb.AppendLine("- **Energy Savings & Payback Calculations (ebm-papst GreenTech EC Benchmark)**:");
+            sb.AppendLine("  - When calculating energy savings from upgrading older AC fans to modern GreenTech EC fans:");
+            sb.AppendLine("  - If exact EC power (W) or investment price is not specified in the question, proactively apply standard ebm-papst benchmark estimates (typical 40% EC power reduction, e.g. 150 W for a 250 W AC fan; typical industrial investment of ~2.500 DKK per fan) to compute and deliver an immediate, concrete, actionable business case.");
+            sb.AppendLine("  - Provide the clear step-by-step calculation: Annual kWh saved = ((P_AC - P_EC) * N * hours) / 1000; Annual DKK saved = kWh * price; Payback years = Total cost / Annual DKK saved.");
+            sb.AppendLine("  - State the benchmark assumptions clearly and explain how the customer can adjust the result with exact project quotations.");
+        }
 
         if (hasAxial || isGeneral)
         {

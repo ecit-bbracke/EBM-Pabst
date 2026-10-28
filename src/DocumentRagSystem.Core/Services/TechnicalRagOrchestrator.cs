@@ -1325,7 +1325,16 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         var exactDocs = exactDocsTask.Result.ToList();
         if (exactDocs.Count > 0)
         {
-            var firstDocChunksTask = exactDocs.Select(doc => vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1, 2, 3 }));
+            var firstDocChunksTask = exactDocs.Select(async doc =>
+            {
+                var chunks = (await vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1, 2, 3 })).ToList();
+                if (chunks.Count == 0)
+                {
+                    var allDocChunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).ToList();
+                    chunks = allDocChunks.Take(4).ToList();
+                }
+                return (IEnumerable<DocumentChunk>)chunks;
+            });
             var exactChunksArrays = await Task.WhenAll(firstDocChunksTask);
             var exactChunks = exactChunksArrays.SelectMany(x => x).ToList();
 
@@ -1350,6 +1359,40 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         if (targetProductCodes == null || targetProductCodes.Count == 0)
         {
             return allChunks.Count > maxChunks ? allChunks.Take(maxChunks).ToList() : allChunks;
+        }
+
+        // When multiple product codes are queried (e.g. comparison), ensure balanced selection across all target codes
+        if (targetProductCodes.Count > 1)
+        {
+            var selectedPerProduct = new List<DocumentChunk>();
+            var perProductBudget = Math.Max(2, maxChunks / targetProductCodes.Count);
+
+            foreach (var code in targetProductCodes)
+            {
+                var codeMatches = allChunks
+                    .Where(chunk => (chunk.FileName != null && chunk.FileName.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                                    (chunk.Text != null && chunk.Text.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                                    (chunk.ArticleId != null && chunk.ArticleId.Contains(code, StringComparison.OrdinalIgnoreCase)))
+                    .GroupBy(c => c.Id)
+                    .Select(g => g.First())
+                    .Take(perProductBudget)
+                    .ToList();
+
+                selectedPerProduct.AddRange(codeMatches);
+            }
+
+            if (selectedPerProduct.Count > 0)
+            {
+                var remainingBudget = maxChunks - selectedPerProduct.Count;
+                if (remainingBudget > 0)
+                {
+                    var extra = allChunks
+                        .Where(c => !selectedPerProduct.Any(s => s.Id == c.Id))
+                        .Take(remainingBudget);
+                    selectedPerProduct.AddRange(extra);
+                }
+                return selectedPerProduct;
+            }
         }
 
         // Prioritize chunks belonging to or referencing the target product codes

@@ -478,6 +478,22 @@ public sealed class LocalLlmClient : ILlmClient, IDisposable
                 cleaned = cleaned.Substring(0, cleaned.Length - 3);
             }
         }
+        cleaned = cleaned.Trim();
+
+        var firstBrace = cleaned.IndexOf('{');
+        var lastBrace = cleaned.LastIndexOf('}');
+        var firstBracket = cleaned.IndexOf('[');
+        var lastBracket = cleaned.LastIndexOf(']');
+
+        if (firstBrace >= 0 && lastBrace > firstBrace && (firstBracket < 0 || firstBrace < firstBracket))
+        {
+            cleaned = cleaned.Substring(firstBrace, lastBrace - firstBrace + 1);
+        }
+        else if (firstBracket >= 0 && lastBracket > firstBracket)
+        {
+            cleaned = cleaned.Substring(firstBracket, lastBracket - firstBracket + 1);
+        }
+
         return cleaned.Trim();
     }
 

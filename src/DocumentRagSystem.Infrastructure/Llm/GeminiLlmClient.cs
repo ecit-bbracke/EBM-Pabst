@@ -424,6 +424,7 @@ public sealed class GeminiLlmClient : ILlmClient
 
     private static string CleanJsonFences(string response)
     {
+        if (string.IsNullOrWhiteSpace(response)) return string.Empty;
         var cleaned = response.Trim();
         if (cleaned.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
         {
@@ -441,6 +442,22 @@ public sealed class GeminiLlmClient : ILlmClient
                 cleaned = cleaned.Substring(0, cleaned.Length - 3);
             }
         }
+        cleaned = cleaned.Trim();
+
+        var firstBrace = cleaned.IndexOf('{');
+        var lastBrace = cleaned.LastIndexOf('}');
+        var firstBracket = cleaned.IndexOf('[');
+        var lastBracket = cleaned.LastIndexOf(']');
+
+        if (firstBrace >= 0 && lastBrace > firstBrace && (firstBracket < 0 || firstBrace < firstBracket))
+        {
+            cleaned = cleaned.Substring(firstBrace, lastBrace - firstBrace + 1);
+        }
+        else if (firstBracket >= 0 && lastBracket > firstBracket)
+        {
+            cleaned = cleaned.Substring(firstBracket, lastBracket - firstBracket + 1);
+        }
+
         return cleaned.Trim();
     }
 
