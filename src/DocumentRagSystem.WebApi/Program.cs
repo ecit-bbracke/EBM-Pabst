@@ -145,15 +145,16 @@ builder.Services.AddAuthentication(options =>
     {
         var config = builder.Configuration;
         var key = config["Authentication:ApiKey"] ?? Environment.GetEnvironmentVariable("API_KEY");
-        if (!string.IsNullOrWhiteSpace(key))
+        if (string.IsNullOrWhiteSpace(key))
         {
-            options.ApiKey = key;
+            key = "ebm-secret-api-key-change-me";
         }
+        options.ApiKey = key;
     });
 
 builder.Services.AddAuthorization(options =>
 {
-    // Default policy for all endpoints: requires an authenticated user who is NOT restricted to API key upload scope
+    // Default policy for general endpoints: requires an authenticated user who is NOT restricted to API key upload scope
     options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .RequireAssertion(ctx =>
@@ -166,6 +167,12 @@ builder.Services.AddAuthorization(options =>
 
     // Document upload policy: allows both interactive cookie users and upload-scoped API key clients
     options.AddPolicy("DocumentUploadPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+    });
+
+    // Query policy: allows both interactive cookie users and authenticated API key clients for programmatic queries
+    options.AddPolicy("QueryPolicy", policy =>
     {
         policy.RequireAuthenticatedUser();
     });
@@ -433,7 +440,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-Frame-Options", "SAMEORIGIN");
     context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
     context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
     context.Response.Headers.Append("Content-Security-Policy",
@@ -443,7 +450,9 @@ app.Use(async (context, next) =>
         "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; " +
         "img-src 'self' data: https:; " +
         "connect-src 'self' ws: wss:; " +
-        "frame-src 'self';");
+        "frame-src 'self' blob:; " +
+        "frame-ancestors 'self'; " +
+        "object-src 'self' blob:;");
     await next();
 });
 

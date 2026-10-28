@@ -4,9 +4,20 @@ using FluentValidation;
 
 namespace DocumentRagSystem.WebApi.DTOs;
 
-public record QueryRequest(string Question, string? ConversationId = null);
+public record QueryRequest(string Question, string? ConversationId = null, string? Mode = null);
 
 public record QueryResponse(string Answer, IEnumerable<CitationDto> Citations, string? ConversationId = null);
+
+public record JsonQueryResponse(
+    [property: JsonPropertyName("response")] string Response,
+    [property: JsonPropertyName("files")] IReadOnlyList<JsonQueryFileDto> Files,
+    [property: JsonPropertyName("conversationId")] string? ConversationId = null
+);
+
+public record JsonQueryFileDto(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("content")] string Content
+);
 
 public record CitationDto(
     [property: JsonPropertyName("chunkId")] string ChunkId,

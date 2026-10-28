@@ -186,6 +186,44 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     }
 
     [Fact]
+    public async Task UploadPdf_ThenQueryInJsonMode_ReturnsBase64Files()
+    {
+        if (!_dockerAvailable) return;
+
+        // Arrange
+        var testDataPath = GetTestDataPath("sample.pdf");
+        Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
+
+        var pdfContent = await File.ReadAllBytesAsync(testDataPath);
+
+        using var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(pdfContent);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        content.Add(fileContent, "file", "4114N_json_mode_sample.pdf");
+
+        // Upload and process the PDF
+        var uploadResponse = await _client.PostAsync("/api/documents/upload", content);
+        uploadResponse.EnsureSuccessStatusCode();
+
+        // Act - Query in JSON mode
+        var queryRequest = new QueryRequest("What are the specifications for 4114N?", Mode: "json");
+        var queryResponse = await _client.PostAsJsonAsync("/api/query", queryRequest);
+
+        // Assert
+        queryResponse.EnsureSuccessStatusCode();
+        var result = await queryResponse.Content.ReadFromJsonAsync<JsonQueryResponse>();
+
+        Assert.NotNull(result);
+        Assert.False(string.IsNullOrWhiteSpace(result.Response));
+        Assert.NotEmpty(result.Files);
+        var file = result.Files[0];
+        Assert.NotEmpty(file.Name);
+        Assert.NotEmpty(file.Content);
+        var decoded = Convert.FromBase64String(file.Content);
+        Assert.NotEmpty(decoded);
+    }
+
+    [Fact]
     public async Task UploadPdf_WhenNonEnglish_SavesFile_AndSkipsEmbedding()
     {
         // Arrange

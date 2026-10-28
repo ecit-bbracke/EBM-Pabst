@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
@@ -21,6 +22,33 @@ namespace DocumentRagSystem.WebApi.Endpoints;
 
 public static class QueryEndpoints
 {
+    public static string ConvertToPlainText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var cleaned = Program.CleanLatexMath(text);
+
+        // Pre-process HTML tags for line breaks and lists
+        cleaned = Regex.Replace(cleaned, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"</p>", "\n\n", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"</li>", "\n", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"<li>", "* ", RegexOptions.IgnoreCase);
+
+        // Strip HTML tags (e.g. <p>, <strong>, <table>, <a href="...">, etc.)
+        cleaned = Regex.Replace(cleaned, @"</?[a-zA-Z][^>]*>", string.Empty);
+
+        // Render markdown to plain text via Markdig
+        var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        var plain = Markdown.ToPlainText(cleaned, pipeline);
+
+        // Decode HTML entities (e.g. &amp;, &quot;, &lt;, &gt;, &#39;)
+        plain = System.Net.WebUtility.HtmlDecode(plain);
+
+        // Normalize excess empty lines
+        plain = Regex.Replace(plain, @"\n{3,}", "\n\n");
+        return plain.Trim();
+    }
     public static IEndpointRouteBuilder MapQueryEndpoints(this IEndpointRouteBuilder app, IEnumerable<string> servedUploadDirectories)
     {
         // QUERY ENDPOINT WITH CITATIONS
@@ -32,6 +60,7 @@ public static class QueryEndpoints
             IDanishDocumentResolver danishResolver,
             IConversationStateStore stateStore,
             ClaimsPrincipal user,
+            HttpContext httpContext,
             ILoggerFactory loggerFactory) =>
         {
             var logger = loggerFactory.CreateLogger("QueryEndpoints");
@@ -51,9 +80,13 @@ public static class QueryEndpoints
             var existingState = await stateStore.GetStateAsync(targetConversationId);
             if (existingState != null)
             {
+                bool isApiKey = user.HasClaim("auth_method", "api_key") ||
+                                string.Equals(user.Identity?.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
+
                 if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
                     !string.Equals(existingState.OwnerUserId, ownerId, StringComparison.OrdinalIgnoreCase) &&
-                    !UserSecurityHelper.IsUserAdmin(user))
+                    !UserSecurityHelper.IsUserAdmin(user) &&
+                    !isApiKey)
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
@@ -136,13 +169,81 @@ public static class QueryEndpoints
 
             var effectiveConversationId = trace.ConversationStateAfter?.ConversationId ?? request.ConversationId;
             requestStopwatch.Stop();
+
+            var effectiveMode = !string.IsNullOrWhiteSpace(request.Mode)
+                ? request.Mode
+                : (!string.IsNullOrWhiteSpace(httpContext.Request.Query["mode"])
+                    ? httpContext.Request.Query["mode"].ToString()
+                    : "html");
+
+            bool isJsonMode = string.Equals(effectiveMode, "json", StringComparison.OrdinalIgnoreCase);
+
+            if (isJsonMode)
+            {
+                var filesList = new List<JsonQueryFileDto>();
+                var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                var allDocReferences = new List<(string? FilePath, string? FileName)>();
+                foreach (var chunk in chunks)
+                {
+                    if (chunk != null)
+                    {
+                        var fn = DocumentUrlResolver.FirstNonEmpty(chunk.FileName, chunk.DocumentId);
+                        allDocReferences.Add((chunk.FilePath, fn));
+                    }
+                }
+                foreach (var daDoc in danishCompanions)
+                {
+                    if (daDoc != null)
+                    {
+                        allDocReferences.Add((daDoc.FilePath, daDoc.FileName));
+                    }
+                }
+
+                foreach (var docRef in allDocReferences)
+                {
+                    var cleanFileName = Path.GetFileName(docRef.FileName ?? docRef.FilePath ?? string.Empty);
+                    if (string.IsNullOrWhiteSpace(cleanFileName) || !seenFiles.Add(cleanFileName))
+                    {
+                        continue;
+                    }
+
+                    var physicalPath = DocumentUrlResolver.ResolvePhysicalFilePath(docRef.FilePath, docRef.FileName, servedUploadDirectories);
+                    if (!string.IsNullOrWhiteSpace(physicalPath) && File.Exists(physicalPath))
+                    {
+                        try
+                        {
+                            var bytes = await File.ReadAllBytesAsync(physicalPath);
+                            var base64 = Convert.ToBase64String(bytes);
+                            filesList.Add(new JsonQueryFileDto(cleanFileName, base64));
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to read physical PDF file for JSON mode: {PhysicalPath}", physicalPath);
+                        }
+                    }
+                    else
+                    {
+                        logger.LogWarning("Physical PDF file not found for JSON mode: {FileName} ({FilePath})", docRef.FileName, docRef.FilePath);
+                    }
+                }
+
+                var plainTextAnswer = ConvertToPlainText(answer);
+
+                logger.LogInformation(
+                    "HTTP POST /api/query [JSON mode] completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, Files: {FileCount}).",
+                    requestStopwatch.ElapsedMilliseconds, effectiveConversationId, filesList.Count);
+
+                return Results.Ok(new JsonQueryResponse(plainTextAnswer, filesList, effectiveConversationId));
+            }
+
             logger.LogInformation(
-                "HTTP POST /api/query completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, Citations: {CitationCount}).",
+                "HTTP POST /api/query [HTML mode] completed in {RequestDurationMs}ms (ConversationId: {ConversationId}, Citations: {CitationCount}).",
                 requestStopwatch.ElapsedMilliseconds, effectiveConversationId, citations.Count);
 
             return Results.Ok(new QueryResponse(htmlAnswer, citations, effectiveConversationId));
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("QueryDocuments");
 
         // STREAMING QUERY ENDPOINT (SSE)
@@ -174,9 +275,13 @@ public static class QueryEndpoints
             var existingState = await stateStore.GetStateAsync(targetConversationId);
             if (existingState != null)
             {
+                bool isApiKey = httpContext.User.HasClaim("auth_method", "api_key") ||
+                                string.Equals(httpContext.User.Identity?.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
+
                 if (!string.IsNullOrWhiteSpace(existingState.OwnerUserId) &&
                     !string.Equals(existingState.OwnerUserId, ownerId, StringComparison.OrdinalIgnoreCase) &&
-                    !UserSecurityHelper.IsUserAdmin(httpContext.User))
+                    !UserSecurityHelper.IsUserAdmin(httpContext.User) &&
+                    !isApiKey)
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
@@ -311,7 +416,7 @@ public static class QueryEndpoints
 
             return Results.Empty;
         })
-        .RequireAuthorization()
+        .RequireAuthorization("QueryPolicy")
         .WithName("QueryDocumentsStream");
 
         // SPEECH-TO-TEXT AUDIO TRANSCRIPTION ENDPOINT (Cross-browser fallback for Firefox etc.)

@@ -119,4 +119,54 @@ public static class DocumentUrlResolver
             return null;
         }
     }
+
+    public static string? ResolvePhysicalFilePath(string? filePath, string? fileName, IEnumerable<string> uploadDirectories)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) && string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+        {
+            return filePath;
+        }
+
+        var rawPath = filePath ?? string.Empty;
+        var unescapedPath = Uri.UnescapeDataString(rawPath);
+        var normalizedFileName = Path.GetFileName(unescapedPath);
+        if (string.IsNullOrWhiteSpace(normalizedFileName))
+        {
+            var unescapedName = Uri.UnescapeDataString(fileName ?? string.Empty);
+            normalizedFileName = Path.GetFileName(unescapedName);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedFileName))
+        {
+            return null;
+        }
+
+        foreach (var dir in uploadDirectories)
+        {
+            if (!Directory.Exists(dir)) continue;
+
+            var direct = Path.Combine(dir, normalizedFileName);
+            if (File.Exists(direct))
+            {
+                return direct;
+            }
+
+            var suffixMatch = ResolveUploadSuffixMatch(dir, normalizedFileName);
+            if (!string.IsNullOrWhiteSpace(suffixMatch))
+            {
+                var suffixPath = Path.Combine(dir, suffixMatch);
+                if (File.Exists(suffixPath))
+                {
+                    return suffixPath;
+                }
+            }
+        }
+
+        return null;
+    }
 }

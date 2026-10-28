@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Core.Services;
 using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.WebApi.DTOs;
 using FluentAssertions;
@@ -98,24 +99,36 @@ public class QueryStreamEndpointTests : IClassFixture<WebApplicationFactory<Prog
     }
 
     [Fact]
-    public async Task PostQueryStream_WithApiKey_ReturnsForbidden()
+    public async Task PostQueryStream_WithApiKey_ReturnsSuccess()
     {
         // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
-        var request = new QueryRequest("Hvad er spændingen for K3G560PC0401?");
+        var request = new QueryRequest("Spænding for test model via API?");
 
-        // Act - API key MUST NOT have access to chat queries
+        var testChunks = new List<DocumentChunk>
+        {
+            new DocumentChunk("10327430_chunk_4", "10327430", "Spændingsområde 380-480 VAC, 50/60 Hz", 4, "Art_8300102253-Doc_10327430.pdf", "/uploads/doc1.pdf")
+        };
+        _mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(testChunks);
+
+        _mockLlmClient.Setup(x => x.StreamTextAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(new[] { "Spændingen", " er", " 400V." }.ToAsyncEnumerable());
+
+        // Act - API key MUST have access to streaming queries via QueryPolicy
         var response = await client.PostAsJsonAsync("/api/query/stream", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
     public async Task PostQueryStream_WithValidQuery_StreamsSseCitationsAndChunks()
     {
         // Arrange
+        TechnicalRagOrchestrator.InvalidateQueryCache();
         var client = await CreateAuthenticatedClientAsync();
 
         // Mock vector store chunks

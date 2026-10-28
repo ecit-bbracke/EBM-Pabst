@@ -124,17 +124,57 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
-    public async Task PostQuery_WithApiKey_ReturnsForbidden()
+    public async Task PostQuery_WithApiKey_ReturnsSuccess()
     {
         // Arrange
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
 
-        // Act - API key MUST NOT have access to chat queries
-        var response = await client.PostAsJsonAsync("/api/query", new QueryRequest("Spænding?"));
+        // Act - API key MUST have access to chat queries via QueryPolicy
+        var response = await client.PostAsJsonAsync("/api/query", new QueryRequest("Hvad er driftsspændingen?"));
 
         // Assert
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<QueryResponse>();
+        Assert.NotNull(body);
+        Assert.NotNull(body.Answer);
+        Assert.NotNull(body.Citations);
+    }
+
+    [Fact]
+    public async Task PostQuery_WithJsonMode_ReturnsJsonResponseWithFiles()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - mode = "json" -> returns JsonQueryResponse with response string and files array
+        var response = await client.PostAsJsonAsync("/api/query", new QueryRequest("Hvad er driftsspændingen?", Mode: "json"));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonQueryResponse>();
+        Assert.NotNull(body);
+        Assert.NotNull(body.Response);
+        Assert.NotNull(body.Files);
+    }
+
+    [Fact]
+    public async Task PostQuery_WithQueryStringJsonMode_ReturnsJsonResponse()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act - ?mode=json query string
+        var response = await client.PostAsJsonAsync("/api/query?mode=json", new QueryRequest("Hvad er driftsspændingen?"));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonQueryResponse>();
+        Assert.NotNull(body);
+        Assert.NotNull(body.Response);
+        Assert.NotNull(body.Files);
     }
 
     [Fact]
@@ -215,5 +255,22 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
 
         // Assert: Upload-only API key MUST be rejected with 403 Forbidden
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SecurityHeaders_WhenResponseReturned_AllowsSameOriginIframeEmbeddingForPdfModal()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/login.html");
+
+        // Assert: X-Frame-Options must be SAMEORIGIN (NOT DENY) to allow modal iframe embedding
+        Assert.True(response.Headers.Contains("X-Frame-Options"));
+        Assert.Equal("SAMEORIGIN", response.Headers.GetValues("X-Frame-Options").First());
+
+        // Assert: CSP must include frame-ancestors 'self' and frame-src 'self' blob:
+        Assert.True(response.Headers.Contains("Content-Security-Policy"));
+        var csp = response.Headers.GetValues("Content-Security-Policy").First();
+        Assert.Contains("frame-ancestors 'self'", csp);
+        Assert.Contains("frame-src 'self' blob:", csp);
     }
 }
