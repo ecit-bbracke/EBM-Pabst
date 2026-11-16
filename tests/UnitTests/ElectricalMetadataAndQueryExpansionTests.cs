@@ -15,7 +15,10 @@ public class ElectricalMetadataAndQueryExpansionTests
     [InlineData("hvad har vi i 3x400V", "3~", 400)]
     [InlineData("hvilke modeller kan køre 1 x 230 V", "1~", 230)]
     [InlineData("hvilke blæsere i 24 VDC", "DC", 24)]
-    public void ElectricalQueryExpander_ShouldDetectAndExpandQueries(string query, string expectedPhase, int expectedVoltage)
+    [InlineData("3 faset", "3~", null)]
+    [InlineData("trefaset", "3~", null)]
+    [InlineData("1-faset", "1~", null)]
+    public void ElectricalQueryExpander_ShouldDetectAndExpandQueries(string query, string expectedPhase, int? expectedVoltage)
     {
         var expanded = ElectricalQueryExpander.Expand(query);
         Assert.NotEqual(query, expanded);

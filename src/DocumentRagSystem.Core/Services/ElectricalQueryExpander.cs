@@ -105,6 +105,16 @@ public static class ElectricalQueryExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
+    private static readonly Regex GenericThreePhaseRegex = new(
+        @"\b(?:3\s*[- ]?fase[rt]?|3~|trefase[rt]?|3-phase|dreiphasen|drei[- ]?phasen)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
+    private static readonly Regex GenericSinglePhaseRegex = new(
+        @"\b(?:1\s*[- ]?fase[rt]?|1~|enkeltfase[rt]?|1-phase|einphasen|ein[- ]?phasen)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
     private static readonly Regex Dc24Regex = new(
         @"\b(?:24\s*v(?:dc)?|24\s*volt\s*dc)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -112,6 +122,11 @@ public static class ElectricalQueryExpander
 
     private static readonly Regex Dc48Regex = new(
         @"\b(?:48\s*v(?:dc)?|48\s*volt\s*dc)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
+    private static readonly Regex GenericDcRegex = new(
+        @"\b(?:dc\s*(?:blæser[e]?|ventilator[er]?|motor|forsyning)?|jævnstrøm)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
@@ -136,9 +151,21 @@ public static class ElectricalQueryExpander
             expanded = true;
         }
 
+        if (!expanded && GenericThreePhaseRegex.IsMatch(query))
+        {
+            sb.Append(" \"Phase 3~\" \"3~\" \"3-phase\" \"Dreiphasen\"");
+            expanded = true;
+        }
+
         if (SinglePhase230Regex.IsMatch(query))
         {
             sb.Append(" \"Phase 1~\" \"1~\" \"1-phase\" \"Einphasen\" \"230 VAC\" \"200 .. 277\" \"200-277\" \"200..277\"");
+            expanded = true;
+        }
+
+        if (!expanded && GenericSinglePhaseRegex.IsMatch(query))
+        {
+            sb.Append(" \"Phase 1~\" \"1~\" \"1-phase\" \"Einphasen\"");
             expanded = true;
         }
 
@@ -151,6 +178,12 @@ public static class ElectricalQueryExpander
         if (Dc48Regex.IsMatch(query) && !expanded)
         {
             sb.Append(" \"48 VDC\" \"48V DC\" \"36 .. 60\" \"48 V\"");
+            expanded = true;
+        }
+
+        if (!expanded && GenericDcRegex.IsMatch(query))
+        {
+            sb.Append(" \"VDC\" \"DC\" \"Gleichstrom\"");
             expanded = true;
         }
 
@@ -174,10 +207,22 @@ public static class ElectricalQueryExpander
             return new ElectricalFilter("3~", 400, "VAC", m3_400.Value);
         }
 
+        var m3 = GenericThreePhaseRegex.Match(query);
+        if (m3.Success)
+        {
+            return new ElectricalFilter("3~", null, "VAC", m3.Value);
+        }
+
         var m1_230 = SinglePhase230Regex.Match(query);
         if (m1_230.Success)
         {
             return new ElectricalFilter("1~", 230, "VAC", m1_230.Value);
+        }
+
+        var m1 = GenericSinglePhaseRegex.Match(query);
+        if (m1.Success)
+        {
+            return new ElectricalFilter("1~", null, "VAC", m1.Value);
         }
 
         var m24 = Dc24Regex.Match(query);
@@ -190,6 +235,12 @@ public static class ElectricalQueryExpander
         if (m48.Success)
         {
             return new ElectricalFilter("DC", 48, "VDC", m48.Value);
+        }
+
+        var mDc = GenericDcRegex.Match(query);
+        if (mDc.Success)
+        {
+            return new ElectricalFilter("DC", null, "VDC", mDc.Value);
         }
 
         return null;
