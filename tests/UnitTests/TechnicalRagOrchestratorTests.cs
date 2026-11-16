@@ -365,6 +365,70 @@ public class TechnicalRagOrchestratorTests
     }
 
     [Fact]
+    public async Task TechnicalRagOrchestrator_WhenProcessingReplacementQuery_IncludesDirectDropInCandidateAndSourceModelInCitations()
+    {
+        // GIVEN a query asking for replacement of K3G280PR04I2 with multiple candidate chunks in vector store:
+        var chunksPR = Enumerable.Range(0, 4)
+            .Select(i => new DocumentChunk($"c_pr_{i}", "doc-pr", $"Source model K3G280PR04I2 chunk {i}", i, FileName: "Art_K3G280PR04I2-Doc_10124475.pdf", ArticleId: "K3G280PR04I2"))
+            .ToList();
+        var chunks8300 = Enumerable.Range(0, 4)
+            .Select(i => new DocumentChunk($"c_8300_{i}", "doc-8300", $"Direct drop-in replacement 8300100757 VBH0280CSPFS chunk {i}", i, FileName: "Art_8300100757-Doc_10290144.pdf", ArticleId: "8300100757"))
+            .ToList();
+        var chunks1737 = Enumerable.Range(0, 4)
+            .Select(i => new DocumentChunk($"c_1737_{i}", "doc-1737", $"Alternative candidate 8300101737 chunk {i}", i, FileName: "Art_8300101737-Doc_10012242.pdf", ArticleId: "8300101737"))
+            .ToList();
+
+        var allChunks = chunks1737.Concat(chunksPR).Concat(chunks8300).ToList();
+
+        var mockVector = new Mock<IVectorStore>();
+        mockVector.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allChunks);
+        mockVector.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc-pr", "Art_K3G280PR04I2-Doc_10124475.pdf", "/uploads/Art_K3G280PR04I2-Doc_10124475.pdf", DateTime.UtcNow,
+                    ProductCode: "K3G280PR04I2", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 750, DiameterMm: 280),
+                new Document("doc-8300", "Art_8300100757-Doc_10290144.pdf", "/uploads/Art_8300100757-Doc_10290144.pdf", DateTime.UtcNow,
+                    ProductCode: "8300100757", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 800, DiameterMm: 280),
+                new Document("doc-1737", "Art_8300101737-Doc_10012242.pdf", "/uploads/Art_8300101737-Doc_10012242.pdf", DateTime.UtcNow,
+                    ProductCode: "8300101737", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 500, DiameterMm: 280)
+            });
+
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.GetDocumentsByArticleIdsAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new List<Document>());
+
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""{"intent": "COMPATIBILITY", "confidence": 0.98, "entities": [{"type": "fan", "name": "K3G280PR04I2"}], "requested_attributes": [], "constraints": [], "clarification_required": false, "clarification_reason": null}""");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Answer Composer")), false))
+            .ReturnsAsync("Erstatning til K3G280PR04I2 er 8300100757");
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Output Governor")), true))
+            .ReturnsAsync("""{"approved": true, "issues": [], "action": "APPROVE"}""");
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object),
+            new WorkflowRouter(),
+            new EvidenceEvaluator(mockLlm.Object),
+            new AnswerComposer(mockLlm.Object),
+            new OutputGovernor(mockLlm.Object),
+            mockLlm.Object,
+            documentRepository: mockRepo.Object
+        );
+
+        // WHEN processing replacement query:
+        var (_, citations, _) = await orchestrator.ProcessQueryAsync("en erstatning til type K3G280PR04I2", mockVector.Object);
+
+        // THEN citations MUST include chunks for both the primary drop-in replacement 8300100757 AND the source model:
+        Assert.NotEmpty(citations);
+        Assert.True(citations.Count <= 8, $"Expected at most 8 citations, but got {citations.Count}");
+        Assert.Contains(citations, c => c.FileName != null && c.FileName.Contains("8300100757"));
+        Assert.Contains(citations, c => c.FileName != null && c.FileName.Contains("K3G280PR04I2"));
+    }
+
+    [Fact]
     public async Task TechnicalRagOrchestrator_ShouldExecuteOverviewWorkflow_WhenAskingForAvailableVentilators()
     {
         // Arrange

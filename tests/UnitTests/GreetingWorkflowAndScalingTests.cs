@@ -154,6 +154,35 @@ public class GreetingWorkflowAndScalingTests
         mockVectorStore.Verify(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("Guten Tag", "Hallo")]
+    [InlineData("Vielen Dank", "Gern geschehen")]
+    [InlineData("Wer bist du?", "Ich bin Ihr technischer Assistent")]
+    public async Task GreetingWorkflowExecutor_ShouldSupportGermanGreetings(string prompt, string expectedSnippet)
+    {
+        // Arrange
+        var executor = new GreetingWorkflowExecutor();
+        var mockVectorStore = new Mock<IVectorStore>();
+        var govResult = new InputGovernorResult(
+            Intent: "GREETING",
+            Confidence: 1.0,
+            Entities: new List<EntityInfo>(),
+            RequestedAttributes: new List<string>(),
+            Constraints: new List<string>(),
+            ClarificationRequired: false,
+            ClarificationReason: null,
+            ParsedEbmProducts: new List<EbmProductInfo>()
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(prompt, govResult, mockVectorStore.Object);
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.Contains(expectedSnippet, draftResponse);
+        Assert.Empty(contextChunks);
+    }
+
     [Fact]
     public async Task TechnicalRagOrchestrator_ProcessQueryStreamAsync_ShouldHandleGreetingInstantly()
     {

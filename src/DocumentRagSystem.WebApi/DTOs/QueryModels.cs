@@ -4,7 +4,14 @@ using FluentValidation;
 
 namespace DocumentRagSystem.WebApi.DTOs;
 
-public record QueryRequest(string Question, string? ConversationId = null, string? Mode = null);
+public record QueryRequest(
+    string Question,
+    string? ConversationId = null,
+    string? Mode = null,
+    string? Pages = null,
+    bool? Compact = null,
+    bool? IncludeBase64 = null
+);
 
 public record QueryResponse(string Answer, IEnumerable<CitationDto> Citations, string? ConversationId = null);
 
@@ -16,7 +23,12 @@ public record JsonQueryResponse(
 
 public record JsonQueryFileDto(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("content")] string Content
+    [property: JsonPropertyName("content")] string? Content = null,
+    [property: JsonPropertyName("url")] string? Url = null,
+    [property: JsonPropertyName("downloadUrl")] string? DownloadUrl = null,
+    [property: JsonPropertyName("pages")] IReadOnlyList<int>? Pages = null,
+    [property: JsonPropertyName("originalSizeBytes")] long? OriginalSizeBytes = null,
+    [property: JsonPropertyName("deliveredSizeBytes")] long? DeliveredSizeBytes = null
 );
 
 public record CitationDto(

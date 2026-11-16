@@ -71,7 +71,10 @@ public record CatalogItem(
     [property: JsonPropertyName("diameter_mm")] int? DiameterMm,
     [property: JsonPropertyName("airflow")] string Airflow,
     [property: JsonPropertyName("document_source")] string DocumentSource,
-    [property: JsonPropertyName("parsed_info")] EbmProductInfo? ParsedInfo = null
+    [property: JsonPropertyName("parsed_info")] EbmProductInfo? ParsedInfo = null,
+    [property: JsonPropertyName("phase")] string? Phase = null,
+    [property: JsonPropertyName("nominal_voltage")] string? NominalVoltage = null,
+    [property: JsonPropertyName("voltage_range")] string? VoltageRange = null
 );
 
 public record CatalogOverviewResult(

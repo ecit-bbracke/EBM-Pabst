@@ -185,7 +185,7 @@ public class DocumentProcessor : IDocumentProcessor
             using var readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
             var extractedText = await _textExtractor.ExtractTextAsync(readStream);
 
-            // Extract product model information for rich catalog queries
+            // Extract product model information and electrical metadata for rich catalog queries
             var ebmParser = new EbmProductCodeParser();
             var extractedProducts = ebmParser.ExtractProductsFromText(fileName);
             if (extractedProducts.Count == 0 && !string.IsNullOrWhiteSpace(extractedText))
@@ -193,17 +193,29 @@ public class DocumentProcessor : IDocumentProcessor
                 extractedProducts = ebmParser.ExtractProductsFromText(extractedText.Substring(0, Math.Min(extractedText.Length, 3000)));
             }
             var bestProduct = extractedProducts.FirstOrDefault();
-            var productCode = bestProduct?.CleanCode;
-            var productCategory = bestProduct?.FanFamily.ToString();
+            var techMeta = TechnicalMetadataExtractor.Extract(extractedText, fileName, bestProduct);
+            var productCode = techMeta.ProductCode ?? bestProduct?.CleanCode;
+            var productCategory = techMeta.ProductCategory ?? bestProduct?.FanFamily.ToString();
+            var phase = techMeta.Phase;
+            var nominalVoltage = techMeta.NominalVoltage;
+            var voltageRange = techMeta.VoltageRange;
+            var powerWatts = techMeta.PowerWatts;
+            var diameterMm = techMeta.DiameterMm ?? bestProduct?.ImpellerDiameterMm;
+            var minVoltage = techMeta.MinVoltage;
+            var maxVoltage = techMeta.MaxVoltage;
 
-            if (!string.IsNullOrWhiteSpace(productCode) || !string.IsNullOrWhiteSpace(productCategory))
+            document = document with
             {
-                document = document with
-                {
-                    ProductCode = productCode,
-                    ProductCategory = productCategory
-                };
-            }
+                ProductCode = productCode,
+                ProductCategory = productCategory,
+                Phase = phase,
+                NominalVoltage = nominalVoltage,
+                VoltageRange = voltageRange,
+                PowerWatts = powerWatts,
+                DiameterMm = diameterMm,
+                MinVoltage = minVoltage,
+                MaxVoltage = maxVoltage
+            };
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
@@ -353,7 +365,7 @@ public class DocumentProcessor : IDocumentProcessor
                                 await _documentRepository.AddDocumentAsync(document);
                                 try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
                             }
-                            await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
+                            await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Processed, language: languageResult.Language, productCode: productCode, productCategory: productCategory, phase: phase, nominalVoltage: nominalVoltage, voltageRange: voltageRange, powerWatts: powerWatts, diameterMm: diameterMm);
                         }
                     }
                     catch (Exception)
@@ -433,7 +445,7 @@ public class DocumentProcessor : IDocumentProcessor
                             await _documentRepository.AddDocumentAsync(document);
                             try { await _documentRepository.DeleteDocumentAsync($"replacement_{existingDoc.Id}"); } catch { }
                         }
-                        await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory);
+                        await _documentRepository.UpdateDocumentStatusAsync(targetDocumentId, DocumentStatus.Skipped, errorMessage: message, language: languageResult.Language, productCode: productCode, productCategory: productCategory, phase: phase, nominalVoltage: nominalVoltage, voltageRange: voltageRange, powerWatts: powerWatts, diameterMm: diameterMm);
                     }
                 }
                 catch (Exception)

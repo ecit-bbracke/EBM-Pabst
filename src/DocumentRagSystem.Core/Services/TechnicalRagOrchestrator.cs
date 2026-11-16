@@ -51,7 +51,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         DateTime CachedAt
     );
     private static readonly ConcurrentDictionary<string, QueryCacheEntry> _queryResponseCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
     private const int MaxCacheSize = 5000;
     private static long _cacheGeneration = 0;
 
@@ -304,7 +304,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         bool hasContextDependencies = (refinement.CandidateSet != null && refinement.CandidateSet.Count > 0) ||
                                        (currentState.CandidateSet != null && currentState.CandidateSet.Members.Count > 0);
 
-        bool canUseCache = !hasPreviousConstraints &&
+        bool isCompatibilityOrReplacement = effectiveQuestion.Contains("erstat", StringComparison.OrdinalIgnoreCase) ||
+                                            effectiveQuestion.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                                            effectiveQuestion.Contains("udskift", StringComparison.OrdinalIgnoreCase);
+
+        bool canUseCache = !isCompatibilityOrReplacement &&
+                           !hasPreviousConstraints &&
                            !hasRefinedConstraints &&
                            !hasContextDependencies &&
                            !refinement.ClarificationRequired;
@@ -483,7 +488,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 8. Answer Composer (Trim context to top 8 most relevant chunks to optimize prefill latency)
         stageStopwatch.Restart();
-        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, productCodes);
+        var targetCodes = GetTargetProductCodesForComposer(productCodes, workflowData);
+        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, targetCodes);
         string composedAnswer = (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting)
             ? currentDraft
             : await _answerComposer.ComposeAnswerAsync(effectiveQuestion, govResult, evidenceClaims, chunksForComposer, currentDraft, workflowData);
@@ -496,7 +502,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         OutputGovernorResult? govOutputResult = null;
         string finalAnswer = composedAnswer;
 
-        if (workflowType == WorkflowType.Greeting)
+        if (workflowType == WorkflowType.Greeting || workflowType == WorkflowType.Overview || workflowType == WorkflowType.Compatibility)
         {
             govOutputResult = new OutputGovernorResult(Approved: true, Issues: new List<OutputGovernorIssue>(), Action: "APPROVE");
         }
@@ -740,7 +746,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         bool hasContextDependencies = (refinement.CandidateSet != null && refinement.CandidateSet.Count > 0) ||
                                        (currentState.CandidateSet != null && currentState.CandidateSet.Members.Count > 0);
 
-        bool canUseCache = !hasPreviousConstraints &&
+        bool isCompatibilityOrReplacement = effectiveQuestion.Contains("erstat", StringComparison.OrdinalIgnoreCase) ||
+                                            effectiveQuestion.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                                            effectiveQuestion.Contains("udskift", StringComparison.OrdinalIgnoreCase);
+
+        bool canUseCache = !isCompatibilityOrReplacement &&
+                           !hasPreviousConstraints &&
                            !hasRefinedConstraints &&
                            !hasContextDependencies &&
                            !refinement.ClarificationRequired;
@@ -858,7 +869,8 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         }
 
         // 8. Stream the Answer in Real-Time (Trim context to top 8 most relevant chunks to optimize TTFT prefill latency)
-        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, productCodes);
+        var targetCodes = GetTargetProductCodesForComposer(productCodes, workflowData);
+        var chunksForComposer = SelectChunksForComposerAndCitations(allChunks, targetCodes);
 
         // Yield citations event as soon as retrieved chunks are ready
         yield return new OrchestrationStreamEvent("citations", null, chunksForComposer, effectiveConvId);
@@ -894,7 +906,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         // 8. Output Governor Validation
         stageStopwatch.Restart();
         OutputGovernorResult govOutputResult;
-        if (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting || string.IsNullOrWhiteSpace(finalAnswer))
+        if (workflowType == WorkflowType.Overview || workflowType == WorkflowType.Greeting || workflowType == WorkflowType.Compatibility || string.IsNullOrWhiteSpace(finalAnswer))
         {
             govOutputResult = new OutputGovernorResult(Approved: true, Issues: new List<OutputGovernorIssue>(), Action: "APPROVE");
         }
@@ -1305,12 +1317,13 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
     private async Task<IEnumerable<DocumentChunk>> PerformHybridSearchAsync(string query, List<string> productCodes, IVectorStore vectorStore, IDocumentRepository? repository)
     {
-        var semanticSearchTask = vectorStore.SearchAsync(query);
+        var expandedQuery = ElectricalQueryExpander.Expand(query);
+        var semanticSearchTask = vectorStore.SearchAsync(expandedQuery);
         var exactDocsTask = repository != null
             ? repository.GetDocumentsByArticleIdsAsync(productCodes)
             : Task.FromResult<IEnumerable<Document>>(Enumerable.Empty<Document>());
         var bm25SearchTask = _ftsStore != null
-            ? _ftsStore.SearchAsync(query, limit: 15)
+            ? _ftsStore.SearchAsync(expandedQuery, limit: 15)
             : Task.FromResult<IEnumerable<DocumentChunk>>(Enumerable.Empty<DocumentChunk>());
 
         await Task.WhenAll(semanticSearchTask, exactDocsTask, bm25SearchTask);
@@ -1323,6 +1336,16 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
         // 2. Pin deterministic product code matches to the top
         var exactDocs = exactDocsTask.Result.ToList();
+        if (exactDocs.Count == 0 && repository != null)
+        {
+            var filter = ElectricalQueryExpander.ExtractVoltageFilter(query);
+            if (filter != null)
+            {
+                var filteredDocs = await repository.GetDocumentsByElectricalFilterAsync(filter.RequiredPhase, filter.TargetVoltage);
+                exactDocs = filteredDocs.ToList();
+            }
+        }
+
         if (exactDocs.Count > 0)
         {
             var firstDocChunksTask = exactDocs.Select(async doc =>
@@ -1349,6 +1372,66 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         return fusedChunks;
     }
 
+    private List<string> GetTargetProductCodesForComposer(List<string> initialCodes, object? workflowData)
+    {
+        var targetCodes = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCode(string? code)
+        {
+            if (!string.IsNullOrWhiteSpace(code) && seen.Add(code))
+            {
+                targetCodes.Add(code);
+            }
+        }
+
+        if (workflowData is CompatibilityResult compat)
+        {
+            // 1. Top matched database candidates in rank order (best drop-in replacement first, max 3)
+            if (compat.ReplacementAnalysis != null)
+            {
+                foreach (var m in compat.ReplacementAnalysis.MatchedDatabaseCandidates.Take(3))
+                {
+                    AddCode(m.CleanCode);
+                    AddCode(m.RawCode);
+                }
+            }
+
+            // 2. Original queried source model code(s)
+            if (initialCodes != null)
+            {
+                foreach (var code in initialCodes)
+                {
+                    AddCode(code);
+                }
+            }
+
+            if (compat.EbmEvaluation != null)
+            {
+                AddCode(compat.EbmEvaluation.ProductA?.CleanCode);
+                AddCode(compat.EbmEvaluation.ProductB?.CleanCode);
+            }
+        }
+        else if (workflowData is ComparisonResult compResult)
+        {
+            if (initialCodes != null)
+            {
+                foreach (var code in initialCodes) AddCode(code);
+            }
+            if (compResult.EbmEvaluation != null)
+            {
+                AddCode(compResult.EbmEvaluation.ProductA?.CleanCode);
+                AddCode(compResult.EbmEvaluation.ProductB?.CleanCode);
+            }
+        }
+        else if (initialCodes != null)
+        {
+            foreach (var code in initialCodes) AddCode(code);
+        }
+
+        return targetCodes;
+    }
+
     private static List<DocumentChunk> SelectChunksForComposerAndCitations(List<DocumentChunk> allChunks, List<string> targetProductCodes, int maxChunks = 8)
     {
         if (allChunks == null || allChunks.Count == 0)
@@ -1361,70 +1444,84 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             return allChunks.Count > maxChunks ? allChunks.Take(maxChunks).ToList() : allChunks;
         }
 
-        // When multiple product codes are queried (e.g. comparison), ensure balanced selection across all target codes
+        static bool ChunkMatchesCode(DocumentChunk chunk, string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return false;
+            return (chunk.FileName != null && chunk.FileName.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                   (chunk.ArticleId != null && chunk.ArticleId.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
+                   (chunk.Text != null && chunk.Text.Contains(code, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // When multiple product codes are involved (e.g. comparison or replacement candidates),
+        // ensure equitable, balanced representation so no single product monopolizes all slots.
         if (targetProductCodes.Count > 1)
         {
-            var selectedPerProduct = new List<DocumentChunk>();
+            var selectedChunks = new List<DocumentChunk>();
+            var seenChunkIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var perProductBudget = Math.Max(2, maxChunks / targetProductCodes.Count);
 
             foreach (var code in targetProductCodes)
             {
+                if (selectedChunks.Count >= maxChunks)
+                    break;
+
+                var currentBudget = Math.Min(perProductBudget, maxChunks - selectedChunks.Count);
                 var codeMatches = allChunks
-                    .Where(chunk => (chunk.FileName != null && chunk.FileName.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
-                                    (chunk.Text != null && chunk.Text.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
-                                    (chunk.ArticleId != null && chunk.ArticleId.Contains(code, StringComparison.OrdinalIgnoreCase)))
-                    .GroupBy(c => c.Id)
-                    .Select(g => g.First())
-                    .Take(perProductBudget)
+                    .Where(c => !seenChunkIds.Contains(c.Id) && ChunkMatchesCode(c, code))
+                    .Take(currentBudget)
                     .ToList();
 
-                selectedPerProduct.AddRange(codeMatches);
-            }
-
-            if (selectedPerProduct.Count > 0)
-            {
-                var remainingBudget = maxChunks - selectedPerProduct.Count;
-                if (remainingBudget > 0)
+                foreach (var match in codeMatches)
                 {
-                    var extra = allChunks
-                        .Where(c => !selectedPerProduct.Any(s => s.Id == c.Id))
-                        .Take(remainingBudget);
-                    selectedPerProduct.AddRange(extra);
-                }
-                return selectedPerProduct;
-            }
-        }
-
-        // Prioritize chunks belonging to or referencing the target product codes
-        var matchingChunks = new List<DocumentChunk>();
-
-        foreach (var chunk in allChunks)
-        {
-            bool isTargetMatch = false;
-            foreach (var code in targetProductCodes)
-            {
-                if ((chunk.FileName != null && chunk.FileName.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
-                    (chunk.Text != null && chunk.Text.Contains(code, StringComparison.OrdinalIgnoreCase)) ||
-                    (chunk.ArticleId != null && chunk.ArticleId.Contains(code, StringComparison.OrdinalIgnoreCase)))
-                {
-                    isTargetMatch = true;
-                    break;
+                    if (seenChunkIds.Add(match.Id))
+                    {
+                        selectedChunks.Add(match);
+                        if (selectedChunks.Count >= maxChunks)
+                            break;
+                    }
                 }
             }
 
-            if (isTargetMatch)
+            // If slots remain, fill with remaining matching chunks from target products in order
+            if (selectedChunks.Count < maxChunks)
             {
-                matchingChunks.Add(chunk);
+                var remainingBudget = maxChunks - selectedChunks.Count;
+                var remainingMatches = allChunks
+                    .Where(c => !seenChunkIds.Contains(c.Id) && targetProductCodes.Any(code => ChunkMatchesCode(c, code)))
+                    .Take(remainingBudget)
+                    .ToList();
+
+                foreach (var extra in remainingMatches)
+                {
+                    if (seenChunkIds.Add(extra.Id))
+                    {
+                        selectedChunks.Add(extra);
+                        if (selectedChunks.Count >= maxChunks)
+                            break;
+                    }
+                }
+            }
+
+            if (selectedChunks.Count > 0)
+            {
+                return selectedChunks.Take(maxChunks).ToList();
             }
         }
 
-        // If target matching chunks exist, prioritize them exclusively up to maxChunks to prevent noise
+        // Single product code or fallback: prioritize chunks referencing target codes
+        var matchingChunks = allChunks
+            .Where(chunk => targetProductCodes.Any(code => ChunkMatchesCode(chunk, code)))
+            .GroupBy(c => c.Id)
+            .Select(g => g.First())
+            .Take(maxChunks)
+            .ToList();
+
         if (matchingChunks.Count > 0)
         {
-            return matchingChunks.GroupBy(c => c.Id).Select(g => g.First()).Take(maxChunks).ToList();
+            return matchingChunks;
         }
 
-        return allChunks.Count > maxChunks ? allChunks.Take(maxChunks).ToList() : allChunks;
+        return allChunks.Take(maxChunks).ToList();
     }
 
     private List<EvidenceClaim> ExtractDomainEvidenceClaims(object? workflowData, InputGovernorResult govResult)

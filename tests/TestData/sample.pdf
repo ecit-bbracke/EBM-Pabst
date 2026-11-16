@@ -1,19 +1,49 @@
-﻿%PDF-1.4
-1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj
-2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj
-3 0 obj <</Type /Page /Parent 2 0 R /Resources <<>> /MediaBox [0 0 500 800] /Contents 4 0 R>> endobj
-4 0 obj <</Length 23>> stream
-BT /F1 12 Tf (main topic) Tj ET
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 428 >>
+stream
+BT
+/F1 18 Tf
+50 780 Td
+(ebm-papst 4114N Compact Axial Fan) Tj
+/F2 12 Tf
+0 -35 Td
+(Product Code: 4114N) Tj
+0 -25 Td
+(Nominal Voltage: 24 VDC) Tj
+0 -20 Td
+(Voltage Range: 18 ... 30 VDC) Tj
+0 -20 Td
+(Air Flow: 180 m3/h) Tj
+0 -20 Td
+(Nominal Speed: 2800 RPM) Tj
+0 -20 Td
+(Power Input: 3.2 W) Tj
+0 -20 Td
+(Sound Pressure Level: 45 dB(A)) Tj
+0 -35 Td
+(Documentation main topic: Technical Specifications and Operating Parameters) Tj
+ET
 endstream
 endobj
 xref
 0 5
-0000000000 65535 f
-0000000009 00000 n
-0000000056 00000 n
-0000000111 00000 n
-0000000212 00000 n
-trailer <</Size 5 /Root 1 0 R>>
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000354 00000 n 
+trailer
+<< /Size 5 /Root 1 0 R >>
 startxref
-285
+833
 %%EOF

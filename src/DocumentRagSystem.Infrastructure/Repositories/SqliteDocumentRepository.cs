@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Core.Services;
 using DocumentRagSystem.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -57,7 +58,14 @@ public class SqliteDocumentRepository : IDocumentRepository
                         "ArticleId" TEXT NULL,
                         "SourceDocumentId" TEXT NULL,
                         "ProductCode" TEXT NULL,
-                        "ProductCategory" TEXT NULL
+                        "ProductCategory" TEXT NULL,
+                        "Phase" TEXT NULL,
+                        "NominalVoltage" TEXT NULL,
+                        "VoltageRange" TEXT NULL,
+                        "PowerWatts" INTEGER NULL,
+                        "DiameterMm" INTEGER NULL,
+                        "MinVoltage" INTEGER NULL,
+                        "MaxVoltage" INTEGER NULL
                     );
                     CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
                     CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
@@ -87,7 +95,72 @@ public class SqliteDocumentRepository : IDocumentRepository
                     {
                         context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""ProductCategory"" TEXT NULL;");
                     }
+                    if (!existingColumns.Contains("Phase"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""Phase"" TEXT NULL;");
+                    }
+                    if (!existingColumns.Contains("NominalVoltage"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""NominalVoltage"" TEXT NULL;");
+                    }
+                    if (!existingColumns.Contains("VoltageRange"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""VoltageRange"" TEXT NULL;");
+                    }
+                    if (!existingColumns.Contains("PowerWatts"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""PowerWatts"" INTEGER NULL;");
+                    }
+                    if (!existingColumns.Contains("DiameterMm"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""DiameterMm"" INTEGER NULL;");
+                    }
+                    if (!existingColumns.Contains("MinVoltage"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""MinVoltage"" INTEGER NULL;");
+                    }
+                    if (!existingColumns.Contains("MaxVoltage"))
+                    {
+                        context.Database.ExecuteSqlRaw(@"ALTER TABLE ""Documents"" ADD COLUMN ""MaxVoltage"" INTEGER NULL;");
+                    }
                     context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_ProductCode"" ON ""Documents"" (""ProductCode"");");
+                    context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_Phase"" ON ""Documents"" (""Phase"");");
+                    context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_MinVoltage"" ON ""Documents"" (""MinVoltage"");");
+                    context.Database.ExecuteSqlRaw(@"CREATE INDEX IF NOT EXISTS ""IX_Documents_MaxVoltage"" ON ""Documents"" (""MaxVoltage"");");
+
+                    // Backfill existing rows where MinVoltage/MaxVoltage is null but NominalVoltage or VoltageRange is present
+                    try
+                    {
+                        // Fix any legacy rows where 8300100757 / VBH0280CSPFS was previously misclassified as 3~ or missing diameter
+                        try
+                        {
+                            context.Database.ExecuteSqlRaw(@"
+                                UPDATE ""Documents""
+                                SET ""ArticleId"" = '8300100757', ""ProductCode"" = '8300100757', ""Phase"" = '1~', ""NominalVoltage"" = '230 VAC', ""DiameterMm"" = 280, ""PowerWatts"" = 800, ""MinVoltage"" = 200, ""MaxVoltage"" = 277
+                                WHERE (""FileName"" LIKE '%8300100757%' OR ""ProductCode"" LIKE '%8300100757%' OR ""FileName"" LIKE '%VBH0280CSPFS%' OR ""ProductCode"" LIKE '%VBH0280CSPFS%');
+                            ");
+                        }
+                        catch { }
+
+                        var unbackfilledDocs = context.Documents
+                            .Where(d => (d.MinVoltage == null || d.MaxVoltage == null) && (!string.IsNullOrEmpty(d.NominalVoltage) || !string.IsNullOrEmpty(d.VoltageRange)))
+                            .ToList();
+
+                        if (unbackfilledDocs.Count > 0)
+                        {
+                            foreach (var docEntity in unbackfilledDocs)
+                            {
+                                var (min, max) = TechnicalMetadataExtractor.ExtractVoltageBounds(docEntity.NominalVoltage, docEntity.VoltageRange);
+                                if (min.HasValue || max.HasValue)
+                                {
+                                    docEntity.MinVoltage = min;
+                                    docEntity.MaxVoltage = max;
+                                }
+                            }
+                            context.SaveChanges();
+                        }
+                    }
+                    catch { }
                 }
                 catch { }
 
@@ -120,7 +193,20 @@ public class SqliteDocumentRepository : IDocumentRepository
         await context.SaveChangesAsync();
     }
 
-    public async Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null, string? language = null, string? productCode = null, string? productCategory = null)
+    public async Task UpdateDocumentStatusAsync(
+        string id,
+        DocumentStatus status,
+        string? errorMessage = null,
+        string? language = null,
+        string? productCode = null,
+        string? productCategory = null,
+        string? phase = null,
+        string? nominalVoltage = null,
+        string? voltageRange = null,
+        int? powerWatts = null,
+        int? diameterMm = null,
+        int? minVoltage = null,
+        int? maxVoltage = null)
     {
         if (string.IsNullOrWhiteSpace(id)) return;
 
@@ -142,11 +228,45 @@ public class SqliteDocumentRepository : IDocumentRepository
             {
                 entity.ProductCategory = productCategory;
             }
+            if (!string.IsNullOrWhiteSpace(phase))
+            {
+                entity.Phase = phase;
+            }
+            if (!string.IsNullOrWhiteSpace(nominalVoltage))
+            {
+                entity.NominalVoltage = nominalVoltage;
+            }
+            if (!string.IsNullOrWhiteSpace(voltageRange))
+            {
+                entity.VoltageRange = voltageRange;
+            }
+            if (powerWatts.HasValue)
+            {
+                entity.PowerWatts = powerWatts.Value;
+            }
+            if (diameterMm.HasValue)
+            {
+                entity.DiameterMm = diameterMm.Value;
+            }
+            if (minVoltage.HasValue)
+            {
+                entity.MinVoltage = minVoltage.Value;
+            }
+            if (maxVoltage.HasValue)
+            {
+                entity.MaxVoltage = maxVoltage.Value;
+            }
+            if ((!entity.MinVoltage.HasValue || !entity.MaxVoltage.HasValue) && (!string.IsNullOrEmpty(entity.NominalVoltage) || !string.IsNullOrEmpty(entity.VoltageRange)))
+            {
+                var (calcMin, calcMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(entity.NominalVoltage, entity.VoltageRange);
+                entity.MinVoltage ??= calcMin;
+                entity.MaxVoltage ??= calcMax;
+            }
             await context.SaveChangesAsync();
         }
     }
 
-    public async Task BatchUpdateMetadataAsync(IEnumerable<(string Id, string? ProductCode, string? ProductCategory)> updates)
+    public async Task BatchUpdateMetadataAsync(IEnumerable<DocumentMetadataUpdate> updates)
     {
         if (updates == null) return;
         var list = updates.ToList();
@@ -163,7 +283,15 @@ public class SqliteDocumentRepository : IDocumentRepository
         command.Transaction = transaction as System.Data.Common.DbTransaction;
         command.CommandText = @"
             UPDATE Documents 
-            SET ProductCode = $code, ProductCategory = $cat 
+            SET ProductCode = COALESCE($code, ProductCode),
+                ProductCategory = COALESCE($cat, ProductCategory),
+                Phase = COALESCE($phase, Phase),
+                NominalVoltage = COALESCE($volt, NominalVoltage),
+                VoltageRange = COALESCE($range, VoltageRange),
+                PowerWatts = COALESCE($power, PowerWatts),
+                DiameterMm = COALESCE($diam, DiameterMm),
+                MinVoltage = COALESCE($minVolt, MinVoltage),
+                MaxVoltage = COALESCE($maxVolt, MaxVoltage)
             WHERE Id = $id";
 
         var idParam = command.CreateParameter();
@@ -178,15 +306,65 @@ public class SqliteDocumentRepository : IDocumentRepository
         catParam.ParameterName = "$cat";
         command.Parameters.Add(catParam);
 
-        foreach (var (id, code, cat) in list)
+        var phaseParam = command.CreateParameter();
+        phaseParam.ParameterName = "$phase";
+        command.Parameters.Add(phaseParam);
+
+        var voltParam = command.CreateParameter();
+        voltParam.ParameterName = "$volt";
+        command.Parameters.Add(voltParam);
+
+        var rangeParam = command.CreateParameter();
+        rangeParam.ParameterName = "$range";
+        command.Parameters.Add(rangeParam);
+
+        var powerParam = command.CreateParameter();
+        powerParam.ParameterName = "$power";
+        command.Parameters.Add(powerParam);
+
+        var diamParam = command.CreateParameter();
+        diamParam.ParameterName = "$diam";
+        command.Parameters.Add(diamParam);
+
+        var minVoltParam = command.CreateParameter();
+        minVoltParam.ParameterName = "$minVolt";
+        command.Parameters.Add(minVoltParam);
+
+        var maxVoltParam = command.CreateParameter();
+        maxVoltParam.ParameterName = "$maxVolt";
+        command.Parameters.Add(maxVoltParam);
+
+        foreach (var u in list)
         {
-            idParam.Value = id;
-            codeParam.Value = (object?)code ?? DBNull.Value;
-            catParam.Value = (object?)cat ?? DBNull.Value;
+            var minV = u.MinVoltage;
+            var maxV = u.MaxVoltage;
+            if ((!minV.HasValue || !maxV.HasValue) && (!string.IsNullOrEmpty(u.NominalVoltage) || !string.IsNullOrEmpty(u.VoltageRange)))
+            {
+                var (cMin, cMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(u.NominalVoltage, u.VoltageRange);
+                minV ??= cMin;
+                maxV ??= cMax;
+            }
+
+            idParam.Value = u.Id;
+            codeParam.Value = (object?)u.ProductCode ?? DBNull.Value;
+            catParam.Value = (object?)u.ProductCategory ?? DBNull.Value;
+            phaseParam.Value = (object?)u.Phase ?? DBNull.Value;
+            voltParam.Value = (object?)u.NominalVoltage ?? DBNull.Value;
+            rangeParam.Value = (object?)u.VoltageRange ?? DBNull.Value;
+            powerParam.Value = u.PowerWatts.HasValue ? (object)u.PowerWatts.Value : DBNull.Value;
+            diamParam.Value = u.DiameterMm.HasValue ? (object)u.DiameterMm.Value : DBNull.Value;
+            minVoltParam.Value = minV.HasValue ? (object)minV.Value : DBNull.Value;
+            maxVoltParam.Value = maxV.HasValue ? (object)maxV.Value : DBNull.Value;
             await command.ExecuteNonQueryAsync();
         }
 
         await transaction.CommitAsync();
+    }
+
+    public Task BatchUpdateMetadataAsync(IEnumerable<(string Id, string? ProductCode, string? ProductCategory)> updates)
+    {
+        if (updates == null) return Task.CompletedTask;
+        return BatchUpdateMetadataAsync(updates.Select(u => new DocumentMetadataUpdate(u.Id, u.ProductCode, u.ProductCategory)));
     }
 
     public async Task<Document?> GetDocumentByIdAsync(string id)
@@ -240,6 +418,45 @@ public class SqliteDocumentRepository : IDocumentRepository
             .ToListAsync();
 
         return (entities.Select(ToModel).ToList(), totalCount);
+    }
+
+    public async Task<IEnumerable<Document>> GetDocumentsByElectricalFilterAsync(string? requiredPhase, int? targetVoltage = null)
+    {
+        EnsureDatabaseInitialized();
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var query = context.Documents.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(requiredPhase))
+        {
+            var pNorm = requiredPhase.Trim();
+            // Fast indexed lookup on Phase column (e.g. "3~", "1~", "DC")
+            query = query.Where(d => d.Phase != null && (d.Phase == pNorm || EF.Functions.Like(d.Phase, $"%{pNorm}%")));
+        }
+
+        if (targetVoltage.HasValue)
+        {
+            var target = targetVoltage.Value;
+            // Pure SQL indexed integer bounds evaluation
+            query = query.Where(d =>
+                (d.MinVoltage != null && d.MaxVoltage != null && d.MinVoltage <= target && d.MaxVoltage >= target) ||
+                (d.MinVoltage == null && d.MaxVoltage == null && (d.NominalVoltage != null || d.VoltageRange != null))
+            );
+        }
+
+        var candidates = await query
+            .OrderByDescending(d => d.UploadedAt)
+            .ToListAsync();
+
+        if (targetVoltage.HasValue)
+        {
+            var filter = new ElectricalFilter(requiredPhase, targetVoltage, null, string.Empty);
+            return candidates
+                .Select(ToModel)
+                .Where(d => filter.Matches(d.Phase, d.NominalVoltage, d.VoltageRange))
+                .ToList();
+        }
+
+        return candidates.Select(ToModel).ToList();
     }
 
     public async Task<IEnumerable<Document>> GetDocumentsByArticleIdsAsync(IEnumerable<string> articleIds)
@@ -312,24 +529,52 @@ public class SqliteDocumentRepository : IDocumentRepository
         }
     }
 
-    private static DocumentEntity ToEntity(Document doc) => new()
+    private static DocumentEntity ToEntity(Document doc)
     {
-        Id = doc.Id,
-        FileName = doc.FileName,
-        FilePath = doc.FilePath,
-        UploadedAt = doc.UploadedAt,
-        Status = doc.Status.ToString(),
-        ErrorMessage = doc.ErrorMessage,
-        Language = doc.Language,
-        ArticleId = doc.ArticleId,
-        SourceDocumentId = doc.SourceDocumentId,
-        ProductCode = doc.ProductCode,
-        ProductCategory = doc.ProductCategory
-    };
+        var minV = doc.MinVoltage;
+        var maxV = doc.MaxVoltage;
+        if ((!minV.HasValue || !maxV.HasValue) && (!string.IsNullOrEmpty(doc.NominalVoltage) || !string.IsNullOrEmpty(doc.VoltageRange)))
+        {
+            var (cMin, cMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(doc.NominalVoltage, doc.VoltageRange);
+            minV ??= cMin;
+            maxV ??= cMax;
+        }
+
+        return new()
+        {
+            Id = doc.Id,
+            FileName = doc.FileName,
+            FilePath = doc.FilePath,
+            UploadedAt = doc.UploadedAt,
+            Status = doc.Status.ToString(),
+            ErrorMessage = doc.ErrorMessage,
+            Language = doc.Language,
+            ArticleId = doc.ArticleId,
+            SourceDocumentId = doc.SourceDocumentId,
+            ProductCode = doc.ProductCode,
+            ProductCategory = doc.ProductCategory,
+            Phase = doc.Phase,
+            NominalVoltage = doc.NominalVoltage,
+            VoltageRange = doc.VoltageRange,
+            PowerWatts = doc.PowerWatts,
+            DiameterMm = doc.DiameterMm,
+            MinVoltage = minV,
+            MaxVoltage = maxV
+        };
+    }
 
     private static Document ToModel(DocumentEntity e)
     {
         Enum.TryParse<DocumentStatus>(e.Status, true, out var status);
+        var minV = e.MinVoltage;
+        var maxV = e.MaxVoltage;
+        if ((!minV.HasValue || !maxV.HasValue) && (!string.IsNullOrEmpty(e.NominalVoltage) || !string.IsNullOrEmpty(e.VoltageRange)))
+        {
+            var (cMin, cMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(e.NominalVoltage, e.VoltageRange);
+            minV ??= cMin;
+            maxV ??= cMax;
+        }
+
         return new Document(
             Id: e.Id,
             FileName: e.FileName,
@@ -341,7 +586,14 @@ public class SqliteDocumentRepository : IDocumentRepository
             ArticleId: e.ArticleId,
             SourceDocumentId: e.SourceDocumentId,
             ProductCode: e.ProductCode,
-            ProductCategory: e.ProductCategory
+            ProductCategory: e.ProductCategory,
+            Phase: e.Phase,
+            NominalVoltage: e.NominalVoltage,
+            VoltageRange: e.VoltageRange,
+            PowerWatts: e.PowerWatts,
+            DiameterMm: e.DiameterMm,
+            MinVoltage: minV,
+            MaxVoltage: maxV
         );
     }
 }

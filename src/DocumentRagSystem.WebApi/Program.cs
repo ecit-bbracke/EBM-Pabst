@@ -15,6 +15,7 @@ using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.HealthChecks;
 using DocumentRagSystem.Infrastructure.Llm;
 using DocumentRagSystem.Infrastructure.Repositories;
+using DocumentRagSystem.Infrastructure.Services;
 using DocumentRagSystem.Infrastructure.TextExtractors;
 using DocumentRagSystem.Infrastructure.VectorStores;
 using DocumentRagSystem.WebApi;
@@ -28,6 +29,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -147,7 +149,7 @@ builder.Services.AddAuthentication(options =>
         var key = config["Authentication:ApiKey"] ?? Environment.GetEnvironmentVariable("API_KEY");
         if (string.IsNullOrWhiteSpace(key))
         {
-            key = "ebm-secret-api-key-change-me";
+            key = "ebm-rag-secret-api-key-2026";
         }
         options.ApiKey = key;
     });
@@ -175,6 +177,41 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("QueryPolicy", policy =>
     {
         policy.RequireAuthenticatedUser();
+    });
+});
+
+// Configure HTTP Response Compression (Brotli + Gzip)
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json",
+        "application/pdf",
+        "text/plain",
+        "text/html"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
+
+// Configure CORS for client-side web apps calling the API
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.SetIsOriginAllowed(_ => true)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -306,6 +343,7 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
 
 builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
+builder.Services.AddSingleton<IPdfOptimizer, PdfOptimizer>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
 
 // Register Language Detector & DocumentProcessor
@@ -456,7 +494,9 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.UseResponseCompression();
 app.UseRouting();
+app.UseCors();
 
 // Authentication & Authorization Middleware
 app.UseAuthentication();
@@ -487,16 +527,6 @@ app.Use(async (context, next) =>
 
         var returnUrl = Uri.EscapeDataString(path + context.Request.QueryString);
         context.Response.Redirect($"/login.html?returnUrl={returnUrl}");
-        return;
-    }
-
-    // Enforce authorization for upload-only API key clients: block them from accessing /uploads
-    bool isApiKey = context.User.HasClaim("auth_method", "api_key") ||
-                    string.Equals(context.User.Identity?.Name, "ApiKeyClient", StringComparison.OrdinalIgnoreCase);
-
-    if (isApiKey && path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase))
-    {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return;
     }
 
@@ -814,6 +844,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     {
         try
         {
+            TechnicalRagOrchestrator.InvalidateQueryCache();
             using var startupScope = app.Services.CreateScope();
             var repo = startupScope.ServiceProvider.GetService<IDocumentRepository>();
             var queue = startupScope.ServiceProvider.GetService<IDocumentQueue>();
@@ -922,6 +953,107 @@ app.Lifetime.ApplicationStarted.Register(() =>
                             await repo.UpdateDocumentStatusAsync(doc.Id, DocumentStatus.Failed, errorMessage: "Behandlingen blev afbrudt under genstart, og kildestien kunne ikke findes.");
                         }
                     }
+                }
+
+                // Automatic startup backfill of missing electrical metadata for processed documents
+                try
+                {
+                    var docsMissingElectrical = allDocs?.Where(d =>
+                        d.Status == DocumentStatus.Processed &&
+                        (string.IsNullOrWhiteSpace(d.Phase) || string.IsNullOrWhiteSpace(d.NominalVoltage) ||
+                         !d.MinVoltage.HasValue || !d.MaxVoltage.HasValue || !d.DiameterMm.HasValue ||
+                         (d.Phase == "3~" && d.ProductCode != null && (d.ProductCode.Contains("4E") || d.ProductCode.Contains("2E") || d.ProductCode.Contains("6E"))) ||
+                         (d.Phase == "3~" && d.FileName != null && (d.FileName.Contains("8300100757") || d.FileName.Contains("VBH0280CSPFS"))))).ToList();
+
+                    if (docsMissingElectrical != null && docsMissingElectrical.Count > 0)
+                    {
+                        var textExtractor = startupScope.ServiceProvider.GetService<ITextExtractor>();
+                        var vectorStore = startupScope.ServiceProvider.GetService<IVectorStore>();
+                        if (textExtractor != null || vectorStore != null)
+                        {
+                            var servedUploads = GetServedUploadDirectories(uploadsDirectory);
+                            var codeParser = new EbmProductCodeParser();
+                            var updates = new List<DocumentMetadataUpdate>();
+
+                            foreach (var doc in docsMissingElectrical)
+                            {
+                                string? resolvedPath = null;
+                                if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+                                {
+                                    resolvedPath = doc.FilePath;
+                                }
+                                else
+                                {
+                                    foreach (var uploadDir in servedUploads)
+                                    {
+                                        var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
+                                        if (File.Exists(candidate)) { resolvedPath = candidate; break; }
+                                        var candidateByName = Path.Combine(uploadDir, doc.FileName);
+                                        if (File.Exists(candidateByName)) { resolvedPath = candidateByName; break; }
+                                    }
+                                }
+
+                                string? text = null;
+                                if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath) && textExtractor != null)
+                                {
+                                    try
+                                    {
+                                        using var fs = new FileStream(resolvedPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                                        text = await textExtractor.ExtractTextAsync(fs);
+                                    }
+                                    catch { }
+                                }
+
+                                if (string.IsNullOrWhiteSpace(text) && vectorStore != null)
+                                {
+                                    try
+                                    {
+                                        var chunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).ToList();
+                                        if (chunks.Count > 0)
+                                        {
+                                            text = string.Join("\n", chunks.Take(4).Select(c => c.Text));
+                                        }
+                                    }
+                                    catch { }
+                                }
+
+                                var extractedProducts = codeParser.ExtractProductsFromText(doc.FileName);
+                                if (extractedProducts.Count == 0 && !string.IsNullOrWhiteSpace(text))
+                                {
+                                    extractedProducts = codeParser.ExtractProductsFromText(text!.Substring(0, Math.Min(text.Length, 3000)));
+                                }
+                                var bestProduct = extractedProducts.FirstOrDefault();
+
+                                var techMeta = TechnicalMetadataExtractor.Extract(text, doc.FileName, bestProduct);
+                                if (!string.IsNullOrWhiteSpace(techMeta.Phase) || !string.IsNullOrWhiteSpace(techMeta.NominalVoltage) || !string.IsNullOrWhiteSpace(techMeta.ProductCode) || techMeta.PowerWatts.HasValue)
+                                {
+                                    updates.Add(new DocumentMetadataUpdate(
+                                        Id: doc.Id,
+                                        ProductCode: techMeta.ProductCode ?? doc.ProductCode,
+                                        ProductCategory: techMeta.ProductCategory ?? doc.ProductCategory,
+                                        Phase: techMeta.Phase ?? doc.Phase,
+                                        NominalVoltage: techMeta.NominalVoltage ?? doc.NominalVoltage,
+                                        VoltageRange: techMeta.VoltageRange ?? doc.VoltageRange,
+                                        PowerWatts: techMeta.PowerWatts ?? doc.PowerWatts,
+                                        DiameterMm: techMeta.DiameterMm ?? doc.DiameterMm ?? bestProduct?.ImpellerDiameterMm,
+                                        MinVoltage: techMeta.MinVoltage ?? doc.MinVoltage,
+                                        MaxVoltage: techMeta.MaxVoltage ?? doc.MaxVoltage
+                                    ));
+                                }
+                            }
+
+                            if (updates.Count > 0)
+                            {
+                                await repo.BatchUpdateMetadataAsync(updates);
+                                app.Logger.LogInformation("Startup backfill populated electrical metadata for {Count} existing documents.", updates.Count);
+                                TechnicalRagOrchestrator.InvalidateQueryCache();
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    app.Logger.LogWarning(ex, "Failed to run startup electrical metadata backfill.");
                 }
             }
         }

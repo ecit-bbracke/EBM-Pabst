@@ -59,9 +59,11 @@ public static class QueryEndpoints
             ITechnicalRagOrchestrator orchestrator,
             IDanishDocumentResolver danishResolver,
             IConversationStateStore stateStore,
+            IPdfOptimizer pdfOptimizer,
             ClaimsPrincipal user,
             HttpContext httpContext,
-            ILoggerFactory loggerFactory) =>
+            ILoggerFactory loggerFactory,
+            IDocumentRepository repository) =>
         {
             var logger = loggerFactory.CreateLogger("QueryEndpoints");
             var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -118,6 +120,17 @@ public static class QueryEndpoints
 
                 var fileName = DocumentUrlResolver.FirstNonEmpty(item.FileName, item.DocumentId);
                 var filePath = item.FilePath;
+
+                if (repository != null && (string.IsNullOrWhiteSpace(item.FileName) || string.IsNullOrWhiteSpace(item.FilePath) || !fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var repoDoc = await repository.GetDocumentByIdAsync(item.DocumentId);
+                    if (repoDoc != null)
+                    {
+                        fileName = DocumentUrlResolver.FirstNonEmpty(repoDoc.FileName, fileName);
+                        filePath = DocumentUrlResolver.FirstNonEmpty(repoDoc.FilePath, filePath);
+                    }
+                }
+
                 var url = DocumentUrlResolver.ToDocumentUrl(filePath, fileName, servedUploadDirectories);
 
                 if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
@@ -183,6 +196,28 @@ public static class QueryEndpoints
                 var filesList = new List<JsonQueryFileDto>();
                 var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+                var requestedPagesOption = !string.IsNullOrWhiteSpace(request.Pages)
+                    ? request.Pages
+                    : httpContext.Request.Query["pages"].ToString();
+
+                var isFullDocumentRequested = string.Equals(requestedPagesOption, "full", StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(requestedPagesOption, "all", StringComparison.OrdinalIgnoreCase);
+
+                var shouldSliceToCitedPages = !isFullDocumentRequested;
+
+                List<int>? explicitPageNumbers = null;
+                if (!string.IsNullOrWhiteSpace(requestedPagesOption) &&
+                    !string.Equals(requestedPagesOption, "cited", StringComparison.OrdinalIgnoreCase) &&
+                    !isFullDocumentRequested)
+                {
+                    explicitPageNumbers = requestedPagesOption
+                        .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(p => int.TryParse(p.Trim(), out var pn) ? pn : -1)
+                        .Where(p => p > 0)
+                        .Distinct()
+                        .ToList();
+                }
+
                 var allDocReferences = new List<(string? FilePath, string? FileName)>();
                 foreach (var chunk in chunks)
                 {
@@ -214,8 +249,55 @@ public static class QueryEndpoints
                         try
                         {
                             var bytes = await File.ReadAllBytesAsync(physicalPath);
-                            var base64 = Convert.ToBase64String(bytes);
-                            filesList.Add(new JsonQueryFileDto(cleanFileName, base64));
+                            var originalSize = (long)bytes.Length;
+
+                            var docCitedPages = chunks
+                                .Where(c => c != null && IsSameDocument(c, docRef))
+                                .Select(c => c.PageNumber ?? 1)
+                                .Where(p => p >= 1)
+                                .Distinct()
+                                .OrderBy(p => p)
+                                .ToList();
+
+                            byte[] deliveredBytes;
+                            List<int>? includedPages = null;
+
+                            if (explicitPageNumbers != null && explicitPageNumbers.Count > 0)
+                            {
+                                deliveredBytes = pdfOptimizer.SliceAndOptimize(bytes, explicitPageNumbers);
+                                includedPages = explicitPageNumbers;
+                            }
+                            else if (shouldSliceToCitedPages && docCitedPages.Count > 0)
+                            {
+                                deliveredBytes = pdfOptimizer.SliceAndOptimize(bytes, docCitedPages);
+                                includedPages = docCitedPages;
+                            }
+                            else if (shouldSliceToCitedPages)
+                            {
+                                deliveredBytes = pdfOptimizer.SliceAndOptimize(bytes, new[] { 1 });
+                                includedPages = new List<int> { 1 };
+                            }
+                            else
+                            {
+                                deliveredBytes = bytes;
+                            }
+
+                            var downloadPath = $"/api/documents/download/{cleanFileName}";
+                            var firstPageAnchor = includedPages != null && includedPages.Count > 0 ? $"#page={includedPages[0]}" : string.Empty;
+                            var viewerUrl = $"{downloadPath}{firstPageAnchor}";
+
+                            bool shouldIncludeBase64 = request.IncludeBase64 ?? !string.Equals(request.Mode, "urls", StringComparison.OrdinalIgnoreCase);
+                            var base64 = shouldIncludeBase64 ? Convert.ToBase64String(deliveredBytes) : string.Empty;
+
+                            filesList.Add(new JsonQueryFileDto(
+                                Name: cleanFileName,
+                                Content: base64,
+                                Url: viewerUrl,
+                                DownloadUrl: downloadPath,
+                                Pages: includedPages,
+                                OriginalSizeBytes: originalSize,
+                                DeliveredSizeBytes: (long)deliveredBytes.Length
+                            ));
                         }
                         catch (Exception ex)
                         {
@@ -256,7 +338,8 @@ public static class QueryEndpoints
             IConversationStateStore stateStore,
             HttpContext httpContext,
             ILoggerFactory loggerFactory,
-            CancellationToken cancellationToken) =>
+            CancellationToken cancellationToken,
+            IDocumentRepository repository) =>
         {
             var logger = loggerFactory.CreateLogger("QueryEndpoints");
             var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -327,6 +410,17 @@ public static class QueryEndpoints
 
                                 var fileName = DocumentUrlResolver.FirstNonEmpty(item.FileName, item.DocumentId);
                                 var filePath = item.FilePath;
+
+                                if (repository != null && (string.IsNullOrWhiteSpace(item.FileName) || string.IsNullOrWhiteSpace(item.FilePath) || !fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    var repoDoc = await repository.GetDocumentByIdAsync(item.DocumentId);
+                                    if (repoDoc != null)
+                                    {
+                                        fileName = DocumentUrlResolver.FirstNonEmpty(repoDoc.FileName, fileName);
+                                        filePath = DocumentUrlResolver.FirstNonEmpty(repoDoc.FilePath, filePath);
+                                    }
+                                }
+
                                 var url = DocumentUrlResolver.ToDocumentUrl(filePath, fileName, servedUploadDirectories);
 
                                 if (!string.IsNullOrWhiteSpace(url) && url.Contains(".pdf", StringComparison.OrdinalIgnoreCase))
@@ -454,5 +548,20 @@ public static class QueryEndpoints
         .WithName("TranscribeAudio");
 
         return app;
+    }
+
+    private static bool IsSameDocument(DocumentChunk c, (string? FilePath, string? FileName) docRef)
+    {
+        var fn1 = Path.GetFileName(DocumentUrlResolver.FirstNonEmpty(c.FileName, c.DocumentId));
+        var fn2 = Path.GetFileName(docRef.FileName ?? docRef.FilePath ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(fn1) && !string.IsNullOrWhiteSpace(fn2) && string.Equals(fn1, fn2, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (!string.IsNullOrWhiteSpace(c.FilePath) && !string.IsNullOrWhiteSpace(docRef.FilePath))
+        {
+            return string.Equals(Path.GetFileName(c.FilePath), Path.GetFileName(docRef.FilePath), StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
     }
 }

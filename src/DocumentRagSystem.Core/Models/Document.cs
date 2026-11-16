@@ -20,7 +20,14 @@ public record Document(
     string? ArticleId = null,
     string? SourceDocumentId = null,
     string? ProductCode = null,
-    string? ProductCategory = null
+    string? ProductCategory = null,
+    string? Phase = null,
+    string? NominalVoltage = null,
+    string? VoltageRange = null,
+    int? PowerWatts = null,
+    int? DiameterMm = null,
+    int? MinVoltage = null,
+    int? MaxVoltage = null
 );
 
 public record DocumentChunk(

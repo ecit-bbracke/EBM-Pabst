@@ -15,4 +15,11 @@ public class DocumentEntity
     public string? SourceDocumentId { get; set; }
     public string? ProductCode { get; set; }
     public string? ProductCategory { get; set; }
+    public string? Phase { get; set; }
+    public string? NominalVoltage { get; set; }
+    public string? VoltageRange { get; set; }
+    public int? PowerWatts { get; set; }
+    public int? DiameterMm { get; set; }
+    public int? MinVoltage { get; set; }
+    public int? MaxVoltage { get; set; }
 }

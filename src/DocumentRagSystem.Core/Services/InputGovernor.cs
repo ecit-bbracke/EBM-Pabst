@@ -217,6 +217,12 @@ Output JSON:
             combinedText.Contains("which fan", StringComparison.OrdinalIgnoreCase) ||
             combinedText.Contains("hvilke ventilator", StringComparison.OrdinalIgnoreCase) ||
             combinedText.Contains("hvilke blæser", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke produkter", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke artikler", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvad kan vi tilbyde", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("hvilke kan vi tilbyde", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("which products", StringComparison.OrdinalIgnoreCase) ||
+            combinedText.Contains("what products", StringComparison.OrdinalIgnoreCase) ||
             combinedText.Contains("hvad findes", StringComparison.OrdinalIgnoreCase) ||
             combinedText.Contains("list all", StringComparison.OrdinalIgnoreCase) ||
             combinedText.Contains("alle ventilator", StringComparison.OrdinalIgnoreCase) ||
@@ -283,12 +289,19 @@ Output JSON:
         {
             if (IsOverviewQuery(text))
             {
+                var constraints = new List<string>();
+                var voltageFilter = ElectricalQueryExpander.ExtractVoltageFilter(text);
+                if (voltageFilter != null)
+                {
+                    constraints.Add($"voltage: {voltageFilter.RawMatch}");
+                }
+
                 result = new InputGovernorResult(
                     Intent: "OVERVIEW",
                     Confidence: 1.0,
                     Entities: new List<EntityInfo>(),
-                    RequestedAttributes: new List<string>(),
-                    Constraints: new List<string>(),
+                    RequestedAttributes: new List<string> { "catalog", "models" },
+                    Constraints: constraints,
                     ClarificationRequired: false,
                     ClarificationReason: null,
                     ParsedEbmProducts: new List<EbmProductInfo>()
@@ -387,8 +400,10 @@ Output JSON:
             }
         }
 
-        // 4. Single-Product Intent (when exactly 1 EbmProduct code is detected and no conversational entity ambiguity)
-        if (extractedProducts.Count == 1 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count <= 1))
+        // 4. Single-Product Intent (when exactly 1 specific EbmProduct code is detected)
+        if (extractedProducts.Count == 1 &&
+            (extractedProducts[0].CleanCode.Length >= 10 || extractedProducts[0].FanFamily == FanFamilyType.CompactOrSpecial) &&
+            (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count <= 1))
         {
             var isTroubleshooting = text.Contains("fejl", StringComparison.OrdinalIgnoreCase) ||
                                     text.Contains("error", StringComparison.OrdinalIgnoreCase) ||
@@ -399,13 +414,12 @@ Output JSON:
                                     text.Contains("defekt", StringComparison.OrdinalIgnoreCase) ||
                                     text.Contains("problem", StringComparison.OrdinalIgnoreCase);
 
-            var isProcedure = text.Contains("hvordan tilslut", StringComparison.OrdinalIgnoreCase) ||
-                              text.Contains("hvordan monter", StringComparison.OrdinalIgnoreCase) ||
-                              text.Contains("how to install", StringComparison.OrdinalIgnoreCase) ||
-                              text.Contains("how to connect", StringComparison.OrdinalIgnoreCase) ||
+            var isProcedure = text.Contains("install", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("tilslut", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("monter", StringComparison.OrdinalIgnoreCase) ||
+                              text.Contains("connect", StringComparison.OrdinalIgnoreCase) ||
                               text.Contains("ledningsdiagram", StringComparison.OrdinalIgnoreCase) ||
-                              text.Contains("wiring diagram", StringComparison.OrdinalIgnoreCase) ||
-                              text.Contains("montage", StringComparison.OrdinalIgnoreCase);
+                              text.Contains("wiring diagram", StringComparison.OrdinalIgnoreCase);
 
             var intent = isTroubleshooting ? "TROUBLESHOOTING" : (isProcedure ? "PROCEDURE" : "SPEC_LOOKUP");
 
@@ -456,8 +470,14 @@ Output JSON:
                lower.Contains("what fan") ||
                lower.Contains("which ventilator") ||
                lower.Contains("which fan") ||
+               lower.Contains("which product") ||
+               lower.Contains("what product") ||
+               lower.Contains("which products") ||
+               lower.Contains("what products") ||
                lower.Contains("hvilke ventilator") ||
                lower.Contains("hvilke blæser") ||
+               lower.Contains("hvilke produkter") ||
+               lower.Contains("hvilke artikler") ||
                lower.Contains("hvad findes der") ||
                lower.Contains("list all") ||
                lower.Contains("alle ventilator") ||
@@ -467,7 +487,12 @@ Output JSON:
                lower.Contains("overview") ||
                lower.Contains("katalog") ||
                lower.Contains("hvad har vi af ventilatorer") ||
-               lower.Contains("oversigt over ventilatorer");
+               lower.Contains("oversigt over ventilatorer") ||
+               lower.Contains("hvad kan vi tilbyde") ||
+               lower.Contains("hvilke kan vi tilbyde") ||
+               lower.Contains("kan vi tilbyde") ||
+               lower.Contains("hvad har vi i") ||
+               lower.Contains("hvad har vi af");
     }
 
     private static bool IsGreetingQuery(string text)

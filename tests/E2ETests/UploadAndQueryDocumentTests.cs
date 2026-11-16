@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -23,6 +24,16 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     private bool _dockerAvailable = true;
     private readonly WebApplicationFactory<Program> _factory;
     private HttpClient _client = null!;
+
+    /// <summary>
+    /// Set to true or define the environment variable OPEN_PDF_IN_VIEWER=true (or 1)
+    /// to automatically open resulting PDF files in the operating system's standard PDF viewer.
+    /// </summary>
+    public static bool OpenResultingPdfInViewer { get; set; } =
+        string.Equals(Environment.GetEnvironmentVariable("OPEN_PDF_IN_VIEWER"), "true", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Environment.GetEnvironmentVariable("OPEN_PDF_IN_VIEWER"), "1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Environment.GetEnvironmentVariable("OPEN_RESULTING_PDF"), "true", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Environment.GetEnvironmentVariable("OPEN_RESULTING_PDF"), "1", StringComparison.OrdinalIgnoreCase);
 
     public UploadAndQueryDocumentTests(WebApplicationFactory<Program> factory)
     {
@@ -102,18 +113,35 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
                     // Replace the real QdrantVectorStore with an in-memory mock store
                     var storedChunks = new List<DocumentChunk>();
                     var mockStore = new Moq.Mock<IVectorStore>();
-                    mockStore.Setup(x => x.AddChunkAsync(Moq.It.IsAny<DocumentChunk>(), Moq.It.IsAny<float[]>()))
-                        .Callback<DocumentChunk, float[]>((chunk, _) => storedChunks.Add(chunk))
+                    mockStore.Setup(x => x.AddChunkAsync(Moq.It.IsAny<DocumentChunk>(), Moq.It.IsAny<float[]>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .Callback<DocumentChunk, float[], System.Threading.CancellationToken>((chunk, _, _) => storedChunks.Add(chunk))
                         .Returns(Task.CompletedTask);
 
-                    mockStore.Setup(x => x.SearchAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int>()))
-                        .ReturnsAsync(() => storedChunks.Count > 0
-                            ? storedChunks.Take(3).ToList()
+                    mockStore.Setup(x => x.AddChunksAsync(Moq.It.IsAny<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .Callback<IEnumerable<(DocumentChunk Chunk, float[] Embedding)>, System.Threading.CancellationToken>((chunks, _) =>
+                        {
+                            if (chunks != null)
+                            {
+                                storedChunks.AddRange(chunks.Select(c => c.Chunk));
+                            }
+                        })
+                        .Returns(Task.CompletedTask);
+
+                    mockStore.Setup(x => x.SearchAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .ReturnsAsync((string _, int limit, System.Threading.CancellationToken _) => storedChunks.Count > 0
+                            ? storedChunks.Take(limit > 0 ? limit : 3).ToList()
                             : new List<DocumentChunk> { new("e2e_chunk_0", "e2e_doc_id", "This is the main topic context.", 0) });
 
-                    mockStore.Setup(x => x.GetChunksByDocumentAndIndicesAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<IEnumerable<int>>()))
-                        .ReturnsAsync((string docId, IEnumerable<int> indices) =>
+                    mockStore.Setup(x => x.GetChunksByDocumentAndIndicesAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<IEnumerable<int>>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .ReturnsAsync((string docId, IEnumerable<int> indices, System.Threading.CancellationToken _) =>
                             storedChunks.Where(c => c.DocumentId == docId && indices.Contains(c.Index)).ToList());
+
+                    mockStore.Setup(x => x.GetAllChunksByDocumentIdAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .ReturnsAsync((string docId, System.Threading.CancellationToken _) =>
+                            storedChunks.Where(c => c.DocumentId == docId).ToList());
+
+                    mockStore.Setup(x => x.GetDocumentsAsync(Moq.It.IsAny<int>(), Moq.It.IsAny<System.Threading.CancellationToken>()))
+                        .ReturnsAsync(new List<Document>());
 
                     var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IVectorStore));
                     if (descriptor != null)
@@ -188,26 +216,27 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
     [Fact]
     public async Task UploadPdf_ThenQueryInJsonMode_ReturnsBase64Files()
     {
-        if (!_dockerAvailable) return;
+        // Calls the production API directly without uploading any document.
+        // Base URL, API key, and question can be configured or overridden via environment variables.
+        var baseUrl = Environment.GetEnvironmentVariable("PRODUCTION_API_URL")
+                      ?? Environment.GetEnvironmentVariable("EBM_API_URL");
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            // Skip remote production test if no external URL is explicitly configured
+            return;
+        }
 
-        // Arrange
-        var testDataPath = GetTestDataPath("sample.pdf");
-        Assert.True(File.Exists(testDataPath), $"Test data PDF not found at: {testDataPath}");
+        var apiKey = Environment.GetEnvironmentVariable("EBM_API_KEY")
+                     ?? "ebm-rag-secret-api-key-2026";
+        var question = Environment.GetEnvironmentVariable("EBM_QUERY_QUESTION")
+                       ?? "What are the specifications for K3G560PC0401?";
 
-        var pdfContent = await File.ReadAllBytesAsync(testDataPath);
+        using var client = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromMinutes(2) };
+        client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
 
-        using var content = new MultipartFormDataContent();
-        var fileContent = new ByteArrayContent(pdfContent);
-        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
-        content.Add(fileContent, "file", "4114N_json_mode_sample.pdf");
-
-        // Upload and process the PDF
-        var uploadResponse = await _client.PostAsync("/api/documents/upload", content);
-        uploadResponse.EnsureSuccessStatusCode();
-
-        // Act - Query in JSON mode
-        var queryRequest = new QueryRequest("What are the specifications for 4114N?", Mode: "json");
-        var queryResponse = await _client.PostAsJsonAsync("/api/query", queryRequest);
+        // Act - Query in JSON mode against production documents (without uploading)
+        var queryRequest = new QueryRequest(question, Mode: "json");
+        var queryResponse = await client.PostAsJsonAsync("/api/query?mode=json", queryRequest);
 
         // Assert
         queryResponse.EnsureSuccessStatusCode();
@@ -216,11 +245,72 @@ public class UploadAndQueryDocumentTests : IClassFixture<WebApplicationFactory<P
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.Response));
         Assert.NotEmpty(result.Files);
-        var file = result.Files[0];
-        Assert.NotEmpty(file.Name);
-        Assert.NotEmpty(file.Content);
-        var decoded = Convert.FromBase64String(file.Content);
-        Assert.NotEmpty(decoded);
+
+        foreach (var file in result.Files)
+        {
+            Assert.NotEmpty(file.Name);
+            Assert.False(string.IsNullOrWhiteSpace(file.Content));
+
+            var decoded = Convert.FromBase64String(file.Content);
+            Assert.NotEmpty(decoded);
+
+            // 1. Verify PDF Magic Number Header: "%PDF-"
+            Assert.True(decoded.Length > 5);
+            Assert.Equal((byte)'%', decoded[0]);
+            Assert.Equal((byte)'P', decoded[1]);
+            Assert.Equal((byte)'D', decoded[2]);
+            Assert.Equal((byte)'F', decoded[3]);
+            Assert.Equal((byte)'-', decoded[4]);
+
+            // 2. Verify structural validity by parsing with PdfPig
+            using (var pdf = UglyToad.PdfPig.PdfDocument.Open(decoded))
+            {
+                Assert.NotNull(pdf);
+                Assert.True(pdf.NumberOfPages > 0, "Decoded PDF must contain at least 1 readable page.");
+            }
+
+            // 3. Optionally open the resulting PDF files in the operating system's standard PDF viewer
+            if (OpenResultingPdfInViewer)
+            {
+                OpenInStandardPdfViewer(decoded, file.Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes the PDF byte array to a temporary file and opens it in the system's default PDF viewer.
+    /// </summary>
+    public static string OpenInStandardPdfViewer(byte[] pdfBytes, string fileName)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "DocumentRagSystem_PdfViewerTests");
+        Directory.CreateDirectory(tempDir);
+
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var ext = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            ext = ".pdf";
+        }
+
+        var safeFileName = $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..6]}{ext}";
+        var tempFilePath = Path.Combine(tempDir, safeFileName);
+        File.WriteAllBytes(tempFilePath, pdfBytes);
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = tempFilePath,
+                UseShellExecute = true
+            };
+            using var process = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PDF Viewer] Notice: Could not launch standard viewer for '{tempFilePath}': {ex.Message}");
+        }
+
+        return tempFilePath;
     }
 
     [Fact]

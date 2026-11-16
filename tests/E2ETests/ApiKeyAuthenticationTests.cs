@@ -244,17 +244,33 @@ public class ApiKeyAuthenticationTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
-    public async Task Uploads_WhenRequestedWithApiKey_ReturnsForbidden()
+    public async Task Uploads_WhenRequestedWithApiKey_AllowsAccess()
     {
-        // Arrange: Client authenticated via upload-only API key
+        // Arrange: Client authenticated via API key
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
 
-        // Act: Attempt to download/view a protected PDF via /uploads
+        // Act: Attempt to download/view a PDF via /uploads
         var response = await client.GetAsync("/uploads/sample.pdf");
 
-        // Assert: Upload-only API key MUST be rejected with 403 Forbidden
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        // Assert: API key is now allowed (returns 200 or 404, but NOT 403 Forbidden or 401 Unauthorized)
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DownloadDocument_WhenRequestedWithApiKey_AllowsAccess()
+    {
+        // Arrange: Client authenticated via API key
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidTestApiKey);
+
+        // Act: Attempt to download via the dedicated /api/documents/download endpoint
+        var response = await client.GetAsync("/api/documents/download/sample.pdf");
+
+        // Assert: API key is authorized
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]

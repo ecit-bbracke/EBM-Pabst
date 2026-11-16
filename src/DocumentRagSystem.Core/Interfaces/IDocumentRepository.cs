@@ -6,16 +6,72 @@ using DocumentRagSystem.Core.Models;
 
 namespace DocumentRagSystem.Core.Interfaces;
 
+public record DocumentMetadataUpdate(
+    string Id,
+    string? ProductCode = null,
+    string? ProductCategory = null,
+    string? Phase = null,
+    string? NominalVoltage = null,
+    string? VoltageRange = null,
+    int? PowerWatts = null,
+    int? DiameterMm = null,
+    int? MinVoltage = null,
+    int? MaxVoltage = null
+);
+
 public interface IDocumentRepository
 {
     Task AddDocumentAsync(Document document);
-    Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null, string? language = null, string? productCode = null, string? productCategory = null);
+    Task UpdateDocumentStatusAsync(
+        string id,
+        DocumentStatus status,
+        string? errorMessage = null,
+        string? language = null,
+        string? productCode = null,
+        string? productCategory = null,
+        string? phase = null,
+        string? nominalVoltage = null,
+        string? voltageRange = null,
+        int? powerWatts = null,
+        int? diameterMm = null,
+        int? minVoltage = null,
+        int? maxVoltage = null);
+
+    async Task BatchUpdateMetadataAsync(IEnumerable<DocumentMetadataUpdate> updates)
+    {
+        if (updates == null) return;
+        foreach (var u in updates)
+        {
+            await UpdateDocumentStatusAsync(
+                u.Id,
+                DocumentStatus.Processed,
+                productCode: u.ProductCode,
+                productCategory: u.ProductCategory,
+                phase: u.Phase,
+                nominalVoltage: u.NominalVoltage,
+                voltageRange: u.VoltageRange,
+                powerWatts: u.PowerWatts,
+                diameterMm: u.DiameterMm,
+                minVoltage: u.MinVoltage,
+                maxVoltage: u.MaxVoltage);
+        }
+    }
+
     Task BatchUpdateMetadataAsync(IEnumerable<(string Id, string? ProductCode, string? ProductCategory)> updates)
     {
-        return Task.WhenAll(updates.Select(u => UpdateDocumentStatusAsync(u.Id, DocumentStatus.Processed, productCode: u.ProductCode, productCategory: u.ProductCategory)));
+        return BatchUpdateMetadataAsync(updates.Select(u => new DocumentMetadataUpdate(u.Id, u.ProductCode, u.ProductCategory)));
     }
     Task<Document?> GetDocumentByIdAsync(string id);
     Task<IEnumerable<Document>> GetAllDocumentsAsync();
+
+    Task<IEnumerable<Document>> GetDocumentsByElectricalFilterAsync(string? requiredPhase, int? targetVoltage = null)
+    {
+        return GetAllDocumentsAsync().ContinueWith(t =>
+        {
+            var filter = new Services.ElectricalFilter(requiredPhase, targetVoltage, null, string.Empty);
+            return (IEnumerable<Document>)t.Result.Where(d => filter.Matches(d.Phase, d.NominalVoltage, d.VoltageRange)).ToList();
+        });
+    }
 
     Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null)
     {

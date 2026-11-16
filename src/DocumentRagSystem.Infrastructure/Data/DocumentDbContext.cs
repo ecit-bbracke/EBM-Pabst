@@ -33,6 +33,7 @@ public class DocumentDbContext : DbContext
             entity.HasIndex(e => e.ArticleId);
             entity.HasIndex(e => e.Language);
             entity.HasIndex(e => e.ProductCode);
+            entity.HasIndex(e => e.Phase);
         });
     }
 }

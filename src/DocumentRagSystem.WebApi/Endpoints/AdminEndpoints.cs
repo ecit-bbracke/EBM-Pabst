@@ -150,31 +150,136 @@ public static class AdminEndpoints
         .RequireAuthorization()
         .WithName("UnlockAdminUser");
 
+        // CLEAR QUERY CACHE ENDPOINT
+        app.MapPost("/api/admin/clear-cache", () =>
+        {
+            TechnicalRagOrchestrator.InvalidateQueryCache();
+            return Results.Ok(new { message = "Query cache invalidated." });
+        })
+        .RequireAuthorization("QueryPolicy")
+        .WithName("ClearQueryCache");
+
         // METADATA BACKFILL ENDPOINT
         app.MapPost("/api/admin/backfill-metadata", async (
             ClaimsPrincipal currentUser,
-            IDocumentRepository repository) =>
+            IDocumentRepository repository,
+            ITextExtractor textExtractor,
+            IVectorStore? vectorStore,
+            bool? forceAll) =>
         {
-            if (!UserSecurityHelper.IsUserAdmin(currentUser))
+            if (!UserSecurityHelper.IsUserAdmin(currentUser) && !currentUser.HasClaim("auth_method", "api_key"))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
             var codeParser = new EbmProductCodeParser();
-            var allDocs = await repository.GetAllDocumentsAsync();
-            var docsToUpdate = allDocs.Where(d => string.IsNullOrWhiteSpace(d.ProductCode) || string.IsNullOrWhiteSpace(d.ProductCategory)).ToList();
+            var allDocs = (await repository.GetAllDocumentsAsync()).ToList();
+            var shouldForce = forceAll.GetValueOrDefault(false);
+            var docsToUpdate = shouldForce
+                ? allDocs
+                : allDocs.Where(d => string.IsNullOrWhiteSpace(d.ProductCode) ||
+                                     string.IsNullOrWhiteSpace(d.ProductCategory) ||
+                                     string.IsNullOrWhiteSpace(d.Phase) ||
+                                     string.IsNullOrWhiteSpace(d.NominalVoltage) ||
+                                     !d.DiameterMm.HasValue ||
+                                     !d.MinVoltage.HasValue ||
+                                     !d.MaxVoltage.HasValue ||
+                                     (d.Phase == "3~" && d.FileName != null && (d.FileName.Contains("8300100757") || d.FileName.Contains("VBH0280CSPFS")))).ToList();
 
-            var updates = new List<(string Id, string? ProductCode, string? ProductCategory)>();
+            var updates = new List<DocumentMetadataUpdate>();
+            int electricalCount = 0;
+
             foreach (var doc in docsToUpdate)
             {
                 if (string.IsNullOrWhiteSpace(doc.FileName)) continue;
 
-                var extractedProducts = codeParser.ExtractProductsFromText(doc.FileName);
-                var bestProduct = extractedProducts.FirstOrDefault();
-                if (bestProduct != null)
+                string? extractedText = null;
+
+                // Attempt to resolve file on disk to extract rich electrical specifications from tables
+                string? resolvedPath = null;
+                if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
                 {
-                    updates.Add((doc.Id, bestProduct.CleanCode, bestProduct.FanFamily.ToString()));
+                    resolvedPath = doc.FilePath;
                 }
+                else
+                {
+                    var urlName = Path.GetFileName(Uri.UnescapeDataString(doc.FilePath ?? string.Empty));
+                    var cleanName = Path.GetFileName(Uri.UnescapeDataString(doc.FileName ?? string.Empty));
+
+                    foreach (var dir in servedUploadDirectories)
+                    {
+                        if (!Directory.Exists(dir)) continue;
+
+                        if (!string.IsNullOrWhiteSpace(urlName))
+                        {
+                            var p1 = Path.Combine(dir, urlName);
+                            if (File.Exists(p1)) { resolvedPath = p1; break; }
+                        }
+                        if (!string.IsNullOrWhiteSpace(cleanName))
+                        {
+                            var p2 = Path.Combine(dir, cleanName);
+                            if (File.Exists(p2)) { resolvedPath = p2; break; }
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath))
+                {
+                    try
+                    {
+                        using var fileStream = new FileStream(resolvedPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        extractedText = await textExtractor.ExtractTextAsync(fileStream);
+                    }
+                    catch { }
+                }
+
+                if (string.IsNullOrWhiteSpace(extractedText) && vectorStore != null)
+                {
+                    try
+                    {
+                        var chunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).ToList();
+                        if (chunks.Count > 0)
+                        {
+                            extractedText = string.Join("\n", chunks.Take(4).Select(c => c.Text));
+                        }
+                    }
+                    catch { }
+                }
+
+                var extractedProducts = codeParser.ExtractProductsFromText(doc.FileName!);
+                if (extractedProducts.Count == 0 && !string.IsNullOrWhiteSpace(extractedText))
+                {
+                    extractedProducts = codeParser.ExtractProductsFromText(extractedText!.Substring(0, Math.Min(extractedText!.Length, 3000)));
+                }
+
+                var bestProduct = extractedProducts.FirstOrDefault();
+                var techMeta = TechnicalMetadataExtractor.Extract(extractedText, doc.FileName, bestProduct);
+
+                var productCode = techMeta.ProductCode ?? bestProduct?.CleanCode ?? doc.ProductCode;
+                var productCategory = techMeta.ProductCategory ?? bestProduct?.FanFamily.ToString() ?? doc.ProductCategory;
+                var phase = techMeta.Phase ?? doc.Phase;
+                var nominalVoltage = techMeta.NominalVoltage ?? doc.NominalVoltage;
+                var voltageRange = techMeta.VoltageRange ?? doc.VoltageRange;
+                var powerWatts = techMeta.PowerWatts ?? doc.PowerWatts;
+                var diameterMm = techMeta.DiameterMm ?? doc.DiameterMm ?? bestProduct?.ImpellerDiameterMm;
+
+                if (!string.IsNullOrWhiteSpace(phase) || !string.IsNullOrWhiteSpace(nominalVoltage) || powerWatts.HasValue)
+                {
+                    electricalCount++;
+                }
+
+                updates.Add(new DocumentMetadataUpdate(
+                    Id: doc.Id,
+                    ProductCode: productCode,
+                    ProductCategory: productCategory,
+                    Phase: phase,
+                    NominalVoltage: nominalVoltage,
+                    VoltageRange: voltageRange,
+                    PowerWatts: powerWatts,
+                    DiameterMm: diameterMm,
+                    MinVoltage: techMeta.MinVoltage ?? doc.MinVoltage,
+                    MaxVoltage: techMeta.MaxVoltage ?? doc.MaxVoltage
+                ));
             }
 
             if (updates.Count > 0)
@@ -183,7 +288,13 @@ public static class AdminEndpoints
                 TechnicalRagOrchestrator.InvalidateQueryCache();
             }
 
-            return Results.Ok(new { message = $"Gennemførte lyn-backfill af metadata. Opdaterede {updates.Count} ud af {docsToUpdate.Count} dokumenter uden metadata i én samlet transaktion." });
+            return Results.Ok(new
+            {
+                message = $"Gennemførte backfill af tekniske metadata for {updates.Count} dokumenter ({electricalCount} med registrerede elektriske specifikationer).",
+                totalExamined = allDocs.Count,
+                updatedDocuments = updates.Count,
+                electricalSpecsExtracted = electricalCount
+            });
         })
         .RequireAuthorization()
         .WithName("BackfillMetadata");

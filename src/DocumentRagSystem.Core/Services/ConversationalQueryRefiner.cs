@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
@@ -15,6 +16,11 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
     private readonly ILlmClient _llmClient;
     private readonly IEbmProductCodeParser _ebmParser;
     private readonly ILogger<ConversationalQueryRefiner>? _logger;
+
+    private static readonly HashSet<int> KnownEbmDiameters = new()
+    {
+        68, 92, 119, 133, 140, 160, 172, 175, 180, 190, 200, 206, 220, 225, 250, 280, 300, 310, 315, 355, 400, 450, 500, 560, 630, 710, 800, 910, 990
+    };
 
     public ConversationalQueryRefiner(
         ILlmClient llmClient,
@@ -89,6 +95,20 @@ Rules:
                 p.RawCode
             )).ToList();
 
+            var initialConstraints = new List<ConversationConstraint>();
+            var voltageFilter = ElectricalQueryExpander.ExtractVoltageFilter(userMessage);
+            if (voltageFilter != null)
+            {
+                initialConstraints.Add(new ConversationConstraint(
+                    Attribute: "voltage",
+                    Operator: "equals",
+                    Value: voltageFilter.RawMatch,
+                    Unit: voltageFilter.VoltageType,
+                    SourceTurn: 1,
+                    Status: "USER_CONSTRAINT"
+                ));
+            }
+
             stopwatch.Stop();
             _logger?.LogInformation(
                 "[QueryRefiner] Single-turn query detected (no prior context). Completed in {DurationMs}ms.",
@@ -100,9 +120,9 @@ Rules:
                 ResolvedQuestion: userMessage,
                 EffectiveQuestion: userMessage,
                 ActiveEntities: initialEntities,
-                ActiveConstraints: new List<ConversationConstraint>(),
+                ActiveConstraints: initialConstraints,
                 CandidateSet: null,
-                ConstraintsAdded: new List<ConversationConstraint>(),
+                ConstraintsAdded: initialConstraints,
                 ConstraintsRemoved: new List<ConversationConstraint>(),
                 ConstraintsReplaced: new List<ConstraintReplacement>(),
                 ReferencesResolved: new List<string>(),
@@ -111,6 +131,59 @@ Rules:
                 ClarificationReason: null,
                 NewTopic: true
             );
+        }
+
+        // Fast-path: Follow-up diameter refinement (e.g. "Ø280", "280", "280 mm", "Ø560")
+        var cleanMsg = userMessage.Trim();
+        var shortDiamMatch = Regex.Match(cleanMsg, @"^(?:Ø\s*|\b)(1[0-9]{2}|[2-9][0-9]{2})(?:\s*mm)?$", RegexOptions.IgnoreCase);
+        if (conversationState != null && shortDiamMatch.Success && int.TryParse(shortDiamMatch.Groups[1].Value, out var targetDiam))
+        {
+            bool hasExplicitDiameterUnit = cleanMsg.Contains('Ø') || cleanMsg.Contains("mm", StringComparison.OrdinalIgnoreCase);
+            bool isKnownEbmDiameter = KnownEbmDiameters.Contains(targetDiam);
+
+            if (hasExplicitDiameterUnit || isKnownEbmDiameter)
+            {
+                var baseQuestion = !string.IsNullOrWhiteSpace(conversationState.LastEffectiveQuestion)
+                    ? conversationState.LastEffectiveQuestion
+                    : "hvilke produkter kan vi tilbyde";
+
+                var effectiveQ = $"{baseQuestion} på Ø{targetDiam} mm";
+                var diamConstraint = new ConversationConstraint(
+                    Attribute: "diameter",
+                    Operator: "equals",
+                    Value: $"{targetDiam} mm",
+                    Unit: "mm",
+                    SourceTurn: conversationState.TurnCount + 1,
+                    Status: "USER_CONSTRAINT"
+                );
+
+                var combinedConstraints = new List<ConversationConstraint>(conversationState.ActiveConstraints);
+                combinedConstraints.RemoveAll(c => c.Attribute.Equals("diameter", StringComparison.OrdinalIgnoreCase));
+                combinedConstraints.Add(diamConstraint);
+
+                stopwatch.Stop();
+                _logger?.LogInformation(
+                    "[QueryRefiner] Fast-path short diameter refinement detected ({Diameter} mm). Effective question: \"{EffectiveQuestion}\".",
+                    targetDiam, effectiveQ);
+
+                return new QueryRefinementResult(
+                    OriginalQuestion: userMessage,
+                    RelationshipToPreviousTurn: TurnRelationship.Refines,
+                    ResolvedQuestion: effectiveQ,
+                    EffectiveQuestion: effectiveQ,
+                    ActiveEntities: conversationState.ActiveEntities,
+                    ActiveConstraints: combinedConstraints,
+                    CandidateSet: null,
+                    ConstraintsAdded: new List<ConversationConstraint> { diamConstraint },
+                    ConstraintsRemoved: new List<ConversationConstraint>(),
+                    ConstraintsReplaced: new List<ConstraintReplacement>(),
+                    ReferencesResolved: new List<string> { $"{userMessage.Trim()} -> diameter Ø{targetDiam} mm" },
+                    ContextUsed: new List<int> { conversationState.TurnCount },
+                    ClarificationRequired: false,
+                    ClarificationReason: null,
+                    NewTopic: false
+                );
+            }
         }
 
         // Fast-path: If user explicitly provided a new distinct ebm-papst product model and does not use ambiguous pronouns
@@ -174,7 +247,7 @@ Rules:
                 requireJson: true,
                 systemInstruction: SystemInstruction,
                 temperature: 0.0,
-                maxOutputTokens: 110);
+                maxOutputTokens: 400);
 
             var structuredRes = await _llmClient.GenerateStructuredAsync<QueryRefinementResult>(req);
             stopwatch.Stop();

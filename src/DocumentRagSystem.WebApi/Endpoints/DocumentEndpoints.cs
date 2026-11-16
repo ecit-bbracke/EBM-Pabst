@@ -20,8 +20,7 @@ public static class DocumentEndpoints
 {
     public static IEndpointRouteBuilder MapDocumentEndpoints(this IEndpointRouteBuilder app, IEnumerable<string> servedUploadDirectories)
     {
-        // DIRECT DOCUMENT FILE SERVE FALLBACK
-        app.MapGet("/uploads/{*filePath}", (string filePath) =>
+        IResult ServePdfFile(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return Results.NotFound();
 
@@ -81,9 +80,17 @@ public static class DocumentEndpoints
             }
 
             return Results.NotFound();
-        })
-        .RequireAuthorization()
-        .WithName("GetUploadedFile");
+        }
+
+        // Dedicated RESTful PDF download endpoint (Supports API Key and Cookie)
+        app.MapGet("/api/documents/download/{*filePath}", (string filePath) => ServePdfFile(filePath))
+            .RequireAuthorization("QueryPolicy")
+            .WithName("DownloadDocumentFile");
+
+        // DIRECT DOCUMENT FILE SERVE FALLBACK (Supports API Key and Cookie)
+        app.MapGet("/uploads/{*filePath}", (string filePath) => ServePdfFile(filePath))
+            .RequireAuthorization("QueryPolicy")
+            .WithName("GetUploadedFile");
 
         // GET ALL DOCUMENTS ENDPOINT (Supports pagination and filtering)
         app.MapGet("/api/documents", async (

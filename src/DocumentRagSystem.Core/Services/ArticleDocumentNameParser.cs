@@ -7,7 +7,7 @@ namespace DocumentRagSystem.Core.Services;
 public static class ArticleDocumentNameParser
 {
     private static readonly Regex ArtDocRegex = new(
-        @"^Art_(?<article>.+?)\s*[-_]\s*Doc_(?<doc>.+)$",
+        @"(?:^|_)Art_(?<article>.+?)\s*[-_]\s*Doc_(?<doc>.+)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex DataSheetPrefixRegex = new(
@@ -30,6 +30,9 @@ public static class ArticleDocumentNameParser
         var rawName = Path.GetFileNameWithoutExtension(fileName).Trim();
         if (string.IsNullOrWhiteSpace(rawName))
             return (null, null);
+
+        // Strip leading GUID / upload hash prefix if present (e.g. "473fb476-dd32-4bb7-a181-804a5953d421_")
+        rawName = Regex.Replace(rawName, @"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}_?", "");
 
         // 1. Primary Pattern: "Art_<articleid>-Doc_<documentid>"
         var artDocMatch = ArtDocRegex.Match(rawName);

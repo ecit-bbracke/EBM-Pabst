@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
+using DocumentRagSystem.Core.Services;
 
 namespace DocumentRagSystem.Infrastructure.Repositories;
 
@@ -19,18 +20,84 @@ public class InMemoryDocumentRepository : IDocumentRepository
         return Task.CompletedTask;
     }
 
-    public Task UpdateDocumentStatusAsync(string id, DocumentStatus status, string? errorMessage = null, string? language = null, string? productCode = null, string? productCategory = null)
+    public Task UpdateDocumentStatusAsync(
+        string id,
+        DocumentStatus status,
+        string? errorMessage = null,
+        string? language = null,
+        string? productCode = null,
+        string? productCategory = null,
+        string? phase = null,
+        string? nominalVoltage = null,
+        string? voltageRange = null,
+        int? powerWatts = null,
+        int? diameterMm = null,
+        int? minVoltage = null,
+        int? maxVoltage = null)
     {
         if (_documents.TryGetValue(id, out var doc))
         {
+            var minV = minVoltage ?? doc.MinVoltage;
+            var maxV = maxVoltage ?? doc.MaxVoltage;
+            var nom = nominalVoltage ?? doc.NominalVoltage;
+            var range = voltageRange ?? doc.VoltageRange;
+            if ((!minV.HasValue || !maxV.HasValue) && (!string.IsNullOrEmpty(nom) || !string.IsNullOrEmpty(range)))
+            {
+                var (cMin, cMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(nom, range);
+                minV ??= cMin;
+                maxV ??= cMax;
+            }
+
             _documents[id] = doc with
             {
                 Status = status,
                 ErrorMessage = errorMessage,
                 Language = language ?? doc.Language,
                 ProductCode = productCode ?? doc.ProductCode,
-                ProductCategory = productCategory ?? doc.ProductCategory
+                ProductCategory = productCategory ?? doc.ProductCategory,
+                Phase = phase ?? doc.Phase,
+                NominalVoltage = nom,
+                VoltageRange = range,
+                PowerWatts = powerWatts ?? doc.PowerWatts,
+                DiameterMm = diameterMm ?? doc.DiameterMm,
+                MinVoltage = minV,
+                MaxVoltage = maxV
             };
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task BatchUpdateMetadataAsync(IEnumerable<DocumentMetadataUpdate> updates)
+    {
+        if (updates == null) return Task.CompletedTask;
+        foreach (var u in updates)
+        {
+            if (_documents.TryGetValue(u.Id, out var doc))
+            {
+                var minV = u.MinVoltage ?? doc.MinVoltage;
+                var maxV = u.MaxVoltage ?? doc.MaxVoltage;
+                var nom = u.NominalVoltage ?? doc.NominalVoltage;
+                var range = u.VoltageRange ?? doc.VoltageRange;
+                if ((!minV.HasValue || !maxV.HasValue) && (!string.IsNullOrEmpty(nom) || !string.IsNullOrEmpty(range)))
+                {
+                    var (cMin, cMax) = TechnicalMetadataExtractor.ExtractVoltageBounds(nom, range);
+                    minV ??= cMin;
+                    maxV ??= cMax;
+                }
+
+                _documents[u.Id] = doc with
+                {
+                    ProductCode = u.ProductCode ?? doc.ProductCode,
+                    ProductCategory = u.ProductCategory ?? doc.ProductCategory,
+                    Phase = u.Phase ?? doc.Phase,
+                    NominalVoltage = nom,
+                    VoltageRange = range,
+                    PowerWatts = u.PowerWatts ?? doc.PowerWatts,
+                    DiameterMm = u.DiameterMm ?? doc.DiameterMm,
+                    MinVoltage = minV,
+                    MaxVoltage = maxV
+                };
+            }
         }
         return Task.CompletedTask;
     }
@@ -38,14 +105,7 @@ public class InMemoryDocumentRepository : IDocumentRepository
     public Task BatchUpdateMetadataAsync(IEnumerable<(string Id, string? ProductCode, string? ProductCategory)> updates)
     {
         if (updates == null) return Task.CompletedTask;
-        foreach (var (id, code, cat) in updates)
-        {
-            if (_documents.TryGetValue(id, out var doc))
-            {
-                _documents[id] = doc with { ProductCode = code, ProductCategory = cat };
-            }
-        }
-        return Task.CompletedTask;
+        return BatchUpdateMetadataAsync(updates.Select(u => new DocumentMetadataUpdate(u.Id, u.ProductCode, u.ProductCategory)));
     }
 
     public Task<Document?> GetDocumentByIdAsync(string id)
@@ -57,6 +117,25 @@ public class InMemoryDocumentRepository : IDocumentRepository
     public Task<IEnumerable<Document>> GetAllDocumentsAsync()
     {
         return Task.FromResult<IEnumerable<Document>>(_documents.Values.OrderByDescending(d => d.UploadedAt).ToList());
+    }
+
+    public Task<IEnumerable<Document>> GetDocumentsByElectricalFilterAsync(string? requiredPhase, int? targetVoltage = null)
+    {
+        var filter = new ElectricalFilter(requiredPhase, targetVoltage, null, string.Empty);
+        var matches = _documents.Values
+            .Where(d =>
+            {
+                if (targetVoltage.HasValue && d.MinVoltage.HasValue && d.MaxVoltage.HasValue)
+                {
+                    bool phaseMatch = string.IsNullOrWhiteSpace(requiredPhase) ||
+                        string.Equals(ElectricalFilter.NormalizePhase(d.Phase), ElectricalFilter.NormalizePhase(requiredPhase), StringComparison.OrdinalIgnoreCase);
+                    return phaseMatch && targetVoltage.Value >= d.MinVoltage.Value && targetVoltage.Value <= d.MaxVoltage.Value;
+                }
+                return filter.Matches(d.Phase, d.NominalVoltage, d.VoltageRange);
+            })
+            .OrderByDescending(d => d.UploadedAt)
+            .ToList();
+        return Task.FromResult<IEnumerable<Document>>(matches);
     }
 
     public Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null)

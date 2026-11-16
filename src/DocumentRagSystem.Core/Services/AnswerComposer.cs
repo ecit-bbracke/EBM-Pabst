@@ -178,6 +178,7 @@ public class AnswerComposer : IAnswerComposer
               * You must NEVER invent, fabricate, or assume technical specifications (such as airflow m³/h, pressure Pa, power W, voltage V, current A, speed rpm, sound dB, weight kg) that are not present in the Context chunks.
               * If the user asks for a comparison of multiple models or asks about models where one or more are not found in the Context chunks, explicitly state in the response language which model(s) are documented and which model(s) lack datasheets in the catalog.
               * You may explain what can be decoded from the ebm-papst product code key (e.g. fan type, motor technology, diameter), but clearly clarify that operating specifications for the missing model are not documented in the catalog.
+              * NO HALLUCINATED MODEL VARIANTS: NEVER fabricate fictitious model names by swapping letters in the query model code. Centrifugal RadiPac K3G models are replaced by the new generation 8300-series RadiPac modules with matching diameter and voltage form, NOT by made-up model variants.
             - Keep simple questions simple. For complex questions, make the reasoning auditable.
             """;
     }
@@ -274,11 +275,19 @@ public class AnswerComposer : IAnswerComposer
         if (isReplacement)
         {
             sb.AppendLine("- **Replacement / Substitution Queries**:");
-            sb.AppendLine("  1. State original model's decoded specifications (Type, EC/AC, Diameter, Airflow direction).");
-            sb.AppendLine("  2. If no direct local database match exists, state this clearly.");
-            sb.AppendLine("  3. Proactively provide concrete ebm-papst series options (e.g. S-series with guard grille, W-series in wall ring) from the Specialized Workflow Analysis.");
-            sb.AppendLine("  4. Highlight critical compatibility requirements (diameter, airflow direction A/V, motor technology).");
-            sb.AppendLine("  5. Do NOT discuss unrelated models unless directly asked.");
+            sb.AppendLine("  1. State original model's decoded and documented specifications (Type, EC/AC, Diameter, Airflow direction, Voltage, Power W, Speed rpm, Airflow m³/h, Pressure Pa).");
+            sb.AppendLine("  2. DIRECT DROP-IN REPLACEMENT FIRST & PROMINENT: ALWAYS feature the direct drop-in replacement (matching diameter, voltage, and nearest power) FIRST and PROMINENTLY. Present its concrete technical specifications (nominal voltage, power consumption W, speed rpm, airflow m³/h, pressure Pa) and explicitly cite the documented datasheet.");
+            sb.AppendLine("  3. DO NOT ASK USER TO READ NAMEPLATE WHEN DATA IS IN DATASHEETS: Do NOT tell the user to read the nameplate on the fan for voltage, power, or RPM when the technical specifications are already documented in the datasheets in Context chunks. Present the documented values directly!");
+            sb.AppendLine("  4. DO NOT DISCUSS UNREQUESTED INCOMPATIBLE MODELS: If a model has lower airflow/pressure or different aerodynamic geometry and is not a direct replacement, do NOT dedicate sections or comparison tables to it unless the user explicitly asked about that specific model. Focus your answer on the direct drop-in replacement from the database or catalog.");
+            sb.AppendLine("  5. NO OVERSHADOWING BY PARTIAL REPLACEMENTS: NEVER let a 'delvis erstatning' (such as replacing only the motorized impeller without the frame) dominate the response or become the main topic. A partial replacement / rebuild must ONLY be mentioned as a brief secondary note at the very end, and you must clearly explain that it requires reusing the old frame.");
+            sb.AppendLine("  6. If a direct local database match or documented candidate exists, emphasize it as the primary solution and deliver its specifications from the datasheet.");
+            sb.AppendLine("  6. Electrical Supply Matching: Replacements must use the same supply form (1~ 230 VAC vs 3~ 400 VAC vs DC 12/24/48V). Never present a 400 VAC 3-phase fan as a direct drop-in for a 230 VAC fan without explicitly pointing out the electrical incompatibility.");
+            sb.AppendLine("  7. Power Consumption (W) Proximity: Prioritize replacements whose nominal power consumption (W) is as close to the original model as possible (e.g. for a 750W model, an 800W fan is a vastly superior replacement compared to an over-dimensioned 1300W fan).");
+            sb.AppendLine("  8. Dimensional Matching: Diameter and mounting footprint must match as closely as possible.");
+            sb.AppendLine("  9. Alternative Options with Full Disclosure: You may suggest alternative replacement models if an optimal drop-in is unavailable, BUT you MUST explicitly state and explain all differences (e.g. supply voltage/phase differences, wattage differences, dimensions).");
+            sb.AppendLine("  10. Proactively provide concrete ebm-papst series options (e.g. S-series with guard grille, W-series in wall ring, 8300-series RadiPac) from the Specialized Workflow Analysis.");
+            sb.AppendLine("  11. Highlight critical compatibility requirements (diameter, airflow direction A/V, motor technology, voltage/phase).");
+            sb.AppendLine("  12. Do NOT discuss unrelated models unless directly asked.");
         }
 
         var ecReplacements = EcReplacementAdvisor.FindEcReplacements(ebmProducts);

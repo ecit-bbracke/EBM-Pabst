@@ -422,4 +422,76 @@ public class ConversationalQueryRefinerTests
         // Verify LLM was NOT invoked
         mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
+
+    [Fact]
+    public async Task FollowUp_ShortDiameter_ShouldRefineWithPriorTurn()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var refiner = new ConversationalQueryRefiner(mockLlm.Object);
+        var state = new ConversationState(
+            ConversationId: "conv-followup",
+            Topic: "catalog query",
+            ActiveEntities: new List<ConversationEntity>(),
+            ActiveConstraints: new List<ConversationConstraint>
+            {
+                new("voltage", "equals", "3X230 VAC", "VAC", 1)
+            },
+            LastEffectiveQuestion: "hvilke produkter i 3X230 VAC kan vi tilbyde",
+            TurnCount: 1
+        );
+
+        // Act - user asks "Ø280 " to narrow down
+        var result = await refiner.RefineQueryAsync("Ø280 ", state);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(TurnRelationship.Refines, result.RelationshipToPreviousTurn);
+        Assert.Equal("hvilke produkter i 3X230 VAC kan vi tilbyde på Ø280 mm", result.EffectiveQuestion);
+        Assert.Contains(result.ActiveConstraints, c => c.Attribute == "voltage" && c.Value == "3X230 VAC");
+        Assert.Contains(result.ActiveConstraints, c => c.Attribute == "diameter" && c.Value == "280 mm");
+
+        // Verify LLM was NOT invoked (deterministic fast-path)
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefineQueryAsync_WithBareVoltageNumber230_ShouldNotTreatAsDiameter()
+    {
+        var mockLlm = new Mock<ILlmService>();
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync("""
+            {
+              "relationship_to_previous_turn": "Refines",
+              "effective_question": "hvilke produkter kører på 230 V",
+              "resolved_question": "hvilke produkter kører på 230 V",
+              "active_entities": [],
+              "active_constraints": [
+                {
+                  "attribute": "voltage",
+                  "operator": "equals",
+                  "value": "230 V",
+                  "unit": "V",
+                  "status": "USER_CONSTRAINT"
+                }
+              ]
+            }
+            """);
+
+        var refiner = new ConversationalQueryRefiner(mockLlm.Object);
+        var state = new ConversationState(
+            ConversationId: "conv-1",
+            Topic: "general",
+            ActiveEntities: new List<ConversationEntity>(),
+            ActiveConstraints: new List<ConversationConstraint>(),
+            LastEffectiveQuestion: "hvilke produkter kan vi tilbyde",
+            TurnCount: 1
+        );
+
+        var result = await refiner.RefineQueryAsync("230", state);
+
+        // Assert: 230 is a voltage, NOT an ebm-papst diameter, so it must NOT trigger diameter fast-path
+        Assert.DoesNotContain(result.ActiveConstraints, c => c.Attribute == "diameter" && c.Value == "230 mm");
+        mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Once);
+    }
 }

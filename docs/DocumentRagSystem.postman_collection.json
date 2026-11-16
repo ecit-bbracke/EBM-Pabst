@@ -23,12 +23,22 @@
     },
     {
       "key": "apiKey",
-      "value": "ebm-secret-api-key-change-me",
+      "value": "ebm-rag-secret-api-key-2026",
       "type": "string"
     },
     {
       "key": "conversationId",
       "value": "postman_session_1",
+      "type": "string"
+    },
+    {
+      "key": "pdfDownloadUrl",
+      "value": "/api/documents/download/sample.pdf",
+      "type": "string"
+    },
+    {
+      "key": "pdfFileName",
+      "value": "sample.pdf",
       "type": "string"
     }
   ],
@@ -116,7 +126,44 @@
           }
         },
         {
-          "name": "2.2 Query Documents (JSON Svar med Base64 PDF filer)",
+          "name": "2.2 Query Documents (Svar + Direkte PDF Download Links)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const data = pm.response.json();",
+                  "pm.test(\"Contains plain text response\", function () {",
+                  "    pm.expect(data.response).to.be.a('string').and.not.empty;",
+                  "});",
+                  "",
+                  "if (data.files && data.files.length > 0) {",
+                  "    pm.test(\"Contains file list with download URLs\", function () {",
+                  "        pm.expect(data.files).to.be.an('array').and.not.empty;",
+                  "    });",
+                  "",
+                  "    const firstFile = data.files[0];",
+                  "    const targetDownloadUrl = firstFile.downloadUrl || (firstFile.url ? firstFile.url.split('#')[0] : null);",
+                  "    if (targetDownloadUrl) {",
+                  "        pm.collectionVariables.set(\"pdfDownloadUrl\", targetDownloadUrl);",
+                  "        pm.collectionVariables.set(\"pdfFileName\", firstFile.name);",
+                  "        console.log(`✅ Næste PDF download klar: {{baseUrl}}${targetDownloadUrl}`);",
+                  "    }",
+                  "",
+                  "    data.files.forEach(function(file, i) {",
+                  "        const pages = file.pages ? file.pages.join(', ') : 'alle';",
+                  "        console.log(`[Fil ${i + 1}] ${file.name} | Sider: [${pages}] | Download URL: ${file.downloadUrl}`);",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -132,14 +179,52 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"question\": \"Hvad er driftsspændingen og maksimalt omdrejningstal for K3G355HA3401?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"mode\": \"json\"\n}"
+              "raw": "{\n  \"question\": \"Er K3G560PC0401 kompatibel med 400V?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"mode\": \"json\",\n  \"includeBase64\": false\n}"
             },
             "url": "{{baseUrl}}/api/query",
-            "description": "JSON mode: Returnerer { response: '...', files: [{ name: '...', content: 'base64...' }] }, hvor samtlige kilde-PDF datablade er Base64-indkapslet direkte i svaret."
+            "description": "### 🚀 Hent Svar + Direkte PDF Download Links (Uden Base64 Bloat)\n\nForespørger systemet og modtager et rent JSON-svar med svarteksten samt en liste over matchende PDF-dokumenter med direkte `downloadUrl`.\n\nVed at sætte `\"includeBase64\": false` undgås 1+ MB Base64-payload i svaret. I stedet gemmes den direkte download-sti automatisk i variablen `{{pdfDownloadUrl}}`, så den næste request (**`2.3 Download PDF fra Query Resultat`**) kan downloade PDF'en direkte som binær fil."
           }
         },
         {
-          "name": "2.3 Query Documents (SSE Stream)",
+          "name": "2.3 Download PDF fra Query Resultat",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}{{pdfDownloadUrl}}",
+            "description": "### 📥 Direkte Download af PDF fra Forespørgsel\n\nDownloader den matchende PDF fundet i forespørgslen (2.2) direkte som binær fil via API-nøglen `X-API-KEY: {{apiKey}}`.\n\n**Sådan gemmer du filen i Postman:**\n1. Kør først `2.2 Query Documents` (sætter automatisk `{{pdfDownloadUrl}}`).\n2. Klik på pilen `▼` ved siden af den blå **Send**-knap i denne request.\n3. Vælg **'Send and Download'**.\n4. Postman gemmer den ægte PDF direkte på din computer!"
+          }
+        },
+        {
+          "name": "2.4 Query Documents (JSON med Base64 PDF-filer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Er K3G560PC0401 kompatibel med 400V?\",\n  \"conversationId\": \"{{conversationId}}\",\n  \"mode\": \"json\",\n  \"pages\": \"cited\",\n  \"includeBase64\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/query",
+            "description": "JSON mode med Base64-indkapslede filer. Sæt `pages: 'cited'` for kun at modtage citerede sider (~87% reduktion)."
+          }
+        },
+        {
+          "name": "2.5 Query Documents (SSE Stream)",
           "request": {
             "method": "POST",
             "header": [
@@ -319,12 +404,18 @@
           }
         },
         {
-          "name": "4.5 Download / View PDF",
+          "name": "4.5 Download PDF Document",
           "request": {
             "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/uploads/sample.pdf",
-            "description": "Downloader eller fremviser PDF-fil. Kræver browser login-cookie (API-key-only afvises med 403 Forbidden af sikkerhedshensyn)."
+            "header": [
+              {
+                "key": "X-API-KEY",
+                "value": "{{apiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/download/sample.pdf",
+            "description": "Downloader det fulde eller citerede PDF-dokument direkte som rå binær fil. Understøtter nu både API-nøgle (`X-API-KEY: {{apiKey}}`) og browser login-cookie.\n\nBrug 'Send and Download' i Postman (pilen ved siden af Send) for at gemme PDF'en direkte på din computer uden Base64-overhead.\n\n*Bemærk: Den ældre sti `{{baseUrl}}/uploads/{fileName}` understøttes også fortsat som synonym.*"
           }
         }
       ]

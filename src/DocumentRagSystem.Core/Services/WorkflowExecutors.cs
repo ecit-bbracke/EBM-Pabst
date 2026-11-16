@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
@@ -65,8 +66,41 @@ internal static class CatalogCacheHelper
         foreach (var doc in allDocsDict.Values)
         {
             var docName = !string.IsNullOrWhiteSpace(doc.FileName) ? doc.FileName : doc.Id;
-            var extracted = ebmParser.ExtractProductsFromText(docName);
-            catalogProducts.AddRange(extracted);
+            var combinedText = $"{docName} {doc.ProductCode} {doc.ArticleId}".Trim();
+            var extracted = ebmParser.ExtractProductsFromText(combinedText);
+            if (extracted.Count > 0)
+            {
+                foreach (var prod in extracted)
+                {
+                    var enrichedProd = prod;
+                    if (!enrichedProd.ImpellerDiameterMm.HasValue && doc.DiameterMm.HasValue)
+                    {
+                        enrichedProd = enrichedProd with { ImpellerDiameterMm = doc.DiameterMm.Value };
+                    }
+                    if (doc.Phase != null)
+                    {
+                        var powerStr = doc.PowerWatts.HasValue ? $" ({doc.PowerWatts.Value} W)" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(doc.NominalVoltage) ? $" {doc.NominalVoltage}" : "";
+                        enrichedProd = enrichedProd with { PhaseDescription = $"{doc.Phase}{voltStr}{powerStr}".Trim() };
+                    }
+                    catalogProducts.Add(enrichedProd);
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.ProductCode) && ebmParser.TryParse(doc.ProductCode, out var singleProd))
+            {
+                var enrichedProd = singleProd;
+                if (!enrichedProd.ImpellerDiameterMm.HasValue && doc.DiameterMm.HasValue)
+                {
+                    enrichedProd = enrichedProd with { ImpellerDiameterMm = doc.DiameterMm.Value };
+                }
+                if (doc.Phase != null)
+                {
+                    var powerStr = doc.PowerWatts.HasValue ? $" ({doc.PowerWatts.Value} W)" : "";
+                    var voltStr = !string.IsNullOrWhiteSpace(doc.NominalVoltage) ? $" {doc.NominalVoltage}" : "";
+                    enrichedProd = enrichedProd with { PhaseDescription = $"{doc.Phase}{voltStr}{powerStr}".Trim() };
+                }
+                catalogProducts.Add(enrichedProd);
+            }
         }
 
         _cache[cacheKey] = (DateTime.UtcNow, allDocsDict, catalogProducts);
@@ -302,7 +336,85 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
             var sourceProduct = ebmProducts[0];
             var (allDocsDict, catalogProducts) = await CatalogCacheHelper.GetCatalogDocumentsAndProductsAsync(vectorStore, _documentRepository, _ebmParser);
 
+            // Enrich source product with physical/electrical specs from database if available
+            var matchingSourceDoc = allDocsDict.Values.FirstOrDefault(d =>
+                (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.Equals(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)));
+
+            if (matchingSourceDoc != null)
+            {
+                if (!sourceProduct.ImpellerDiameterMm.HasValue && matchingSourceDoc.DiameterMm.HasValue)
+                {
+                    sourceProduct = sourceProduct with { ImpellerDiameterMm = matchingSourceDoc.DiameterMm.Value };
+                }
+                if (matchingSourceDoc.PowerWatts.HasValue && (sourceProduct.PhaseDescription == null || !sourceProduct.PhaseDescription.Contains(" W")))
+                {
+                    var voltStr = !string.IsNullOrWhiteSpace(matchingSourceDoc.NominalVoltage) ? $" {matchingSourceDoc.NominalVoltage}" : "";
+                    var phaseStr = matchingSourceDoc.Phase ?? sourceProduct.PhaseDescription ?? "";
+                    sourceProduct = sourceProduct with { PhaseDescription = $"{phaseStr}{voltStr} ({matchingSourceDoc.PowerWatts.Value} W)".Trim() };
+                }
+            }
+
             replacementAnalysis = _ebmParser.AnalyzeReplacements(sourceProduct, catalogProducts);
+
+            // 1. Directly fetch chunks for the source product from local database if available
+            var sourceDocs = allDocsDict.Values
+                .Where(d => (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                            (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                            (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            foreach (var doc in sourceDocs)
+            {
+                try
+                {
+                    var docChunks = (await vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1, 2, 3 })).ToList();
+                    if (docChunks.Count == 0)
+                    {
+                        docChunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).Take(4).ToList();
+                    }
+                    var enrichedChunks = docChunks.Select(c => c with
+                    {
+                        FileName = !string.IsNullOrWhiteSpace(c.FileName) ? c.FileName : doc.FileName,
+                        FilePath = !string.IsNullOrWhiteSpace(c.FilePath) ? c.FilePath : doc.FilePath,
+                        ArticleId = !string.IsNullOrWhiteSpace(c.ArticleId) ? c.ArticleId : sourceProduct.CleanCode
+                    }).ToList();
+                    allChunks.AddRange(enrichedChunks);
+                }
+                catch { }
+            }
+
+            // 2. Directly fetch chunks for top matched database candidates (prioritizing closest drop-ins)
+            foreach (var match in replacementAnalysis.MatchedDatabaseCandidates.Take(3))
+            {
+                var candidateDocs = allDocsDict.Values
+                    .Where(d => (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(match.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(match.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.Contains(match.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                foreach (var doc in candidateDocs)
+                {
+                    try
+                    {
+                        var docChunks = (await vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1, 2, 3 })).ToList();
+                        if (docChunks.Count == 0)
+                        {
+                            docChunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).Take(4).ToList();
+                        }
+                        var enrichedChunks = docChunks.Select(c => c with
+                        {
+                            FileName = !string.IsNullOrWhiteSpace(c.FileName) ? c.FileName : doc.FileName,
+                            FilePath = !string.IsNullOrWhiteSpace(c.FilePath) ? c.FilePath : doc.FilePath,
+                            ArticleId = !string.IsNullOrWhiteSpace(c.ArticleId) ? c.ArticleId : match.CleanCode
+                        }).ToList();
+
+                        allChunks.AddRange(enrichedChunks);
+                    }
+                    catch { }
+                }
+            }
 
             // Fetch source chunks and candidate chunks in parallel
             var searchTasks = new List<Task<IEnumerable<DocumentChunk>>>
@@ -310,15 +422,47 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 vectorStore.SearchAsync($"{sourceProduct.RawCode} {sourceProduct.CleanCode} specifications")
             };
 
-            foreach (var match in replacementAnalysis.MatchedDatabaseCandidates)
+            foreach (var match in replacementAnalysis.MatchedDatabaseCandidates.Take(3))
             {
                 searchTasks.Add(vectorStore.SearchAsync($"{match.RawCode} {match.CleanCode} specifications"));
+            }
+
+            // Proactively search for recommended theoretical series from vector store / catalog
+            if (sourceProduct.FanFamily == FanFamilyType.Centrifugal && sourceProduct.CleanCode.StartsWith("K"))
+            {
+                var diam = sourceProduct.ImpellerDiameterMm;
+                if (diam.HasValue)
+                {
+                    searchTasks.Add(vectorStore.SearchAsync($"8300 {diam.Value} RadiPac specifications"));
+                }
+            }
+            else if (sourceProduct.FanFamily == FanFamilyType.Axial && sourceProduct.Technology == MotorTechnology.AC)
+            {
+                var diam = sourceProduct.ImpellerDiameterMm;
+                if (diam.HasValue)
+                {
+                    searchTasks.Add(vectorStore.SearchAsync($"S3G {diam.Value} W3G specifications"));
+                }
             }
 
             var searchResults = await Task.WhenAll(searchTasks);
             foreach (var res in searchResults)
             {
                 allChunks.AddRange(res);
+            }
+
+            // Purge chunks from clearly incompatible dimensions when replacing a fan with defined diameter
+            if (sourceProduct.ImpellerDiameterMm.HasValue)
+            {
+                var targetDiam = sourceProduct.ImpellerDiameterMm.Value;
+                allChunks.RemoveAll(c =>
+                {
+                    if (allDocsDict.TryGetValue(c.DocumentId, out var doc) && doc.DiameterMm.HasValue)
+                    {
+                        return Math.Abs(doc.DiameterMm.Value - targetDiam) > 50;
+                    }
+                    return false;
+                });
             }
 
             allChunks = allChunks.GroupBy(c => c.Id).Select(g => g.First()).ToList();
@@ -353,7 +497,9 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
             };
 
             var overallStatus = replacementAnalysis.MatchedDatabaseCandidates.Count > 0 ? "COMPATIBLE" : "CONDITIONAL";
-            var overallReason = replacementAnalysis.Summary;
+            var overallReason = replacementAnalysis.MatchedDatabaseCandidates.Count > 0
+                ? $"Fandt {replacementAnalysis.MatchedDatabaseCandidates.Count} direkte erstatningskandidat(er) i databasen: {string.Join(", ", replacementAnalysis.MatchedDatabaseCandidates.Select(m => m.RawCode))}."
+                : replacementAnalysis.Summary;
 
             var draftSb = new StringBuilder();
             draftSb.AppendLine($"### Erstatnings- og kompatibilitetsanalyse for {sourceProduct.RawCode}\n");
@@ -370,8 +516,10 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 draftSb.AppendLine("#### Direkte erstatningsmodeller i databasen:");
                 foreach (var match in replacementAnalysis.MatchedDatabaseCandidates)
                 {
-                    draftSb.AppendLine($"- **{match.RawCode}**: {match.CleanCode} (Ø{match.ImpellerDiameterMm} mm, {match.MotorDescription}, {match.AirflowDescription})");
+                    var phaseStr = !string.IsNullOrWhiteSpace(match.PhaseDescription) ? $", {match.PhaseDescription}" : "";
+                    draftSb.AppendLine($"- **{match.RawCode}**: {match.CleanCode} (Ø{match.ImpellerDiameterMm} mm, {match.MotorDescription}{phaseStr}, {match.AirflowDescription})");
                 }
+                draftSb.AppendLine("\n*Bemærk: Ovenstående model(ler) findes i systemets datablade og udgør den optimale direkte drop-in erstatning.*");
                 draftSb.AppendLine();
             }
             else
@@ -813,7 +961,10 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
                             DiameterMm: prod.ImpellerDiameterMm,
                             Airflow: prod.AirflowDescription,
                             DocumentSource: docName,
-                            ParsedInfo: prod
+                            ParsedInfo: prod,
+                            Phase: doc.Phase,
+                            NominalVoltage: doc.NominalVoltage,
+                            VoltageRange: doc.VoltageRange
                         ));
                     }
                 }
@@ -830,7 +981,10 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
                         DiameterMm: null,
                         Airflow: "Se datablad",
                         DocumentSource: docName,
-                        ParsedInfo: null
+                        ParsedInfo: null,
+                        Phase: doc.Phase,
+                        NominalVoltage: doc.NominalVoltage,
+                        VoltageRange: doc.VoltageRange
                     ));
                 }
             }
@@ -875,72 +1029,350 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
             Categories: categorizedGroups
         );
 
-        var isDanish = question.Contains("hvilk", StringComparison.OrdinalIgnoreCase) ||
-                       question.Contains("hvad", StringComparison.OrdinalIgnoreCase) ||
-                       question.Contains("findes", StringComparison.OrdinalIgnoreCase) ||
-                       question.Contains("modeller", StringComparison.OrdinalIgnoreCase) ||
-                       question.Contains("alle", StringComparison.OrdinalIgnoreCase);
+        var lang = ResolveLanguage(question);
+        var voltageFilter = ElectricalQueryExpander.ExtractVoltageFilter(question);
+        List<CatalogItem>? filteredItems = null;
+        if (voltageFilter != null)
+        {
+            filteredItems = catalogItems.Where(i => voltageFilter.Matches(i.Phase, i.NominalVoltage, i.VoltageRange)).ToList();
+        }
+
+        // Generic Diameter Filter (e.g. "Ø280", "280 mm", "diameter 280", "størrelse 280" - never bare "på <number>" as that matches "på 230 V")
+        var diamMatch = Regex.Match(question, @"(?:Ø\s*(\d{3})\b|\b(\d{3})\s*mm\b|\b(?:størrelse|diameter|hjul)\s*(?:Ø)?\s*(\d{3})\b)", RegexOptions.IgnoreCase);
+        int? targetDiameter = null;
+        if (diamMatch.Success)
+        {
+            var val = !string.IsNullOrWhiteSpace(diamMatch.Groups[1].Value) ? diamMatch.Groups[1].Value
+                    : (!string.IsNullOrWhiteSpace(diamMatch.Groups[2].Value) ? diamMatch.Groups[2].Value : diamMatch.Groups[3].Value);
+            if (int.TryParse(val, out var d)) targetDiameter = d;
+        }
+
+        if (targetDiameter.HasValue)
+        {
+            var candidatesToFilter = filteredItems ?? catalogItems;
+            filteredItems = candidatesToFilter.Where(i => i.DiameterMm == targetDiameter.Value).ToList();
+        }
+
+        bool hasFilter = voltageFilter != null || targetDiameter.HasValue;
+        string filterHeadingDa = "";
+        string filterHeadingDe = "";
+        string filterHeadingEn = "";
+
+        if (voltageFilter != null && targetDiameter.HasValue)
+        {
+            filterHeadingDa = $"{voltageFilter.RawMatch} og Ø{targetDiameter.Value} mm";
+            filterHeadingDe = $"{voltageFilter.RawMatch} und Ø{targetDiameter.Value} mm";
+            filterHeadingEn = $"{voltageFilter.RawMatch} and Ø{targetDiameter.Value} mm";
+        }
+        else if (voltageFilter != null)
+        {
+            filterHeadingDa = voltageFilter.RawMatch;
+            filterHeadingDe = voltageFilter.RawMatch;
+            filterHeadingEn = voltageFilter.RawMatch;
+        }
+        else if (targetDiameter.HasValue)
+        {
+            filterHeadingDa = $"Ø{targetDiameter.Value} mm";
+            filterHeadingDe = $"Ø{targetDiameter.Value} mm";
+            filterHeadingEn = $"Ø{targetDiameter.Value} mm";
+        }
 
         var draftSb = new StringBuilder();
-        if (isDanish)
+        if (lang == ContentLanguage.Danish)
         {
-            draftSb.AppendLine("### ebm-papst Ventilator- og Produktoversigt\n");
-            draftSb.AppendLine($"Systemet indeholder **{catalogResult.TotalModels} modeller** fordelt over **{catalogResult.TotalDocuments} datablade/dokumenter**:\n");
-
-            foreach (var (category, items) in catalogResult.Categories)
+            if (hasFilter)
             {
-                draftSb.AppendLine($"#### {category} ({items.Count} modeller)");
-                var displayItems = items.Take(15).ToList();
-                foreach (var item in displayItems)
+                draftSb.AppendLine($"### ebm-papst modeller til {filterHeadingDa}\n");
+                if (filteredItems != null && filteredItems.Count > 0)
                 {
-                    var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
-                    var airflowStr = !string.IsNullOrWhiteSpace(item.Airflow) ? $", {item.Airflow}" : "";
-                    draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{airflowStr} *(Kilde: {item.DocumentSource})*");
+                    draftSb.AppendLine($"Følgende **{filteredItems.Count} model(ler)** i kataloget matcher kriterierne:\n");
+                    var displayFiltered = filteredItems.Take(20).ToList();
+                    foreach (var item in displayFiltered)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        var rangeStr = !string.IsNullOrWhiteSpace(item.VoltageRange) ? $" (område: {item.VoltageRange})" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{voltStr}{rangeStr} *(Kilde: {item.DocumentSource})*");
+                    }
+                    if (filteredItems.Count > 20)
+                    {
+                        draftSb.AppendLine($"- *... og {filteredItems.Count - 20} yderligere modeller i kataloget, der matcher kriterierne.*");
+                        draftSb.AppendLine("\n> **Tip**: Du kan indsnævre listen ved at angive en specifik diameter (f.eks. Ø280, Ø400, Ø560 mm) eller ønsket luftmængde (m³/t).");
+                    }
+                    draftSb.AppendLine();
                 }
-                if (items.Count > 15)
+                else
                 {
-                    draftSb.AppendLine($"- *... og {items.Count - 15} yderligere modeller i denne kategori.*");
+                    draftSb.AppendLine($"Der findes p.t. ingen dokumenterede modeller i den lokale database, der matcher kriterierne for {filterHeadingDa}.\n");
                 }
-                draftSb.AppendLine();
             }
+            else
+            {
+                draftSb.AppendLine("### ebm-papst Ventilator- og Produktoversigt\n");
+                draftSb.AppendLine($"Systemet indeholder **{catalogResult.TotalModels} modeller** fordelt over **{catalogResult.TotalDocuments} datablade/dokumenter**:\n");
 
-            draftSb.AppendLine("#### Typenøgle og Parametre");
-            draftSb.AppendLine("- **Ventilatortype**: 1. bogstav (A = Aksial grundmodel, S = med beskyttelsesgitter, W = i vægring, R = Løst centrifugalhjul, K = RadiPac i ramme, G/D = Sneglehus).");
-            draftSb.AppendLine("- **Motorteknologi**: 2.-3. tegn (3G = EC energieffektiv motor; AC angiver poltal og 1~ 230V / 3~ 400V).");
-            draftSb.AppendLine("- **Diameter**: 4.-6. ciffer angiver impellerdiameter i mm.");
-            draftSb.AppendLine("- **Luftretning (Aksial)**: 12. ciffer (lige = Luftretning A, ulige = Luftretning V).");
+                foreach (var (category, items) in catalogResult.Categories)
+                {
+                    draftSb.AppendLine($"#### {category} ({items.Count} modeller)");
+                    var displayItems = items.Take(15).ToList();
+                    foreach (var item in displayItems)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var airflowStr = !string.IsNullOrWhiteSpace(item.Airflow) ? $", {item.Airflow}" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{airflowStr}{voltStr} *(Kilde: {item.DocumentSource})*");
+                    }
+                    if (items.Count > 15)
+                    {
+                        draftSb.AppendLine($"- *... og {items.Count - 15} yderligere modeller i denne kategori.*");
+                    }
+                    draftSb.AppendLine();
+                }
+
+                draftSb.AppendLine("#### Typenøgle og Parametre");
+                draftSb.AppendLine("- **Ventilatortype**: 1. bogstav (A = Aksial grundmodel, S = med beskyttelsesgitter, W = i vægring, R = Løst centrifugalhjul, K = RadiPac i ramme, G/D = Sneglehus).");
+                draftSb.AppendLine("- **Motorteknologi**: 2.-3. tegn (3G = EC energieffektiv motor; AC angiver poltal og 1~ 230V / 3~ 400V).");
+                draftSb.AppendLine("- **Diameter**: 4.-6. ciffer angiver impellerdiameter i mm.");
+                draftSb.AppendLine("- **Luftretning (Aksial)**: 12. ciffer (lige = Luftretning A, ulige = Luftretning V).");
+            }
+        }
+        else if (lang == ContentLanguage.German)
+        {
+            if (hasFilter)
+            {
+                draftSb.AppendLine($"### ebm-papst Modelle für {filterHeadingDe}\n");
+                if (filteredItems != null && filteredItems.Count > 0)
+                {
+                    draftSb.AppendLine($"Folgende **{filteredItems.Count} Modell(e)** im Katalog entsprechen den Kriterien:\n");
+                    var displayFiltered = filteredItems.Take(20).ToList();
+                    foreach (var item in displayFiltered)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        var rangeStr = !string.IsNullOrWhiteSpace(item.VoltageRange) ? $" (Bereich: {item.VoltageRange})" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{voltStr}{rangeStr} *(Quelle: {item.DocumentSource})*");
+                    }
+                    if (filteredItems.Count > 20)
+                    {
+                        draftSb.AppendLine($"- *... und {filteredItems.Count - 20} weitere Modelle im Katalog, die den Kriterien entsprechen.*");
+                        draftSb.AppendLine("\n> **Tipp**: Sie können die Liste eingrenzen, indem Sie einen bestimmten Durchmesser (z.B. Ø280, Ø400, Ø560 mm) oder den gewünschten Luftvolumenstrom (m³/h) angeben.");
+                    }
+                    draftSb.AppendLine();
+                }
+                else
+                {
+                    draftSb.AppendLine($"In der lokalen Datenbank sind derzeit keine dokumentierten Modelle für {filterHeadingDe} registriert.\n");
+                }
+            }
+            else
+            {
+                draftSb.AppendLine("### ebm-papst Ventilator- und Produktübersicht\n");
+                draftSb.AppendLine($"Das System indexiert derzeit **{catalogResult.TotalModels} Ventilatormodelle** in **{catalogResult.TotalDocuments} technischen Datenblättern/Dokumenten**:\n");
+
+                foreach (var (category, items) in catalogResult.Categories)
+                {
+                    var deCategory = FormatCategoryInGerman(category);
+                    draftSb.AppendLine($"#### {deCategory} ({items.Count} Modelle)");
+                    var displayItems = items.Take(15).ToList();
+                    foreach (var item in displayItems)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var technology = item.ParsedInfo != null
+                            ? item.ParsedInfo.GetMotorDescription(ContentLanguage.German)
+                            : FormatNonParsedTechnologyInGerman(item.Technology);
+                        var airflow = item.ParsedInfo != null
+                            ? item.ParsedInfo.GetAirflowDescription(ContentLanguage.German)
+                            : FormatNonParsedAirflowInGerman(item.Airflow);
+                        var airflowStr = !string.IsNullOrWhiteSpace(airflow) ? $", {airflow}" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {technology}{diamStr}{airflowStr}{voltStr} *(Quelle: {item.DocumentSource})*");
+                    }
+                    if (items.Count > 15)
+                    {
+                        draftSb.AppendLine($"- *... und {items.Count - 15} weitere Modelle in dieser Kategorie.*");
+                    }
+                    draftSb.AppendLine();
+                }
+
+                draftSb.AppendLine("#### Typenschlüssel und Parameter");
+                draftSb.AppendLine("- **Ventilatortype**: 1. Buchstabe (A = Axial-Grundmodell, S = mit Schutzgitter, W = im Wandring, R = Motorisiertes Laufrad, K = RadiPac im Tragrahmen, G/D = Spiralgehäuse).");
+                draftSb.AppendLine("- **Motortechnologie**: 2.-3. Zeichen (3G = EC energiesparender Motor; AC gibt Polzahl und 1~ 230V / 3~ 400V an).");
+                draftSb.AppendLine("- **Durchmesser**: 4.-6. Ziffer gibt den Laufraddurchmesser in mm an.");
+                draftSb.AppendLine("- **Luftförderrichtung (Axial)**: 12. Ziffer (gerade = Förderrichtung A, ungerade = Förderrichtung V).");
+            }
         }
         else
         {
-            draftSb.AppendLine("### ebm-papst Ventilator and Product Overview\n");
-            draftSb.AppendLine($"The system currently indexes **{catalogResult.TotalModels} ventilator models** across **{catalogResult.TotalDocuments} technical datasheets/documents**:\n");
-
-            foreach (var (category, items) in catalogResult.Categories)
+            if (hasFilter)
             {
-                draftSb.AppendLine($"#### {category} ({items.Count} models)");
-                var displayItems = items.Take(15).ToList();
-                foreach (var item in displayItems)
+                draftSb.AppendLine($"### ebm-papst Models for {filterHeadingEn}\n");
+                if (filteredItems != null && filteredItems.Count > 0)
                 {
-                    var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
-                    var airflowStr = !string.IsNullOrWhiteSpace(item.Airflow) ? $", {item.Airflow}" : "";
-                    draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{airflowStr} *(Source: {item.DocumentSource})*");
+                    draftSb.AppendLine($"The following **{filteredItems.Count} model(s)** in the catalog match the criteria:\n");
+                    var displayFiltered = filteredItems.Take(20).ToList();
+                    foreach (var item in displayFiltered)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        var rangeStr = !string.IsNullOrWhiteSpace(item.VoltageRange) ? $" (range: {item.VoltageRange})" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {item.Technology}{diamStr}{voltStr}{rangeStr} *(Source: {item.DocumentSource})*");
+                    }
+                    if (filteredItems.Count > 20)
+                    {
+                        draftSb.AppendLine($"- *... and {filteredItems.Count - 20} additional models in the catalog matching the criteria.*");
+                        draftSb.AppendLine("\n> **Tip**: You can narrow down the list by specifying a diameter (e.g. Ø280, Ø400, Ø560 mm) or required airflow (m³/h).");
+                    }
+                    draftSb.AppendLine();
                 }
-                if (items.Count > 15)
+                else
                 {
-                    draftSb.AppendLine($"- *... and {items.Count - 15} additional models in this category.*");
+                    draftSb.AppendLine($"Currently no documented models in the local database match the criteria for {filterHeadingEn}.\n");
                 }
-                draftSb.AppendLine();
             }
+            else
+            {
+                draftSb.AppendLine("### ebm-papst Ventilator and Product Overview\n");
+                draftSb.AppendLine($"The system currently indexes **{catalogResult.TotalModels} ventilator models** across **{catalogResult.TotalDocuments} technical datasheets/documents**:\n");
 
-            draftSb.AppendLine("#### Product Designation Key & Parameters");
-            draftSb.AppendLine("- **Fan Type**: 1st char (A = Axial base, S = with guard grille, W = in wall ring, R = Motorized impeller, K = RadiPac in bracket, G/D = Scroll housing).");
-            draftSb.AppendLine("- **Motor Technology**: 2nd-3rd chars (3G = EC energy-efficient motor; AC indicates pole count and 1~ 230V / 3~ 400V).");
-            draftSb.AppendLine("- **Diameter**: 4th-6th chars specify impeller diameter in mm.");
-            draftSb.AppendLine("- **Airflow Direction (Axial)**: 12th char (even = Airflow A, odd = Airflow V).");
+                foreach (var (category, items) in catalogResult.Categories)
+                {
+                    var enCategory = FormatCategoryInEnglish(category);
+                    draftSb.AppendLine($"#### {enCategory} ({items.Count} models)");
+                    var displayItems = items.Take(15).ToList();
+                    foreach (var item in displayItems)
+                    {
+                        var diamStr = item.DiameterMm.HasValue ? $", Ø{item.DiameterMm} mm" : "";
+                        var technology = item.ParsedInfo != null
+                            ? item.ParsedInfo.GetMotorDescription(ContentLanguage.English)
+                            : FormatNonParsedTechnologyInEnglish(item.Technology);
+                        var airflow = item.ParsedInfo != null
+                            ? item.ParsedInfo.GetAirflowDescription(ContentLanguage.English)
+                            : FormatNonParsedAirflowInEnglish(item.Airflow);
+                        var airflowStr = !string.IsNullOrWhiteSpace(airflow) ? $", {airflow}" : "";
+                        var voltStr = !string.IsNullOrWhiteSpace(item.NominalVoltage) ? $", {item.Phase ?? ""} {item.NominalVoltage}" : "";
+                        draftSb.AppendLine($"- **{item.ModelName}**: {technology}{diamStr}{airflowStr}{voltStr} *(Source: {item.DocumentSource})*");
+                    }
+                    if (items.Count > 15)
+                    {
+                        draftSb.AppendLine($"- *... and {items.Count - 15} additional models in this category.*");
+                    }
+                    draftSb.AppendLine();
+                }
+
+                draftSb.AppendLine("#### Product Designation Key & Parameters");
+                draftSb.AppendLine("- **Fan Type**: 1st char (A = Axial base, S = with guard grille, W = in wall ring, R = Motorized impeller, K = RadiPac in bracket, G/D = Scroll housing).");
+                draftSb.AppendLine("- **Motor Technology**: 2nd-3rd chars (3G = EC energy-efficient motor; AC indicates pole count and 1~ 230V / 3~ 400V).");
+                draftSb.AppendLine("- **Diameter**: 4th-6th chars specify impeller diameter in mm.");
+                draftSb.AppendLine("- **Airflow Direction (Axial)**: 12th char (even = Airflow A, odd = Airflow V).");
+            }
         }
 
         var structuredDraft = draftSb.ToString().Trim();
         return (structuredDraft, sampleChunks, catalogResult);
+    }
+
+    private static ContentLanguage ResolveLanguage(string question)
+    {
+        if (string.IsNullOrWhiteSpace(question)) return ContentLanguage.Danish;
+
+        var q = question.Trim();
+
+        // 1. Definite German indicators
+        if (Regex.IsMatch(q, @"\b(welche(s|r|n)?|was|wo|gibt\s+es|übersicht|uebersicht|lüfter|luefter|ventilatoren|modelle|datenbl[äa]tter|zeige|katalog|sortiment|hilf(e)?|guten\s+tag|danke)\b", RegexOptions.IgnoreCase))
+        {
+            return ContentLanguage.German;
+        }
+
+        // 2. Definite Danish indicators
+        if (Regex.IsMatch(q, @"\b(hvilke?|hvad|hvor|findes|modeller|oversigt|sortiment|blæser(e)?|vis|alle|nogle|ventilatorer|datablade)\b", RegexOptions.IgnoreCase))
+        {
+            return ContentLanguage.Danish;
+        }
+
+        // 3. Definite English indicators
+        if (Regex.IsMatch(q, @"\b(which|what|where|fans?|models?|overview|catalog(ue)?|list|show|available|any|datasheets?)\b", RegexOptions.IgnoreCase))
+        {
+            return ContentLanguage.English;
+        }
+
+        // 4. Statistical heuristic from DefaultLanguageDetector
+        var detection = DefaultLanguageDetector.DetectLanguageHeuristic(q, null);
+        if (string.Equals(detection.Language, "de", StringComparison.OrdinalIgnoreCase))
+            return ContentLanguage.German;
+        if (string.Equals(detection.Language, "da", StringComparison.OrdinalIgnoreCase))
+            return ContentLanguage.Danish;
+        if (string.Equals(detection.Language, "en", StringComparison.OrdinalIgnoreCase))
+            return ContentLanguage.English;
+
+        return detection.IsEnglish ? ContentLanguage.English : ContentLanguage.Danish;
+    }
+
+    private static string FormatCategoryInEnglish(string category)
+    {
+        return category switch
+        {
+            "Aksialventilatorer (Axial Fans)" => "Axial Fans",
+            "Centrifugalventilatorer & RadiPac (Centrifugal Fans)" => "Centrifugal Fans & RadiPac",
+            "Kompaktblæsere & DC-ventilatorer (Compact Fans)" => "Compact & DC Fans",
+            "Øvrige ventilatorer og moduler" => "Other Fans and Modules",
+            "Dokumenterede modeller & datablade" => "Documented Models & Datasheets",
+            _ => category
+        };
+    }
+
+    private static string FormatCategoryInGerman(string category)
+    {
+        return category switch
+        {
+            "Aksialventilatorer (Axial Fans)" => "Axialventilatoren",
+            "Centrifugalventilatorer & RadiPac (Centrifugal Fans)" => "Radialventilatoren & RadiPac",
+            "Kompaktblæsere & DC-ventilatorer (Compact Fans)" => "Kompaktlüfter & DC-Ventilatoren",
+            "Øvrige ventilatorer og moduler" => "Sonstige Ventilatoren und Module",
+            "Dokumenterede modeller & datablade" => "Dokumentierte Modelle & Datenblätter",
+            _ => category
+        };
+    }
+
+    private static string FormatNonParsedTechnologyInEnglish(string danishTech)
+    {
+        if (string.IsNullOrWhiteSpace(danishTech)) return "See datasheet for motor specifications";
+        if (danishTech.Contains("datablad", StringComparison.OrdinalIgnoreCase)) return "See datasheet for motor specifications";
+        if (danishTech.Contains("Kompaktmotor", StringComparison.OrdinalIgnoreCase) || danishTech.Contains("Elektronisk DC", StringComparison.OrdinalIgnoreCase)) return "Electronic DC / Compact Motor";
+        if (danishTech.Contains("EC-motor", StringComparison.OrdinalIgnoreCase)) return "EC motor";
+        if (danishTech.Contains("AC-motor", StringComparison.OrdinalIgnoreCase)) return "AC motor";
+        return danishTech;
+    }
+
+    private static string FormatNonParsedTechnologyInGerman(string danishTech)
+    {
+        if (string.IsNullOrWhiteSpace(danishTech)) return "Siehe Datenblatt für Motorspezifikationen";
+        if (danishTech.Contains("datablad", StringComparison.OrdinalIgnoreCase)) return "Siehe Datenblatt für Motorspezifikationen";
+        if (danishTech.Contains("Kompaktmotor", StringComparison.OrdinalIgnoreCase) || danishTech.Contains("Elektronisk DC", StringComparison.OrdinalIgnoreCase)) return "Elektronischer DC- / Kompaktmotor";
+        if (danishTech.Contains("EC-motor", StringComparison.OrdinalIgnoreCase)) return "EC-Motor";
+        if (danishTech.Contains("AC-motor", StringComparison.OrdinalIgnoreCase)) return "AC-Motor";
+        return danishTech;
+    }
+
+    private static string FormatNonParsedAirflowInEnglish(string danishAirflow)
+    {
+        if (string.IsNullOrWhiteSpace(danishAirflow)) return string.Empty;
+        if (danishAirflow.Contains("datablad", StringComparison.OrdinalIgnoreCase)) return "See datasheet";
+        if (danishAirflow.Contains("Se specifik montage", StringComparison.OrdinalIgnoreCase)) return "See datasheet for specific mounting (over struts / ribs)";
+        if (danishAirflow.Contains("over ribber / struts", StringComparison.OrdinalIgnoreCase)) return "Airflow over struts / ribs";
+        if (danishAirflow.Contains("Aksial indsugning, radial udblæsning", StringComparison.OrdinalIgnoreCase)) return "Axial intake, radial discharge";
+        if (danishAirflow.Contains("Radial luftafgang", StringComparison.OrdinalIgnoreCase)) return "Radial air discharge";
+        return danishAirflow;
+    }
+
+    private static string FormatNonParsedAirflowInGerman(string danishAirflow)
+    {
+        if (string.IsNullOrWhiteSpace(danishAirflow)) return string.Empty;
+        if (danishAirflow.Contains("datablad", StringComparison.OrdinalIgnoreCase)) return "Siehe Datenblatt";
+        if (danishAirflow.Contains("Se specifik montage", StringComparison.OrdinalIgnoreCase)) return "Spezifische Montage siehe Datenblatt (über Stege)";
+        if (danishAirflow.Contains("over ribber / struts", StringComparison.OrdinalIgnoreCase)) return "Luftförderung über Stege";
+        if (danishAirflow.Contains("Aksial indsugning, radial udblæsning", StringComparison.OrdinalIgnoreCase)) return "Axial saugend, radial ausblasend";
+        if (danishAirflow.Contains("Radial luftafgang", StringComparison.OrdinalIgnoreCase)) return "Radiale Luftausblasung";
+        return danishAirflow;
     }
 }
 
@@ -961,10 +1393,25 @@ public class GreetingWorkflowExecutor : IWorkflowExecutor
     )
     {
         var q = question.Trim().ToLowerInvariant();
-        bool isDanish = q.Contains("hej") || q.Contains("dav") || q.Contains("god") || q.Contains("hva") || q.Contains("tak") || q.Contains("hvem") || q.Contains("hjælp") || q.Contains("mojn");
+        var lang = ResolveGreetingLanguage(q);
 
         string response;
-        if (isDanish)
+        if (lang == ContentLanguage.German)
+        {
+            if (q.Contains("dank") || q.Contains("vielen dank"))
+            {
+                response = "Gern geschehen! Geben Sie einfach Bescheid, wenn Sie weitere Fragen zu ebm-papst Ventilatoren oder Datenblättern haben.";
+            }
+            else if (q.Contains("wer bist du") || q.Contains("was kannst du") || q.Contains("hilfe") || q.Contains("helfen"))
+            {
+                response = "Ich bin Ihr technischer Assistent für ebm-papst Ventilatoren und Datenblätter. Ich kann Ihnen helfen, technische Spezifikationen (Spannung, Luftmenge, Abmessungen) zu finden, Modelle zu vergleichen, Ersatzprodukte zu ermitteln oder technische Berechnungen durchzuführen. Wie kann ich Ihnen helfen?";
+            }
+            else
+            {
+                response = "Hallo! Ich bin bereit, Ihre Fragen auf Basis der verfügbaren ebm-papst Datenblätter zu beantworten. Sie können nach bestimmten Modellen fragen, Ventilatoren vergleichen, Ersatzprodukte suchen oder Berechnungen durchführen. Wie kann ich Ihnen heute helfen?";
+            }
+        }
+        else if (lang == ContentLanguage.Danish)
         {
             if (q.Contains("tak"))
             {
@@ -996,5 +1443,28 @@ public class GreetingWorkflowExecutor : IWorkflowExecutor
         }
 
         return Task.FromResult((response, new List<DocumentChunk>(), (object?)null));
+    }
+
+    private static ContentLanguage ResolveGreetingLanguage(string q)
+    {
+        if (q.Contains("hallo") || q.Contains("guten") || q.Contains("dank") || q.Contains("servus") || q.Contains("grüß") || q.Contains("gruess") || q.Contains("moin") || q.Contains("wer bist") || q.Contains("was kannst"))
+        {
+            return ContentLanguage.German;
+        }
+
+        if (q.Contains("hej") || q.Contains("dav") || q.Contains("god") || q.Contains("hva") || q.Contains("tak") || q.Contains("hvem") || q.Contains("hjælp") || q.Contains("mojn"))
+        {
+            return ContentLanguage.Danish;
+        }
+
+        if (q.Contains("hello") || q.Contains("hi") || q.Contains("thank") || q.Contains("who are") || q.Contains("what can") || q.Contains("help"))
+        {
+            return ContentLanguage.English;
+        }
+
+        var detection = DefaultLanguageDetector.DetectLanguageHeuristic(q, null);
+        if (string.Equals(detection.Language, "de", StringComparison.OrdinalIgnoreCase)) return ContentLanguage.German;
+        if (string.Equals(detection.Language, "da", StringComparison.OrdinalIgnoreCase)) return ContentLanguage.Danish;
+        return ContentLanguage.English;
     }
 }

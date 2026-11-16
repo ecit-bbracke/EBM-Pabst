@@ -427,9 +427,20 @@ public class SpecializedWorkflowTests
 
         // Assert
         Assert.NotNull(draftResponse);
+        Assert.StartsWith("### ebm-papst Ventilator and Product Overview", draftResponse);
         Assert.Contains("S4E315BS2035", draftResponse);
         Assert.Contains("K3G560PC0401", draftResponse);
         Assert.Contains("4114N", draftResponse);
+
+        // Verify that the English query outputs strictly English headers, technology and airflow descriptions
+        Assert.Contains("Axial Fans", draftResponse);
+        Assert.Contains("Centrifugal Fans & RadiPac", draftResponse);
+        Assert.Contains("Compact & DC Fans", draftResponse);
+        Assert.Contains("*(Source:", draftResponse);
+        Assert.DoesNotContain("*(Kilde:", draftResponse);
+        Assert.DoesNotContain("Elektronisk DC", draftResponse);
+        Assert.DoesNotContain("Luftstrøm over ribber", draftResponse);
+        Assert.DoesNotContain("Se specifik montage i datablad", draftResponse);
 
         var catalogResult = workflowData as CatalogOverviewResult;
         Assert.NotNull(catalogResult);
@@ -440,6 +451,110 @@ public class SpecializedWorkflowTests
 
         // Verify that LLM draft generation was completely eliminated for Overview workflow
         mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), false), Times.Never);
+    }
+
+    [Fact]
+    public async Task OverviewWorkflow_WithDanishQuery_ProducesDanishCatalog()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var mockVectorStore = new Mock<IVectorStore>();
+
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf", "/data/k3g.pdf", DateTime.UtcNow),
+                new Document("doc3", "9694300352_4114N_2H6PU_PDB_EN.PDF", "/data/4114.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "S4E315 series axial fan", 0, "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new OverviewWorkflowExecutor(mockLlm.Object, parser);
+        var governorResult = new InputGovernorResult(
+            Intent: "OVERVIEW",
+            Confidence: 0.95,
+            Entities: new(),
+            RequestedAttributes: new(),
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "Hvilke ventilatorer findes der?",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.StartsWith("### ebm-papst Ventilator- og Produktoversigt", draftResponse);
+        Assert.Contains("S4E315BS2035", draftResponse);
+        Assert.Contains("K3G560PC0401", draftResponse);
+        Assert.Contains("4114N", draftResponse);
+        Assert.Contains("Aksialventilatorer (Axial Fans)", draftResponse);
+        Assert.Contains("*(Kilde:", draftResponse);
+    }
+
+    [Fact]
+    public async Task OverviewWorkflow_WithGermanQuery_ProducesGermanCatalog()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var mockVectorStore = new Mock<IVectorStore>();
+
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf", "/data/k3g.pdf", DateTime.UtcNow),
+                new Document("doc3", "9694300352_4114N_2H6PU_PDB_EN.PDF", "/data/4114.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "S4E315 series axial fan", 0, "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new OverviewWorkflowExecutor(mockLlm.Object, parser);
+        var governorResult = new InputGovernorResult(
+            Intent: "OVERVIEW",
+            Confidence: 0.95,
+            Entities: new(),
+            RequestedAttributes: new(),
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "Welche Modelle und Ventilatoren gibt es?",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.StartsWith("### ebm-papst Ventilator- und Produktübersicht", draftResponse);
+        Assert.Contains("S4E315BS2035", draftResponse);
+        Assert.Contains("K3G560PC0401", draftResponse);
+        Assert.Contains("4114N", draftResponse);
+        Assert.Contains("Axialventilatoren", draftResponse);
+        Assert.Contains("Radialventilatoren & RadiPac", draftResponse);
+        Assert.Contains("Kompaktlüfter & DC-Ventilatoren", draftResponse);
+        Assert.Contains("*(Quelle:", draftResponse);
+        Assert.DoesNotContain("*(Kilde:", draftResponse);
+        Assert.DoesNotContain("*(Source:", draftResponse);
     }
 
     [Fact]
@@ -516,6 +631,123 @@ public class SpecializedWorkflowTests
 
         // Verify that LLM draft generation was completely eliminated (0 LLM round-trips for draft generation)
         mockLlm.Verify(x => x.GenerateCompletionAsync(It.IsAny<string>(), false), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompatibilityWorkflow_WithK3G280PR04I2_ShouldFeature8300100757AsDirectMatch()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("docPR", "Art_K3G280PR04I2-Doc_10124475.pdf", "/uploads/Art_K3G280PR04I2-Doc_10124475.pdf", DateTime.UtcNow,
+                    ProductCode: "K3G280PR04I2", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 750, DiameterMm: 280),
+                new Document("doc8300", "473fb476-dd32-4bb7-a181-804a5953d421_Art_8300100757-Doc_10290144.pdf", "/uploads/473fb476-dd32-4bb7-a181-804a5953d421_Art_8300100757-Doc_10290144.pdf", DateTime.UtcNow,
+                    ProductCode: "8300100757", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 800, DiameterMm: 280),
+                new Document("docRR", "Art_K3G280RR04I2-Doc_9839158.pdf", "/uploads/Art_K3G280RR04I2-Doc_9839158.pdf", DateTime.UtcNow,
+                    ProductCode: "K3G280RR04I2", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 660, DiameterMm: 280)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("cPR", "docPR", "K3G280-PR04-I2 RadiPac 750W 2400 m3/h 665 Pa 3000 rpm", 0, "Art_K3G280PR04I2-Doc_10124475.pdf"),
+                new DocumentChunk("cRR", "docRR", "K3G280-RR04-I2 RadiCal 660W 2100 m3/h 682 Pa 2900 rpm", 0, "Art_K3G280RR04I2-Doc_9839158.pdf"),
+                new DocumentChunk("c8300", "doc8300", "Item 8300100757 VBH0280CSPFS 1~ 230 VAC 800W 3640 min-1 2485 m3/h", 0, "473fb476-dd32-4bb7-a181-804a5953d421_Art_8300100757-Doc_10290144.pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new CompatibilityWorkflowExecutor(mockLlm.Object, parser);
+        var sourceProduct = parser.Parse("K3G280PR04I2");
+        var governorResult = new InputGovernorResult(
+            Intent: "COMPATIBILITY",
+            Confidence: 0.98,
+            Entities: new List<EntityInfo> { new EntityInfo("centrifugal_fan", "K3G280PR04I2") },
+            RequestedAttributes: new List<string> { "voltage", "power", "diameter" },
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null,
+            ParsedEbmProducts: new List<EbmProductInfo> { sourceProduct }
+        );
+
+        // Act
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "en erstatning til type K3G280PR04I2",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert
+        Assert.NotNull(draftResponse);
+        Assert.Contains("8300100757", draftResponse);
+        Assert.Contains("Direkte erstatningsmodeller i databasen", draftResponse);
+
+        var compatResult = workflowData as CompatibilityResult;
+        Assert.NotNull(compatResult);
+        Assert.NotNull(compatResult.ReplacementAnalysis);
+        Assert.Equal("COMPATIBLE", compatResult.Status);
+        Assert.Contains(compatResult.ReplacementAnalysis.MatchedDatabaseCandidates, m => m.CleanCode.Contains("8300100757"));
+        Assert.DoesNotContain(compatResult.ReplacementAnalysis.MatchedDatabaseCandidates, m => m.CleanCode.Contains("RR04"));
+        Assert.Contains(contextChunks, c => c.DocumentId == "doc8300" || c.Text.Contains("8300100757"));
+    }
+
+    [Fact]
+    public async Task CompatibilityWorkflow_WithMultiple8300Candidates_ShouldRankClosestWattageFirstAndIncludeDatasheets()
+    {
+        // GIVEN a source fan K3G280PR04I2 (750W) and multiple 280mm 230V candidates in database (8300101737 at 500W, 8300101712 at 170W, 8300100757 at 800W):
+        var mockLlm = new Mock<ILlmService>();
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("docPR", "Art_K3G280PR04I2-Doc_10124475.pdf", "/uploads/Art_K3G280PR04I2-Doc_10124475.pdf", DateTime.UtcNow,
+                    ProductCode: "K3G280PR04I2", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 750, DiameterMm: 280),
+                new Document("doc1737", "Art_8300101737-Doc_10012242.pdf", "/uploads/Art_8300101737-Doc_10012242.pdf", DateTime.UtcNow,
+                    ProductCode: "8300101737", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 500, DiameterMm: 280),
+                new Document("doc1712", "Art_8300101712-Doc_10048252.pdf", "/uploads/Art_8300101712-Doc_10048252.pdf", DateTime.UtcNow,
+                    ProductCode: "8300101712", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 170, DiameterMm: 280),
+                new Document("doc8300", "473fb476-dd32-4bb7-a181-804a5953d421_Art_8300100757-Doc_10290144.pdf", "/uploads/473fb476-dd32-4bb7-a181-804a5953d421_Art_8300100757-Doc_10290144.pdf", DateTime.UtcNow,
+                    ProductCode: "8300100757", Phase: "1~", NominalVoltage: "230 VAC", PowerWatts: 800, DiameterMm: 280)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c8300", "doc8300", "Item 8300100757 VBH0280CSPFS 1~ 230 VAC 800W 3640 min-1 2485 m3/h", 0, "Art_8300100757-Doc_10290144.pdf"),
+                new DocumentChunk("c1737", "doc1737", "Item 8300101737 VBS0280RSPGZ 1~ 230 VAC 500W 2700 min-1 2000 m3/h", 0, "Art_8300101737-Doc_10012242.pdf"),
+                new DocumentChunk("c1712", "doc1712", "Item 8300101712 VBS0280SSNDS 1~ 230 VAC 170W 2000 min-1 1630 m3/h", 0, "Art_8300101712-Doc_10048252.pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new CompatibilityWorkflowExecutor(mockLlm.Object, parser);
+        var sourceProduct = parser.Parse("K3G280PR04I2");
+        var governorResult = new InputGovernorResult(
+            Intent: "COMPATIBILITY",
+            Confidence: 0.98,
+            Entities: new List<EntityInfo> { new EntityInfo("centrifugal_fan", "K3G280PR04I2") },
+            RequestedAttributes: new List<string> { "voltage", "power", "diameter" },
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null,
+            ParsedEbmProducts: new List<EbmProductInfo> { sourceProduct }
+        );
+
+        // WHEN executing the compatibility workflow:
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "en erstatning til type K3G280PR04I2",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // THEN 8300100757 (800W, delta 50W) MUST be ranked ahead of 8300101737 (500W) and 8300101712 (170W):
+        var compatResult = workflowData as CompatibilityResult;
+        Assert.NotNull(compatResult);
+        Assert.NotNull(compatResult.ReplacementAnalysis);
+        Assert.True(compatResult.ReplacementAnalysis.MatchedDatabaseCandidates.Count >= 3);
+        Assert.Equal("8300100757", compatResult.ReplacementAnalysis.MatchedDatabaseCandidates[0].CleanCode);
+        Assert.Contains(contextChunks, c => c.DocumentId == "doc8300" || c.FileName != null && c.FileName.Contains("8300100757"));
     }
 
     [Fact]
