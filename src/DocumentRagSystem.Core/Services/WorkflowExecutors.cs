@@ -1267,6 +1267,41 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
             }
         }
 
+        if (filteredItems != null && filteredItems.Count > 0)
+        {
+            var matchingChunks = new List<DocumentChunk>();
+            foreach (var item in filteredItems.Take(5))
+            {
+                var doc = allDocsDict.Values.FirstOrDefault(d =>
+                    (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(item.ModelName, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(d.ArticleId) && d.ArticleId.Contains(item.ModelName, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.Contains(item.ModelName, StringComparison.OrdinalIgnoreCase)));
+                if (doc != null)
+                {
+                    try
+                    {
+                        var docChunks = (await vectorStore.GetChunksByDocumentAndIndicesAsync(doc.Id, new[] { 0, 1 })).ToList();
+                        if (docChunks.Count == 0)
+                        {
+                            docChunks = (await vectorStore.GetAllChunksByDocumentIdAsync(doc.Id)).Take(2).ToList();
+                        }
+                        var enriched = docChunks.Select(c => c with
+                        {
+                            FileName = !string.IsNullOrWhiteSpace(c.FileName) ? c.FileName : doc.FileName,
+                            FilePath = !string.IsNullOrWhiteSpace(c.FilePath) ? c.FilePath : doc.FilePath,
+                            ArticleId = !string.IsNullOrWhiteSpace(c.ArticleId) ? c.ArticleId : doc.ArticleId
+                        }).ToList();
+                        matchingChunks.AddRange(enriched);
+                    }
+                    catch { }
+                }
+            }
+            if (matchingChunks.Count > 0)
+            {
+                sampleChunks = matchingChunks.Take(8).ToList();
+            }
+        }
+
         var structuredDraft = draftSb.ToString().Trim();
         return (structuredDraft, sampleChunks, catalogResult);
     }

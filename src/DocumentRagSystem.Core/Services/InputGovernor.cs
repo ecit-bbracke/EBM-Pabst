@@ -284,7 +284,7 @@ Output JSON:
             }
         }
 
-        // 1. Overview intent (asking for available ventilators/fans/catalog/inventory)
+        // 1. Overview intent (asking for available ventilators/fans/catalog/inventory or bare parameter search)
         if (extractedProducts.Count == 0 && (conversationContext == null || conversationContext.ActiveEntities == null || conversationContext.ActiveEntities.Count == 0))
         {
             if (IsOverviewQuery(text))
@@ -492,7 +492,26 @@ Output JSON:
                lower.Contains("hvilke kan vi tilbyde") ||
                lower.Contains("kan vi tilbyde") ||
                lower.Contains("hvad har vi i") ||
-               lower.Contains("hvad har vi af");
+               lower.Contains("hvad har vi af") ||
+               lower.Contains("produkter med") ||
+               lower.Contains("blæsere med") ||
+               lower.Contains("ventilatorer med") ||
+               lower.Contains("modeller med") ||
+               lower.Contains("fans with") ||
+               lower.Contains("products with") ||
+               lower.Contains("lüfter mit") ||
+               lower.Contains("ventilatoren mit") ||
+               IsBareParameterQuery(lower);
+    }
+
+    private static bool IsBareParameterQuery(string lower)
+    {
+        var words = lower.Split(new[] { ' ', '\t', '?', '!', '.', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length <= 4 && !lower.Contains("can") && !lower.Contains("will") && !lower.Contains("is") && !lower.Contains("kan") && !lower.Contains("virker") && !lower.Contains("fungerer") && !lower.Contains("operate"))
+        {
+            return ElectricalQueryExpander.ExtractVoltageFilter(lower) != null;
+        }
+        return false;
     }
 
     private static bool IsGreetingQuery(string text)
