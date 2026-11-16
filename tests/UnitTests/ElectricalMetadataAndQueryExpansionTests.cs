@@ -11,6 +11,7 @@ namespace DocumentRagSystem.UnitTests;
 public class ElectricalMetadataAndQueryExpansionTests
 {
     [Theory]
+    // Danish queries
     [InlineData("hvilke produkter i 3 x 230 VAC kan vi tilbyde", "3~", 230)]
     [InlineData("hvad har vi i 3x400V", "3~", 400)]
     [InlineData("hvilke modeller kan køre 1 x 230 V", "1~", 230)]
@@ -18,6 +19,18 @@ public class ElectricalMetadataAndQueryExpansionTests
     [InlineData("3 faset", "3~", null)]
     [InlineData("trefaset", "3~", null)]
     [InlineData("1-faset", "1~", null)]
+    // English queries
+    [InlineData("three phase 230V fans", "3~", 230)]
+    [InlineData("3-phase 400 VAC", "3~", 400)]
+    [InlineData("single-phase 230V models", "1~", 230)]
+    [InlineData("three-phase", "3~", null)]
+    [InlineData("single phase", "1~", null)]
+    // German queries
+    [InlineData("dreiphasig 230V lüfter", "3~", 230)]
+    [InlineData("3-phasig 400 VAC", "3~", 400)]
+    [InlineData("einphasig 230V", "1~", 230)]
+    [InlineData("dreiphasig", "3~", null)]
+    [InlineData("einphasig", "1~", null)]
     public void ElectricalQueryExpander_ShouldDetectAndExpandQueries(string query, string expectedPhase, int? expectedVoltage)
     {
         var expanded = ElectricalQueryExpander.Expand(query);

@@ -91,27 +91,27 @@ public record ElectricalFilter(
 public static class ElectricalQueryExpander
 {
     private static readonly Regex ThreePhase230Regex = new(
-        @"\b(?:3\s*[\*xX~]\s*2(?:00|08|30|40)(?:\s*(?:v(?:ac)?|volt))?|3\s*[- ]?fase[rt]?\s*2(?:00|08|30|40)(?:\s*(?:v(?:ac)?|volt))?|3~?\s*2(?:00|08|30|40)(?:\s*(?:v(?:ac)?|volt))?|2(?:00|08|30|40)\s*v(?:ac)?\s*3~?)\b",
+        @"\b(?:3\s*[\*xX~]\s*2(?:00|08|30|40)(?:\s*(?:v(?:ac)?|volt))?|(?:3\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|three[- ]phase|trefase[rt]?|dreiphas(?:ig[en]?|en)|3~)\s*(?:with\s+|med\s+|mit\s+)?2(?:00|08|30|40)(?:\s*(?:v(?:ac)?|volt))?|2(?:00|08|30|40)\s*v(?:ac)?\s*(?:3\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|3~|three[- ]phase))\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
     private static readonly Regex ThreePhase400Regex = new(
-        @"\b(?:3\s*[\*xX~]\s*4(?:00|15|60|80)(?:\s*(?:v(?:ac)?|volt))?|3\s*[- ]?fase[rt]?\s*4(?:00|15|60|80)(?:\s*(?:v(?:ac)?|volt))?|3~?\s*4(?:00|15|60|80)(?:\s*(?:v(?:ac)?|volt))?|4(?:00|15|60|80)\s*v(?:ac)?\s*3~?)\b",
+        @"\b(?:3\s*[\*xX~]\s*4(?:00|15|60|80)(?:\s*(?:v(?:ac)?|volt))?|(?:3\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|three[- ]phase|trefase[rt]?|dreiphas(?:ig[en]?|en)|3~)\s*(?:with\s+|med\s+|mit\s+)?4(?:00|15|60|80)(?:\s*(?:v(?:ac)?|volt))?|4(?:00|15|60|80)\s*v(?:ac)?\s*(?:3\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|3~|three[- ]phase))\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
     private static readonly Regex SinglePhase230Regex = new(
-        @"\b(?:1\s*[\*xX~]\s*230(?:\s*(?:v(?:ac)?|volt))?|1\s*[- ]?fase[rt]?\s*230(?:\s*(?:v(?:ac)?|volt))?|1~?\s*230(?:\s*(?:v(?:ac)?|volt))?|230\s*v(?:ac)?\s*1~?|enkeltfaset\s*230(?:\s*(?:v(?:ac)?|volt))?)\b",
+        @"\b(?:1\s*[\*xX~]\s*230(?:\s*(?:v(?:ac)?|volt))?|(?:1\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|single[- ]phase|one[- ]phase|enkeltfase[rt]?|einphas(?:ig[en]?|en)|1~)\s*(?:with\s+|med\s+|mit\s+)?230(?:\s*(?:v(?:ac)?|volt))?|230\s*v(?:ac)?\s*(?:1\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|1~|single[- ]phase))\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
     private static readonly Regex GenericThreePhaseRegex = new(
-        @"\b(?:3\s*[- ]?fase[rt]?|3~|trefase[rt]?|3-phase|dreiphasen|drei[- ]?phasen)\b",
+        @"\b(?:3\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|three[- ]phase|trefase[rt]?|dreiphas(?:ig[en]?|en)|3~)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
     private static readonly Regex GenericSinglePhaseRegex = new(
-        @"\b(?:1\s*[- ]?fase[rt]?|1~|enkeltfase[rt]?|1-phase|einphasen|ein[- ]?phasen)\b",
+        @"\b(?:1\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|single[- ]phase|one[- ]phase|enkeltfase[rt]?|einphas(?:ig[en]?|en)|1~)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
@@ -126,7 +126,7 @@ public static class ElectricalQueryExpander
     );
 
     private static readonly Regex GenericDcRegex = new(
-        @"\b(?:dc\s*(?:blæser[e]?|ventilator[er]?|motor|forsyning)?|jævnstrøm)\b",
+        @"\b(?:dc\s*(?:blæser[e]?|ventilator[er]?|lüfter|fan[s]?|motor|forsyning|supply)?|jævnstrøm|gleichstrom|direct[- ]current)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
