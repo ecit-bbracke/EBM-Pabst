@@ -31,6 +31,14 @@ public class ElectricalMetadataAndQueryExpansionTests
     [InlineData("einphasig 230V", "1~", 230)]
     [InlineData("dreiphasig", "3~", null)]
     [InlineData("einphasig", "1~", null)]
+    // Case sensitivity / uppercase / lowercase variations
+    [InlineData("3 FASET 230 V", "3~", 230)]
+    [InlineData("3 faset 230 v", "3~", 230)]
+    [InlineData("3 FaSeT 230 vAc", "3~", 230)]
+    [InlineData("THREE PHASE 400 VAC", "3~", 400)]
+    [InlineData("three phase 400 vac", "3~", 400)]
+    [InlineData("DREIPHASIG 230 V", "3~", 230)]
+    [InlineData("dReIpHaSiG 230 v", "3~", 230)]
     public void ElectricalQueryExpander_ShouldDetectAndExpandQueries(string query, string expectedPhase, int? expectedVoltage)
     {
         var expanded = ElectricalQueryExpander.Expand(query);
