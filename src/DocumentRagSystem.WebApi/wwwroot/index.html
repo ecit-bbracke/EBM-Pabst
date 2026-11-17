@@ -287,6 +287,18 @@
                                 <span>Feedback</span>
                             </button>
                         </div>
+
+                        <!-- Bekræftelsesbesked vist direkte på siden efter afsendelse -->
+                        <div id="feedback-page-success" class="hidden mt-2 p-3 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
+                                <span>Tak for din feedback!</span>
+                            </div>
+                            <button type="button" onclick="dismissFeedbackSuccess()" class="text-emerald-700 hover:text-emerald-900 text-xs font-medium p-1 hover:bg-emerald-100 rounded" title="Luk besked">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+
                         <div id="feedback-form-container" class="hidden mt-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                             <p class="text-xs text-slate-600 leading-relaxed font-normal">
                                 Dine søgeprompter, svaret og dit bruger-ID medsendes automatisk. Du behøver ikke at tilføje dem i din kommentar.
@@ -1138,6 +1150,7 @@
         // Handle question submissions with real-time SSE streaming
         async function handleQuerySubmit(event) {
             event.preventDefault();
+            dismissFeedbackSuccess();
             const queryInput = document.getElementById('query-input');
             const submitBtn = document.getElementById('submit-btn');
             const question = queryInput.value.trim();
@@ -1995,6 +2008,7 @@
 
             const isHidden = container.classList.contains('hidden');
             if (isHidden) {
+                dismissFeedbackSuccess();
                 container.classList.remove('hidden');
                 toggleBtn.setAttribute('aria-expanded', 'true');
                 const commentEl = document.getElementById('feedback-comment');
@@ -2003,6 +2017,11 @@
                 container.classList.add('hidden');
                 toggleBtn.setAttribute('aria-expanded', 'false');
             }
+        }
+
+        function dismissFeedbackSuccess() {
+            const pageSuccessEl = document.getElementById('feedback-page-success');
+            if (pageSuccessEl) pageSuccessEl.classList.add('hidden');
         }
 
         function openFeedbackForm() {
@@ -2127,23 +2146,20 @@
                     return;
                 }
 
-                // Success
-                if (successEl) {
-                    successEl.textContent = 'Tak for din feedback!';
-                    successEl.classList.remove('hidden');
-                }
+                // Success: clear inputs, collapse form, show confirmation banner directly on the page
                 commentEl.value = '';
                 if (emailEl) emailEl.value = '';
 
-                setTimeout(() => {
-                    const container = document.getElementById('feedback-form-container');
-                    const toggleBtn = document.getElementById('feedback-toggle-btn');
-                    if (container && !container.classList.contains('hidden') && (!errorEl || errorEl.classList.contains('hidden'))) {
-                        container.classList.add('hidden');
-                        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
-                        if (successEl) successEl.classList.add('hidden');
-                    }
-                }, 4000);
+                const container = document.getElementById('feedback-form-container');
+                const toggleBtn = document.getElementById('feedback-toggle-btn');
+                if (container) container.classList.add('hidden');
+                if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+
+                const pageSuccessEl = document.getElementById('feedback-page-success');
+                if (pageSuccessEl) {
+                    pageSuccessEl.classList.remove('hidden');
+                    pageSuccessEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
 
             } catch (err) {
                 // Preserve user input on network error
