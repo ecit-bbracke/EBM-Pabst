@@ -20,6 +20,7 @@ services:
       - Qdrant__CollectionName=production-chunks
       - Gemini__ApiKey=${GEMINI_API_KEY}
       - Conversations__StorageDirectory=/app/data/conversations
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
