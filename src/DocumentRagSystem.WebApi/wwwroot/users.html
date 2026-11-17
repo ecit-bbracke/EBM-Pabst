@@ -262,6 +262,18 @@
     </div>
 
     <script>
+        function initUsersPage() {
+            fetchUsers();
+            fetchSystemHealth();
+            fetchFeedbacks();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initUsersPage);
+        } else {
+            initUsersPage();
+        }
+
         let feedbackListCache = [];
 
         async function fetchFeedbacks() {
