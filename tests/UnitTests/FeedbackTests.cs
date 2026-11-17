@@ -61,6 +61,16 @@ public class FeedbackTests
         var all = (await repo.GetAllFeedbackAsync()).ToList();
         Assert.Single(all);
         Assert.Equal(saved.Id, all[0].Id);
+
+        // WHEN deleting the feedback:
+        var deleted = await repo.DeleteFeedbackAsync(saved.Id);
+        Assert.True(deleted);
+
+        // THEN it should no longer exist:
+        var afterDelete = await repo.GetFeedbackByIdAsync(saved.Id);
+        Assert.Null(afterDelete);
+        var allAfter = (await repo.GetAllFeedbackAsync()).ToList();
+        Assert.Empty(allAfter);
     }
 
     [Theory]

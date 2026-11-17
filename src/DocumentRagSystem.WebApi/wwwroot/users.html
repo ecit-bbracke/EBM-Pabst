@@ -178,15 +178,253 @@
                 </div>
             </div>
 
+            <!-- Feedback Table Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                            <i class="fa-solid fa-comment-dots text-emerald-600 mr-2 text-sm"></i>
+                            Indkommen brugerfeedback
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Feedback indsendt fra AI assistenten med tilhørende søgekontekst.</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span id="feedback-count-badge" class="hidden px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full"></span>
+                        <button onclick="fetchFeedbacks()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater feedback-liste">
+                            <i class="fa-solid fa-arrows-rotate" id="feedback-refresh-icon"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Feedback Alert Banner -->
+                <div id="feedback-status" class="hidden m-4 p-3 rounded-lg text-xs"></div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-slate-600">
+                        <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-6 py-3">Tidspunkt & Bruger</th>
+                                <th class="px-6 py-3">Kommentar</th>
+                                <th class="px-6 py-3">Søgekontekst</th>
+                                <th class="px-6 py-3 text-right">Handlinger</th>
+                            </tr>
+                        </thead>
+                        <tbody id="feedback-table-body" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs">
+                                    <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser feedback...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
         </div>
 
     </main>
 
+    <!-- Feedback Detail Modal -->
+    <div id="feedback-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+            <div class="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                        <i class="fa-solid fa-comment-dots text-sm"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-base">Feedback Detaljer</h3>
+                </div>
+                <button onclick="closeFeedbackModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200/60 transition">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto space-y-4 text-xs" id="feedback-modal-body">
+                <!-- Dynamisk indhold -->
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+                <button onclick="closeFeedbackModal()" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg transition text-xs">Luk</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchUsers();
-            fetchSystemHealth();
-        });
+        let feedbackListCache = [];
+
+        async function fetchFeedbacks() {
+            const tbody = document.getElementById('feedback-table-body');
+            const icon = document.getElementById('feedback-refresh-icon');
+            const badge = document.getElementById('feedback-count-badge');
+            if (icon) icon.classList.add('animate-spin');
+
+            try {
+                const response = await fetch('/api/feedback');
+                if (response.status === 401 || response.status === 403) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs">Adgang nægtet. Kræver administratorrettigheder.</td></tr>`;
+                    return;
+                }
+                if (!response.ok) throw new Error('Kunne ikke hente feedback');
+
+                const feedbacks = await response.json();
+                feedbackListCache = feedbacks || [];
+
+                if (badge) {
+                    badge.textContent = `${feedbackListCache.length} indlæg`;
+                    badge.classList.remove('hidden');
+                }
+
+                if (!feedbacks || feedbacks.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-inbox mr-1.5"></i> Ingen indkommen feedback endnu.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = feedbacks.map((fb, idx) => {
+                    const dateObj = new Date(fb.created_at || fb.createdAt);
+                    const formattedDate = dateObj.toLocaleDateString('da-DK', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+
+                    const userDisplay = fb.user_email || fb.userEmail || fb.user_id || fb.userId || 'Ukendt bruger';
+                    const contactEmail = fb.contact_email || fb.contactEmail;
+                    const contactBadge = contactEmail
+                        ? `<div class="mt-1"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200"><i class="fa-regular fa-envelope mr-1 text-[9px]"></i>${escapeHtml(contactEmail)}</span></div>`
+                        : '';
+
+                    const commentText = fb.comment || '';
+                    const commentPreview = commentText.length > 90
+                        ? escapeHtml(commentText.substring(0, 90)) + '...'
+                        : escapeHtml(commentText);
+
+                    const promptText = fb.search_prompts || fb.searchPrompts || '';
+                    const promptPreview = promptText.length > 50
+                        ? escapeHtml(promptText.substring(0, 50)) + '...'
+                        : (promptText ? escapeHtml(promptText) : '<span class="text-slate-400 italic">Ingen prompt</span>');
+
+                    return `
+                        <tr class="hover:bg-slate-50/60 transition">
+                            <td class="px-6 py-4 align-top">
+                                <div class="font-semibold text-slate-800 text-xs">${escapeHtml(formattedDate)}</div>
+                                <div class="text-[11px] text-slate-500 truncate max-w-[180px]" title="${escapeHtml(userDisplay)}">${escapeHtml(userDisplay)}</div>
+                                ${contactBadge}
+                            </td>
+                            <td class="px-6 py-4 align-top">
+                                <p class="text-xs text-slate-800 leading-relaxed max-w-xs break-words">${commentPreview}</p>
+                            </td>
+                            <td class="px-6 py-4 align-top">
+                                <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
+                                    <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
+                                </div>
+                                <button onclick="openFeedbackDetails(${idx})" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
+                                    <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
+                                    <span>Vis fuld kontekst</span>
+                                </button>
+                            </td>
+                            <td class="px-6 py-4 text-right align-top">
+                                <button onclick="deleteFeedback('${fb.id}')" class="text-red-600 hover:text-red-800 p-1.5 rounded-lg hover:bg-red-50 transition" title="Slet feedback">
+                                    <i class="fa-solid fa-trash-can text-xs"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente feedbackliste.</td></tr>`;
+            } finally {
+                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
+            }
+        }
+
+        function openFeedbackDetails(index) {
+            const fb = feedbackListCache[index];
+            if (!fb) return;
+
+            const modal = document.getElementById('feedback-modal');
+            const body = document.getElementById('feedback-modal-body');
+            if (!modal || !body) return;
+
+            const dateObj = new Date(fb.created_at || fb.createdAt);
+            const formattedDate = dateObj.toLocaleDateString('da-DK', {
+                day: '2-digit', month: 'short', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+
+            const contactHtml = (fb.contact_email || fb.contactEmail)
+                ? `<div class="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                     <span class="font-semibold text-blue-900 block mb-0.5">Kontakt-email oplyst af bruger:</span>
+                     <span class="text-blue-800 font-medium">${escapeHtml(fb.contact_email || fb.contactEmail)}</span>
+                   </div>`
+                : '';
+
+            const conversationHtml = (fb.conversation_id || fb.conversationId)
+                ? `<div class="text-[10px] text-slate-400">Samtale-ID: <code>${escapeHtml(fb.conversation_id || fb.conversationId)}</code></div>`
+                : '';
+
+            body.innerHTML = `
+                <div class="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px]">
+                    <div>
+                        <span class="text-slate-400 font-medium block">Tidspunkt:</span>
+                        <span class="font-semibold text-slate-800">${escapeHtml(formattedDate)}</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 font-medium block">Bruger (Session):</span>
+                        <span class="font-semibold text-slate-800">${escapeHtml(fb.user_email || fb.userEmail || fb.user_id || fb.userId)}</span>
+                    </div>
+                </div>
+
+                ${contactHtml}
+
+                <div class="space-y-1.5">
+                    <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Brugerens kommentar:</label>
+                    <div class="p-3 bg-amber-50/70 border border-amber-200 rounded-lg text-slate-900 leading-relaxed font-medium whitespace-pre-wrap">${escapeHtml(fb.comment)}</div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Medsendte søgeprompter:</label>
+                    <div class="p-3 bg-slate-100 border border-slate-200 rounded-lg text-slate-800 font-mono text-[11px] whitespace-pre-wrap max-h-36 overflow-y-auto">${escapeHtml(fb.search_prompts || fb.searchPrompts || 'Ingen prompt registreret')}</div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Svaret fra assistenten:</label>
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap">${escapeHtml(fb.assistant_answer || fb.assistantAnswer || 'Intet svar registreret')}</div>
+                </div>
+
+                ${conversationHtml}
+            `;
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeFeedbackModal() {
+            const modal = document.getElementById('feedback-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        async function deleteFeedback(id) {
+            if (!confirm('Er du sikker på, at du vil slette dette feedback-indlæg?')) return;
+
+            const statusBanner = document.getElementById('feedback-status');
+            try {
+                const response = await fetch(`/api/feedback/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (response.ok) {
+                    if (statusBanner) {
+                        statusBanner.className = 'm-4 p-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs';
+                        statusBanner.textContent = 'Feedback slettet.';
+                        statusBanner.classList.remove('hidden');
+                        setTimeout(() => statusBanner.classList.add('hidden'), 3000);
+                    }
+                    fetchFeedbacks();
+                } else {
+                    const err = await response.json();
+                    alert(err?.message || 'Kunne ikke slette feedback.');
+                }
+            } catch (err) {
+                alert('Netværksfejl under sletning.');
+            }
+        }
+    </script>
+</body>
+</html>
 
         async function fetchSystemHealth() {
             const panel = document.getElementById('system-health-panel');

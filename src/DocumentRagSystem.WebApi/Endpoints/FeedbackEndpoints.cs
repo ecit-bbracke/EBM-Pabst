@@ -109,6 +109,31 @@ public static class FeedbackEndpoints
         .RequireAuthorization()
         .WithName("GetAllFeedback");
 
+        app.MapDelete("/api/feedback/{id}", async (
+            string id,
+            IFeedbackRepository feedbackRepo,
+            ClaimsPrincipal user,
+            ILoggerFactory loggerFactory) =>
+        {
+            if (!UserSecurityHelper.IsUserAdmin(user))
+            {
+                return Results.Forbid();
+            }
+
+            var deleted = await feedbackRepo.DeleteFeedbackAsync(id);
+            if (!deleted)
+            {
+                return Results.NotFound(new { message = "Feedback ikke fundet." });
+            }
+
+            var logger = loggerFactory.CreateLogger("FeedbackEndpoints");
+            logger.LogInformation("Feedback {FeedbackId} deleted by admin {Admin}.", id, user.Identity?.Name);
+
+            return Results.Ok(new { message = "Feedback slettet." });
+        })
+        .RequireAuthorization()
+        .WithName("DeleteFeedback");
+
         return app;
     }
 }

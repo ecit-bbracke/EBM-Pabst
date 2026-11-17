@@ -102,6 +102,20 @@ public class SqliteFeedbackRepository : IFeedbackRepository
         return entity != null ? ToModel(entity) : null;
     }
 
+    public async Task<bool> DeleteFeedbackAsync(string id, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        EnsureDatabaseInitialized();
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await context.Feedbacks.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        if (entity == null) return false;
+
+        context.Feedbacks.Remove(entity);
+        await context.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     private static UserFeedback ToModel(FeedbackEntity entity)
     {
         return new UserFeedback(

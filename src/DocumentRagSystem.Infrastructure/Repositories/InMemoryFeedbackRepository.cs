@@ -40,8 +40,14 @@ public class InMemoryFeedbackRepository : IFeedbackRepository
     public Task<UserFeedback?> GetFeedbackByIdAsync(string id, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(id)) return Task.FromResult<UserFeedback?>(null);
-
         _feedbacks.TryGetValue(id, out var item);
         return Task.FromResult(item);
+    }
+
+    public Task<bool> DeleteFeedbackAsync(string id, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return Task.FromResult(false);
+        var removed = _feedbacks.TryRemove(id, out _);
+        return Task.FromResult(removed);
     }
 }
