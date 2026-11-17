@@ -316,3 +316,13 @@ async function handleLogout() {
 function checkAdminNav() {
     PortalAuth.checkSession();
 }
+
+// Global keyboard accessibility: Escape closes open modal dialogs
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' || e.key === 'Esc') {
+        const changePwModal = document.getElementById('change-password-modal');
+        if (changePwModal && !changePwModal.classList.contains('hidden')) {
+            closeChangePasswordModal();
+        }
+    }
+});

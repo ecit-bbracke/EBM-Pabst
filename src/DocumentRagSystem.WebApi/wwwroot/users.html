@@ -829,6 +829,22 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
         }
+
+        // Keyboard accessibility: Escape closes open admin modals
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' || e.key === 'Esc') {
+                const fbModal = document.getElementById('feedback-modal');
+                if (fbModal && !fbModal.classList.contains('hidden')) {
+                    closeFeedbackModal();
+                    return;
+                }
+                const adminResetModal = document.getElementById('admin-reset-pw-modal');
+                if (adminResetModal && !adminResetModal.classList.contains('hidden')) {
+                    closeResetPasswordModal();
+                    return;
+                }
+            }
+        });
     </script>
 </body>
 </html>

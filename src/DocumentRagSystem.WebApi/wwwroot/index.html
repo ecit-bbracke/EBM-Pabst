@@ -2151,6 +2151,29 @@
                 return;
             }
         });
+
+        // Keyboard accessibility: Escape closes open feedback form or PDF modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' || e.key === 'Esc') {
+                const pdfModal = document.getElementById('pdf-modal');
+                if (pdfModal && !pdfModal.classList.contains('hidden')) {
+                    pdfModal.classList.add('hidden');
+                    document.body.style.overflow = '';
+                    return;
+                }
+
+                const feedbackContainer = document.getElementById('feedback-form-container');
+                if (feedbackContainer && !feedbackContainer.classList.contains('hidden')) {
+                    feedbackContainer.classList.add('hidden');
+                    const toggleBtn = document.getElementById('feedback-toggle-btn');
+                    if (toggleBtn) {
+                        toggleBtn.setAttribute('aria-expanded', 'false');
+                        toggleBtn.focus();
+                    }
+                    return;
+                }
+            }
+        });
     </script>
 </body>
 </html>
