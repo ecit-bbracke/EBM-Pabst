@@ -2,11 +2,27 @@
  * ebm-papst Portal Shared Navigation & Account Management Component
  * Provides unified header, authentication status check, and self-service password change modal.
  */
+
+// Detect active release version from script URL parameter (injected during package-release.ps1)
+(function() {
+    let ver = 'vdev';
+    try {
+        const scriptEl = document.currentScript || document.querySelector('script[src*="nav.js"]');
+        if (scriptEl && scriptEl.src) {
+            const url = new URL(scriptEl.src, window.location.origin);
+            const vParam = url.searchParams.get('v');
+            if (vParam) ver = `v${vParam}`;
+        }
+    } catch {}
+    window.PORTAL_VERSION = ver;
+})();
+
 class PortalHeader extends HTMLElement {
     connectedCallback() {
         const active = this.getAttribute('active') || 'chat';
         const title = this.getAttribute('title') || 'Søgning i produkt dokumentation';
         const icon = this.getAttribute('icon') || 'fa-robot';
+        const version = window.PORTAL_VERSION || 'vdev';
 
         const isChat = active === 'chat';
         const isDocs = active === 'documents';
@@ -23,8 +39,9 @@ class PortalHeader extends HTMLElement {
                     <div class="bg-brand-500 p-2 rounded-lg text-white shadow-sm flex items-center justify-center">
                         <i class="fa-solid ${icon} text-xl"></i>
                     </div>
-                    <div>
+                    <div class="flex items-center space-x-2.5">
                         <h1 class="text-xl font-bold tracking-tight">${title}</h1>
+                        <span class="text-[10px] font-mono font-normal px-1.5 py-0.5 rounded bg-brand-800/90 text-brand-300 border border-brand-700/60 select-all cursor-default" title="Aktiv commit revision: ${version}">${version}</span>
                     </div>
                 </div>
                 <nav class="flex items-center space-x-2.5">
@@ -59,6 +76,14 @@ class PortalHeader extends HTMLElement {
 
         PortalAuth.ensureChangePasswordModal();
         PortalAuth.checkSession();
+
+        // Update footer copyright line with version badge if present
+        setTimeout(() => {
+            const footerPara = document.querySelector('footer p');
+            if (footerPara && !footerPara.innerHTML.includes(version)) {
+                footerPara.innerHTML += ` &bull; <span class="font-mono text-xs opacity-75" title="Aktiv commit revision">${version}</span>`;
+            }
+        }, 50);
     }
 }
 customElements.define('portal-header', PortalHeader);
