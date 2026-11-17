@@ -34,27 +34,31 @@ New-Item -ItemType Directory -Path "$PayloadDir\webapi" -Force | Out-Null
 New-Item -ItemType Directory -Path "$PayloadDir\worker" -Force | Out-Null
 New-Item -ItemType Directory -Path "$PayloadDir\data" -Force | Out-Null
 
-# 2. Publish WebApi (Self-Contained Linux x64)
-Write-Host "`n--> Publishing DocumentRagSystem.WebApi ($Runtime)..." -ForegroundColor Yellow
-dotnet publish "$RootDir\src\DocumentRagSystem.WebApi\DocumentRagSystem.WebApi.csproj" `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -o "$PayloadDir\webapi"
-
-# 3. Publish Worker (Self-Contained Linux x64)
-Write-Host "`n--> Publishing DocumentRagSystem.Worker ($Runtime)..." -ForegroundColor Yellow
-dotnet publish "$RootDir\src\DocumentRagSystem.Worker\DocumentRagSystem.Worker.csproj" `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -o "$PayloadDir\worker"
-
-# 3b. Inject automated Git commit hash into client HTML assets for cache-busting
+# Resolve current Git commit hash for assembly versioning and client cache-busting
 $GitCommit = (git rev-parse --short HEAD 2>$null)
 if (-not $GitCommit) {
     $GitCommit = (Get-Date -Format "yyyyMMddHHmm")
 }
+
+# 2. Publish WebApi (Self-Contained Linux x64)
+Write-Host "`n--> Publishing DocumentRagSystem.WebApi ($Runtime, commit: $GitCommit)..." -ForegroundColor Yellow
+dotnet publish "$RootDir\src\DocumentRagSystem.WebApi\DocumentRagSystem.WebApi.csproj" `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -p:SourceRevisionId=$GitCommit `
+    -o "$PayloadDir\webapi"
+
+# 3. Publish Worker (Self-Contained Linux x64)
+Write-Host "`n--> Publishing DocumentRagSystem.Worker ($Runtime, commit: $GitCommit)..." -ForegroundColor Yellow
+dotnet publish "$RootDir\src\DocumentRagSystem.Worker\DocumentRagSystem.Worker.csproj" `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -p:SourceRevisionId=$GitCommit `
+    -o "$PayloadDir\worker"
+
+# 3b. Inject automated Git commit hash into client HTML assets for cache-busting
 Write-Host "`n--> Injecting Git commit version ($GitCommit) into published HTML assets..." -ForegroundColor Yellow
 $WwwrootDir = "$PayloadDir\webapi\wwwroot"
 if (Test-Path $WwwrootDir) {

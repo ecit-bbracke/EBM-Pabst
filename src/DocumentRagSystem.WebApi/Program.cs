@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
@@ -633,11 +634,40 @@ app.MapGet("/health", async (
     var memoryMb = Math.Round(process.WorkingSet64 / (1024.0 * 1024.0), 1);
     var uptime = DateTime.UtcNow - process.StartTime.ToUniversalTime();
 
+    var gitCommit = Environment.GetEnvironmentVariable("BUILD_GIT_COMMIT");
+    if (string.IsNullOrWhiteSpace(gitCommit))
+    {
+        var infoVer = typeof(Program).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(infoVer))
+        {
+            var plusIdx = infoVer.IndexOf('+');
+            if (plusIdx >= 0 && plusIdx < infoVer.Length - 1)
+            {
+                var sha = infoVer.Substring(plusIdx + 1).Trim();
+                gitCommit = sha.Length > 7 ? sha.Substring(0, 7) : sha;
+            }
+            else if (!infoVer.Contains('+'))
+            {
+                gitCommit = infoVer.Length > 7 ? infoVer.Substring(0, 7) : infoVer;
+            }
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(gitCommit))
+    {
+        gitCommit = builder.Configuration["Build:GitCommit"] ?? "dev";
+    }
+
     var opts = llmOptions.Value;
 
     return Results.Ok(new
     {
         status = "Healthy",
+        gitCommit = gitCommit,
+        version = $"v{gitCommit}",
         timestamp = DateTime.UtcNow,
         uptime = $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m {uptime.Seconds}s",
         memoryUsageMb = memoryMb,

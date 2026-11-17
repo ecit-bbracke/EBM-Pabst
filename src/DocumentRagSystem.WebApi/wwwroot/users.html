@@ -486,6 +486,10 @@
 
                     <div class="bg-slate-50 p-3.5 rounded-lg border border-slate-200/80 space-y-2 text-xs">
                         <div class="flex justify-between items-center">
+                            <span class="text-slate-500 font-medium">System Revision:</span>
+                            <span class="font-mono text-brand-700 font-semibold text-[11px] bg-brand-50 px-1.5 py-0.5 rounded border border-brand-200/70">${escapeHtml(data.version || ('v' + (data.gitCommit || 'dev')))}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
                             <span class="text-slate-500 font-medium">AI Provider:</span>
                             <span class="font-bold text-slate-700">${escapeHtml(data.llmProvider || 'Gemini')}</span>
                         </div>
