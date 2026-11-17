@@ -342,6 +342,7 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
         sp.GetService<ILogger<QdrantVectorStore>>()));
 
 builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
+builder.Services.AddSingleton<IFeedbackRepository, SqliteFeedbackRepository>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IPdfOptimizer, PdfOptimizer>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));
@@ -583,6 +584,7 @@ app.MapDocumentEndpoints(servedUploadDirectories);
 app.MapQueryEndpoints(servedUploadDirectories);
 app.MapConversationEndpoints();
 app.MapAuthEndpoints();
+app.MapFeedbackEndpoints();
 app.MapAdminEndpoints(servedUploadDirectories);
 app.MapDataberegning();
 
@@ -739,6 +741,20 @@ try
             CREATE INDEX IF NOT EXISTS "IX_Documents_FileName" ON "Documents" ("FileName");
             CREATE INDEX IF NOT EXISTS "IX_Documents_ArticleId" ON "Documents" ("ArticleId");
             CREATE INDEX IF NOT EXISTS "IX_Documents_Language" ON "Documents" ("Language");
+
+            CREATE TABLE IF NOT EXISTS "Feedbacks" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Feedbacks" PRIMARY KEY,
+                "UserId" TEXT NOT NULL,
+                "UserEmail" TEXT NULL,
+                "Comment" TEXT NOT NULL,
+                "ContactEmail" TEXT NULL,
+                "SearchPrompts" TEXT NULL,
+                "AssistantAnswer" TEXT NULL,
+                "ConversationId" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_Feedbacks_UserId" ON "Feedbacks" ("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_Feedbacks_CreatedAt" ON "Feedbacks" ("CreatedAt");
         """);
 
         try

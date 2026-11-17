@@ -5,6 +5,7 @@ namespace DocumentRagSystem.Infrastructure.Data;
 public class DocumentDbContext : DbContext
 {
     public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
+    public DbSet<FeedbackEntity> Feedbacks => Set<FeedbackEntity>();
 
     public DocumentDbContext(DbContextOptions<DocumentDbContext> options)
         : base(options)
@@ -34,6 +35,13 @@ public class DocumentDbContext : DbContext
             entity.HasIndex(e => e.Language);
             entity.HasIndex(e => e.ProductCode);
             entity.HasIndex(e => e.Phase);
+        });
+
+        builder.Entity<FeedbackEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }
