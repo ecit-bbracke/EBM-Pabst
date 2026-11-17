@@ -560,6 +560,13 @@ app.UseStaticFiles(new StaticFileOptions
             ctx.Context.Response.Headers["Pragma"] = "no-cache";
             ctx.Context.Response.Headers["Expires"] = "0";
         }
+        else if (ctx.File.Name.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+                 ctx.File.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+        {
+            // Revalidate scripts and stylesheets so client browsers instantly receive updates upon new deployments
+            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+            ctx.Context.Response.Headers["Pragma"] = "no-cache";
+        }
     }
 });
 
