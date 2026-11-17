@@ -7,3 +7,7 @@ public record UserDto(string Email, string? UserName = null);
 public record CreateUserRequest(string Email, string Password);
 
 public record UserSummaryDto(string Id, string Email, string? UserName, bool IsLockedOut);
+
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+public record AdminResetPasswordRequest(string NewPassword);

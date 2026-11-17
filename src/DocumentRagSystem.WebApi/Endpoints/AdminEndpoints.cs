@@ -150,6 +150,44 @@ public static class AdminEndpoints
         .RequireAuthorization()
         .WithName("UnlockAdminUser");
 
+        app.MapPost("/api/admin/users/{id}/reset-password", async (
+            string id,
+            AdminResetPasswordRequest model,
+            ClaimsPrincipal currentUser,
+            UserManager<IdentityUser> userManager) =>
+        {
+            if (!UserSecurityHelper.IsUserAdmin(currentUser))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            if (string.IsNullOrWhiteSpace(model.NewPassword) || model.NewPassword.Length < 6)
+            {
+                return Results.BadRequest(new { message = "Ny adgangskode skal være på mindst 6 tegn." });
+            }
+
+            var user = await userManager.FindByIdAsync(id);
+            if (user == null)
+            {
+                return Results.NotFound(new { message = "Bruger ikke fundet." });
+            }
+
+            var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+            var result = await userManager.ResetPasswordAsync(user, resetToken, model.NewPassword);
+
+            if (result.Succeeded)
+            {
+                await userManager.SetLockoutEndDateAsync(user, null);
+                await userManager.ResetAccessFailedCountAsync(user);
+
+                return Results.Ok(new { message = $"Adgangskoden for '{user.Email}' er blevet nulstillet." });
+            }
+
+            return Results.BadRequest(new { message = string.Join(", ", result.Errors.Select(e => e.Description)) });
+        })
+        .RequireAuthorization()
+        .WithName("AdminResetPassword");
+
         // CLEAR QUERY CACHE ENDPOINT
         app.MapPost("/api/admin/clear-cache", () =>
         {
