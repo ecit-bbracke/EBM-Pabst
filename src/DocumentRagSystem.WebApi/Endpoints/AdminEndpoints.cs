@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -48,7 +49,10 @@ public static class AdminEndpoints
         app.MapPost("/api/admin/users", async (
             CreateUserRequest model,
             ClaimsPrincipal currentUser,
-            UserManager<IdentityUser> userManager) =>
+            UserManager<IdentityUser> userManager,
+            IEmailSender emailSender,
+            ILoggerFactory loggerFactory,
+            HttpContext httpContext) =>
         {
             if (!UserSecurityHelper.IsUserAdmin(currentUser))
             {
@@ -76,12 +80,34 @@ public static class AdminEndpoints
             var result = await userManager.CreateAsync(newUser, model.Password);
             if (result.Succeeded)
             {
-                return Results.Ok(new UserSummaryDto(
-                    Id: newUser.Id,
-                    Email: newUser.Email,
-                    UserName: newUser.UserName,
-                    IsLockedOut: false
-                ));
+                var logger = loggerFactory.CreateLogger("AdminEndpoints");
+                logger.LogInformation("New user created: {Email} by admin {Admin}.", newUser.Email, currentUser.Identity?.Name);
+
+                bool emailSent = false;
+                try
+                {
+                    var loginUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/login.html";
+                    var welcomeHtml = BuildWelcomeEmailHtml(newUser.Email, model.Password, loginUrl);
+                    await emailSender.SendEmailAsync(newUser.Email, "Velkommen til ebm-papst Portalen", welcomeHtml, isHtml: true);
+                    emailSent = true;
+                    logger.LogInformation("Welcome email successfully dispatched to {Email}.", newUser.Email);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not send welcome email to {Email}: {Error}", newUser.Email, ex.Message);
+                }
+
+                return Results.Ok(new
+                {
+                    id = newUser.Id,
+                    email = newUser.Email,
+                    userName = newUser.UserName,
+                    isLockedOut = false,
+                    emailSent = emailSent,
+                    message = emailSent
+                        ? $"Bruger '{newUser.Email}' oprettet! Velkomstmail er sendt til brugeren."
+                        : $"Bruger '{newUser.Email}' oprettet! (Bemærk: Kunne ikke afsende velkomstmail automatisk)."
+                });
             }
 
             return Results.BadRequest(new { message = string.Join(", ", result.Errors.Select(e => e.Description)) });
@@ -154,7 +180,10 @@ public static class AdminEndpoints
             string id,
             AdminResetPasswordRequest model,
             ClaimsPrincipal currentUser,
-            UserManager<IdentityUser> userManager) =>
+            UserManager<IdentityUser> userManager,
+            IEmailSender emailSender,
+            ILoggerFactory loggerFactory,
+            HttpContext httpContext) =>
         {
             if (!UserSecurityHelper.IsUserAdmin(currentUser))
             {
@@ -180,7 +209,30 @@ public static class AdminEndpoints
                 await userManager.SetLockoutEndDateAsync(user, null);
                 await userManager.ResetAccessFailedCountAsync(user);
 
-                return Results.Ok(new { message = $"Adgangskoden for '{user.Email}' er blevet nulstillet." });
+                var logger = loggerFactory.CreateLogger("AdminEndpoints");
+                logger.LogInformation("Password reset for user: {Email} by admin {Admin}.", user.Email, currentUser.Identity?.Name);
+
+                bool emailSent = false;
+                try
+                {
+                    var loginUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/login.html";
+                    var resetHtml = BuildPasswordResetEmailHtml(user.Email ?? string.Empty, model.NewPassword, loginUrl);
+                    await emailSender.SendEmailAsync(user.Email ?? string.Empty, "Din adgangskode til ebm-papst Portalen er blevet nulstillet", resetHtml, isHtml: true);
+                    emailSent = true;
+                    logger.LogInformation("Password reset notification email sent to {Email}.", user.Email);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not send password reset notification email to {Email}: {Error}", user.Email, ex.Message);
+                }
+
+                return Results.Ok(new
+                {
+                    emailSent = emailSent,
+                    message = emailSent
+                        ? $"Adgangskoden for '{user.Email}' er blevet nulstillet, og email er sendt til brugeren."
+                        : $"Adgangskoden for '{user.Email}' er blevet nulstillet."
+                });
             }
 
             return Results.BadRequest(new { message = string.Join(", ", result.Errors.Select(e => e.Description)) });
@@ -540,5 +592,129 @@ public static class AdminEndpoints
         .WithName("CleanOrphanedDocuments");
 
         return app;
+    }
+
+    private static string BuildWelcomeEmailHtml(string email, string password, string loginUrl)
+    {
+        var encodedEmail = WebUtility.HtmlEncode(email);
+        var encodedPassword = WebUtility.HtmlEncode(password);
+        var encodedLoginUrl = WebUtility.HtmlEncode(loginUrl);
+
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="da">
+            <head>
+              <meta charset="utf-8" />
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 20px; }
+                .card { max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+                .header { background: #0c4a6e; color: #ffffff; padding: 24px; text-align: left; }
+                .header h2 { margin: 0; font-size: 20px; font-weight: 700; }
+                .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; }
+                .content { padding: 24px; font-size: 14px; line-height: 1.6; color: #334155; }
+                .credentials-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0284c7; padding: 16px; border-radius: 6px; margin: 20px 0; }
+                .credentials-box table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                .credentials-box th, .credentials-box td { padding: 6px 8px; text-align: left; }
+                .credentials-box th { width: 35%; color: #64748b; font-weight: 600; }
+                .credentials-box td { font-family: Consolas, Monaco, monospace; font-weight: 600; color: #0f172a; }
+                .btn { display: inline-block; background-color: #0284c7; color: #ffffff !important; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 16px 0; }
+                .footer { background: #f8fafc; padding: 14px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div class="header">
+                  <h2>ebm-papst Portal &bull; Velkommen som bruger</h2>
+                  <p>Din adgang er nu oprettet</p>
+                </div>
+                <div class="content">
+                  <p>Hej,</p>
+                  <p>Der er oprettet en brugerkonto til dig på ebm-papst Portalen med adgang til AI Chat Assistenten, tekniske datablade og beregningsmoduler.</p>
+                  
+                  <div class="credentials-box">
+                    <table>
+                      <tr><th>Brugernavn:</th><td>{{encodedEmail}}</td></tr>
+                      <tr><th>Midlertidig adgangskode:</th><td>{{encodedPassword}}</td></tr>
+                      <tr><th>Login URL:</th><td><a href="{{encodedLoginUrl}}" style="color: #0284c7; font-family: sans-serif;">{{encodedLoginUrl}}</a></td></tr>
+                    </table>
+                  </div>
+
+                  <div style="text-align: center;">
+                    <a href="{{encodedLoginUrl}}" class="btn" target="_blank">Log ind på ebm-papst Portalen</a>
+                  </div>
+
+                  <p style="font-size: 12px; color: #64748b; margin-top: 20px;">
+                    <strong>Sikkerhedstip:</strong> Vi anbefaler, at du efter første login skifter din adgangskode via <em>"Skift kode"</em>-knappen i portalens topmenu.
+                  </p>
+                </div>
+                <div class="footer">
+                  ebm-papst Document RAG Portal &bull; Denne besked er sendt automatisk ved oprettelse.
+                </div>
+              </div>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string BuildPasswordResetEmailHtml(string email, string newPassword, string loginUrl)
+    {
+        var encodedEmail = WebUtility.HtmlEncode(email);
+        var encodedPassword = WebUtility.HtmlEncode(newPassword);
+        var encodedLoginUrl = WebUtility.HtmlEncode(loginUrl);
+
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="da">
+            <head>
+              <meta charset="utf-8" />
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 20px; }
+                .card { max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+                .header { background: #0c4a6e; color: #ffffff; padding: 24px; text-align: left; }
+                .header h2 { margin: 0; font-size: 20px; font-weight: 700; }
+                .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; }
+                .content { padding: 24px; font-size: 14px; line-height: 1.6; color: #334155; }
+                .credentials-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 6px; margin: 20px 0; }
+                .credentials-box table { width: 100%; border-collapse: collapse; font-size: 13px; }
+                .credentials-box th, .credentials-box td { padding: 6px 8px; text-align: left; }
+                .credentials-box th { width: 35%; color: #64748b; font-weight: 600; }
+                .credentials-box td { font-family: Consolas, Monaco, monospace; font-weight: 600; color: #0f172a; }
+                .btn { display: inline-block; background-color: #0284c7; color: #ffffff !important; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 16px 0; }
+                .footer { background: #f8fafc; padding: 14px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div class="header">
+                  <h2>ebm-papst Portal &bull; Adgangskode Nulstillet</h2>
+                  <p>En administrator har nulstillet din adgangskode</p>
+                </div>
+                <div class="content">
+                  <p>Hej,</p>
+                  <p>Din adgangskode til ebm-papst Portalen er blevet nulstillet af en administrator.</p>
+                  
+                  <div class="credentials-box">
+                    <table>
+                      <tr><th>Brugernavn:</th><td>{{encodedEmail}}</td></tr>
+                      <tr><th>Ny adgangskode:</th><td>{{encodedPassword}}</td></tr>
+                      <tr><th>Login URL:</th><td><a href="{{encodedLoginUrl}}" style="color: #0284c7; font-family: sans-serif;">{{encodedLoginUrl}}</a></td></tr>
+                    </table>
+                  </div>
+
+                  <div style="text-align: center;">
+                    <a href="{{encodedLoginUrl}}" class="btn" target="_blank">Log ind på ebm-papst Portalen</a>
+                  </div>
+
+                  <p style="font-size: 12px; color: #64748b; margin-top: 20px;">
+                    <strong>Sikkerhedstip:</strong> Vi anbefaler, at du efter login ændrer denne midlertidige adgangskode via <em>"Skift kode"</em> i menuen.
+                  </p>
+                </div>
+                <div class="footer">
+                  ebm-papst Document RAG Portal &bull; Denne besked er sendt automatisk ved nulstilling.
+                </div>
+              </div>
+            </body>
+            </html>
+            """;
     }
 }

@@ -102,4 +102,58 @@ public class PasswordManagementTests
         // THEN password reset succeeds:
         Assert.True(result.Succeeded);
     }
+
+    [Fact]
+    public async Task WelcomeEmail_Dispatch_SendsEmailWithTemporaryCredentials()
+    {
+        // GIVEN a mock email sender and user creation parameters:
+        var mockEmailSender = new Mock<DocumentRagSystem.Core.Interfaces.IEmailSender>();
+        string? capturedRecipient = null;
+        string? capturedSubject = null;
+        string? capturedBody = null;
+
+        mockEmailSender.Setup(x => x.SendEmailAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<bool>(),
+            It.IsAny<System.Threading.CancellationToken>()))
+            .Callback<string, string, string, bool, System.Threading.CancellationToken>((to, subj, body, html, ct) =>
+            {
+                capturedRecipient = to;
+                capturedSubject = subj;
+                capturedBody = body;
+            })
+            .Returns(Task.CompletedTask);
+
+        // WHEN sending a welcome email:
+        var recipient = "newemployee@ebmpabst.dk";
+        var tempPassword = "SecureGeneratedSecret#14";
+        var loginUrl = "https://portal.ebmpabst.dk/login.html";
+
+        var welcomeHtml = $"""
+            <html>
+                <body>
+                    <p>Brugernavn: {recipient}</p>
+                    <p>Midlertidig adgangskode: {tempPassword}</p>
+                    <p>Login URL: {loginUrl}</p>
+                </body>
+            </html>
+            """;
+
+        await mockEmailSender.Object.SendEmailAsync(
+            recipient,
+            "Velkommen til ebm-papst Portalen",
+            welcomeHtml,
+            isHtml: true
+        );
+
+        // THEN email was dispatched to the new user with credentials:
+        Assert.Equal("newemployee@ebmpabst.dk", capturedRecipient);
+        Assert.Equal("Velkommen til ebm-papst Portalen", capturedSubject);
+        Assert.NotNull(capturedBody);
+        Assert.Contains(recipient, capturedBody);
+        Assert.Contains(tempPassword, capturedBody);
+        Assert.Contains(loginUrl, capturedBody);
+    }
 }

@@ -317,6 +317,78 @@ function checkAdminNav() {
     PortalAuth.checkSession();
 }
 
+// Cryptographically secure password generation
+function generateSecurePassword(length = 14) {
+    const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // exclude easily confused I, O
+    const lowercase = "abcdefghijkmnopqrstuvwxyz"; // exclude easily confused l
+    const numbers = "23456789";                   // exclude easily confused 0, 1
+    const symbols = "!@#$%^&*()-_=+[]{}";
+    const allChars = uppercase + lowercase + numbers + symbols;
+
+    const randomBytes = new Uint8Array(length);
+    window.crypto.getRandomValues(randomBytes);
+
+    let passwordChars = [
+        uppercase[randomBytes[0] % uppercase.length],
+        lowercase[randomBytes[1] % lowercase.length],
+        numbers[randomBytes[2] % numbers.length],
+        symbols[randomBytes[3] % symbols.length]
+    ];
+
+    for (let i = 4; i < length; i++) {
+        passwordChars.push(allChars[randomBytes[i] % allChars.length]);
+    }
+
+    // Shuffle characters using Fisher-Yates with crypto random
+    for (let i = passwordChars.length - 1; i > 0; i--) {
+        const j = randomBytes[i] % (i + 1);
+        [passwordChars[i], passwordChars[j]] = [passwordChars[j], passwordChars[i]];
+    }
+
+    return passwordChars.join('');
+}
+
+function generateAndSetPassword(inputId, barId, textId, confirmInputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    const pw = generateSecurePassword(14);
+    input.value = pw;
+    input.type = 'text'; // Show the generated password so admin can view/copy it
+
+    // Update eye toggle icon if present
+    const toggleBtn = input.parentElement ? input.parentElement.querySelector('button[onclick*="togglePasswordVisibility"]') : null;
+    if (toggleBtn) {
+        const icon = toggleBtn.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-eye text-xs text-brand-600';
+    }
+
+    if (confirmInputId) {
+        const confirmInput = document.getElementById(confirmInputId);
+        if (confirmInput) {
+            confirmInput.value = pw;
+            confirmInput.type = 'text';
+        }
+    }
+
+    if (typeof updatePasswordStrength === 'function' && barId && textId) {
+        updatePasswordStrength(pw, barId, textId);
+    }
+}
+
+function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const isPw = input.type === 'password';
+    input.type = isPw ? 'text' : 'password';
+    if (btn) {
+        const icon = btn.querySelector('i');
+        if (icon) {
+            icon.className = isPw ? 'fa-solid fa-eye text-xs text-brand-600' : 'fa-solid fa-eye-slash text-xs text-slate-400';
+        }
+    }
+}
+
 // Global keyboard accessibility: Escape closes open modal dialogs
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Esc') {
