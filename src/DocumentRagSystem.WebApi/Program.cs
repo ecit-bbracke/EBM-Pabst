@@ -14,6 +14,7 @@ using DocumentRagSystem.Infrastructure.Data;
 using DocumentRagSystem.Infrastructure.Embeddings;
 using DocumentRagSystem.Infrastructure.HealthChecks;
 using DocumentRagSystem.Infrastructure.Llm;
+using DocumentRagSystem.Infrastructure.Notifications;
 using DocumentRagSystem.Infrastructure.Repositories;
 using DocumentRagSystem.Infrastructure.Services;
 using DocumentRagSystem.Infrastructure.TextExtractors;
@@ -343,6 +344,10 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>(sp =>
 
 builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
 builder.Services.AddSingleton<IFeedbackRepository, SqliteFeedbackRepository>();
+builder.Services.Configure<FeedbackNotificationOptions>(
+    builder.Configuration.GetSection(FeedbackNotificationOptions.SectionName));
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton<IFeedbackNotificationService, FeedbackNotificationService>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();
 builder.Services.AddSingleton<IPdfOptimizer, PdfOptimizer>();
 builder.Services.AddSingleton<IChunkingService, ChunkingService>(sp => new ChunkingService(1000, 200));

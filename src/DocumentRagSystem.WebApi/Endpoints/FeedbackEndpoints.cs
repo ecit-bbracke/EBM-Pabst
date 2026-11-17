@@ -34,6 +34,7 @@ public static class FeedbackEndpoints
             SubmitFeedbackRequest request,
             ClaimsPrincipal user,
             IFeedbackRepository feedbackRepo,
+            IFeedbackNotificationService notificationService,
             UserManager<IdentityUser> userManager,
             ILoggerFactory loggerFactory) =>
         {
@@ -83,6 +84,16 @@ public static class FeedbackEndpoints
 
             logger.LogInformation("Feedback {FeedbackId} saved from user {UserId} (Conversation: {ConvId}).",
                 saved.Id, userId, request.ConversationId);
+
+            // 4. Dispatch Email Notification via SendGrid SMTP to bbracke@ecit.com
+            try
+            {
+                await notificationService.SendFeedbackNotificationAsync(saved);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to dispatch email notification for feedback {FeedbackId}: {Message}", saved.Id, ex.Message);
+            }
 
             return Results.Ok(new
             {
