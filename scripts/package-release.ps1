@@ -50,6 +50,28 @@ dotnet publish "$RootDir\src\DocumentRagSystem.Worker\DocumentRagSystem.Worker.c
     --self-contained true `
     -o "$PayloadDir\worker"
 
+# 3b. Inject automated Git commit hash into client HTML assets for cache-busting
+$GitCommit = (git rev-parse --short HEAD 2>$null)
+if (-not $GitCommit) {
+    $GitCommit = (Get-Date -Format "yyyyMMddHHmm")
+}
+Write-Host "`n--> Injecting Git commit version ($GitCommit) into published HTML assets..." -ForegroundColor Yellow
+$WwwrootDir = "$PayloadDir\webapi\wwwroot"
+if (Test-Path $WwwrootDir) {
+    Get-ChildItem -Path $WwwrootDir -Filter "*.html" | ForEach-Object {
+        $htmlContent = Get-Content -Path $_.FullName -Raw -Encoding UTF8
+        $updatedHtml = [System.Text.RegularExpressions.Regex]::Replace(
+            $htmlContent,
+            'src="nav\.js(?:\?v=[^"]*)?"',
+            "src=`"nav.js?v=$GitCommit`""
+        )
+        if ($htmlContent -ne $updatedHtml) {
+            Set-Content -Path $_.FullName -Value $updatedHtml -Encoding UTF8 -NoNewline
+            Write-Host "    Injected into $($_.Name) -> nav.js?v=$GitCommit" -ForegroundColor DarkGray
+        }
+    }
+}
+
 # 4. Copy configuration, scripts, documentation, and data
 Write-Host "`n--> Assembling release payload..." -ForegroundColor Yellow
 if (Test-Path "$RootDir\data\Generelt") {
