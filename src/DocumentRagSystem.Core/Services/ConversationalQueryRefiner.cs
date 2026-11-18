@@ -65,6 +65,7 @@ Rules:
 5. RESET: start over.
 6. Keep effective_question in the exact same language as latest user message (if language cannot be detected, use Danish).
 7. DIMENSIONAL & COLLOQUIAL MAPPING: When users specify approximate, colloquial, or non-standard fan dimensions (such as 120mm, 121mm, 118mm, 120x120) or colloquial terms ('computerblæser', 'kabinetblæser', 'PC fan'), map and expand the effective_question to include the official ebm-papst standard dimensions (119 mm / 119x119 mm) and standard product category ('axial compact fan' / 'kompaktblæser', series 4400/4300).
+8. ENGINEERING UNITS & OPERATIONAL PARAMETERS: When users specify airflow in non-metric or alternative units like CFM or l/s, convert and include both the original unit and standard metric m³/h (e.g. 100 CFM ≈ 170 m³/h; 50 l/s = 180 m³/h). When users specify pressure in mmVS, mm H2O, or in. wg, include the Pascal (Pa) equivalent (10 mmVS ≈ 100 Pa; 1 in. wg ≈ 250 Pa). When harsh, wet, or outdoor environments are mentioned, include IP54/IP68.
 """;
 
     public async Task<QueryRefinementResult> RefineQueryAsync(

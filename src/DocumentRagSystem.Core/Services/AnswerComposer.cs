@@ -285,6 +285,10 @@ public class AnswerComposer : IAnswerComposer
         }
 
         sb.AppendLine("- **Motor Technology**: '3G' = EC-motor (electronically commutated); AC motor codes = poles + phase ('E' = 1~ 230V, 'D' = 3~ 400V).");
+        sb.AppendLine("- **Engineering Units & Operating Parameters (CFM, l/s, mmVS, Pa, IP-ratings)**:");
+        sb.AppendLine("  - When user questions specify airflow in CFM or l/s, always provide the metric m³/h equivalent alongside for clarity (1 CFM ≈ 1,7 m³/h; 1 l/s = 3,6 m³/h; e.g. 100 CFM ≈ 170 m³/h).");
+        sb.AppendLine("  - When user questions specify pressure in mmVS, mm H2O, or in. wg, show the Pascal (Pa) equivalent (1 mmVS ≈ 9,81 Pa; 1 in. wg ≈ 249 Pa).");
+        sb.AppendLine("  - When discussing harsh, wet, or outdoor environments, explicitly mention ingress protection ratings (IP20 for standard indoor/IT racks, IP54/IP55 for industrial dust/splash protection, IP68 for fully potted/washdown/outdoor).");
 
         if (isReplacement)
         {

@@ -189,14 +189,23 @@ public static class ElectricalQueryExpander
 
         var expandedElectrical = sb.ToString();
         var expandedDimensional = DimensionalQueryExpander.Expand(query);
+        var expandedUnits = EngineeringUnitsQueryExpander.Expand(query);
+
+        var finalResult = new StringBuilder(expandedElectrical);
 
         if (!string.Equals(expandedDimensional, query.Trim(), StringComparison.Ordinal))
         {
             var dimensionalAdditions = expandedDimensional.Substring(query.Trim().Length);
-            return expandedElectrical + dimensionalAdditions;
+            finalResult.Append(dimensionalAdditions);
         }
 
-        return expandedElectrical;
+        if (!string.Equals(expandedUnits, query.Trim(), StringComparison.Ordinal))
+        {
+            var unitAdditions = expandedUnits.Substring(query.Trim().Length);
+            finalResult.Append(unitAdditions);
+        }
+
+        return finalResult.ToString();
     }
 
     public static ElectricalFilter? ExtractVoltageFilter(string? query)
