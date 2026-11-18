@@ -969,9 +969,9 @@
 
                 return `
                     <tr class="hover:bg-slate-50/50 transition">
-                        <td class="px-6 py-4 font-medium text-slate-900">
-                            <div class="flex items-start space-x-3">
-                                <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase shrink-0 mt-0.5">
+                        <td class="px-6 py-4 align-middle font-medium text-slate-900">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase shrink-0">
                                     ${user.email.substring(0, 2)}
                                 </div>
                                 <div class="min-w-0">
@@ -983,9 +983,9 @@
                                 </div>
                             </div>
                         </td>
-                        <td class="px-6 py-4 align-top whitespace-nowrap">${statusBadge}</td>
-                        <td class="px-6 py-4 align-top whitespace-nowrap">${lastLoginContent}</td>
-                        <td class="px-6 py-4 text-right align-top whitespace-nowrap">${actions}</td>
+                        <td class="px-6 py-4 align-middle whitespace-nowrap">${statusBadge}</td>
+                        <td class="px-6 py-4 align-middle whitespace-nowrap">${lastLoginContent}</td>
+                        <td class="px-6 py-4 text-right align-middle whitespace-nowrap">${actions}</td>
                     </tr>
                 `;
             }).join('');
