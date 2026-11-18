@@ -318,6 +318,59 @@ public class SqliteDocumentRepositoryTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task getPagedDocumentsAsync_withSortingParameters_shouldSortDatabaseWideAcrossAllRecords()
+    {
+        // GIVEN a repository containing documents with distinct file names and upload dates:
+        var repo = new SqliteDocumentRepository(_factory);
+
+        var docA = new Document(
+            Id: "doc-alpha",
+            FileName: "Alpha_Brochure.pdf",
+            FilePath: "/uploads/alpha.pdf",
+            UploadedAt: new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+            Status: DocumentStatus.Processed
+        );
+
+        var docZ = new Document(
+            Id: "doc-zeta",
+            FileName: "Zeta_Datasheet.pdf",
+            FilePath: "/uploads/zeta.pdf",
+            UploadedAt: new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc),
+            Status: DocumentStatus.Processed
+        );
+
+        var docM = new Document(
+            Id: "doc-mike",
+            FileName: "Mike_Manual.pdf",
+            FilePath: "/uploads/mike.pdf",
+            UploadedAt: new DateTime(2026, 2, 20, 0, 0, 0, DateTimeKind.Utc),
+            Status: DocumentStatus.Pending
+        );
+
+        await repo.AddDocumentAsync(docA);
+        await repo.AddDocumentAsync(docZ);
+        await repo.AddDocumentAsync(docM);
+
+        // WHEN retrieving documents sorted by name ASC:
+        var (nameAscItems, _) = await repo.GetPagedDocumentsAsync(1, 10, null, null, sortBy: "name", sortDir: "asc");
+        var nameAscList = nameAscItems.ToList();
+
+        // THEN records are returned in alphabetical order:
+        Assert.Equal("Alpha_Brochure.pdf", nameAscList[0].FileName);
+        Assert.Equal("Mike_Manual.pdf", nameAscList[1].FileName);
+        Assert.Equal("Zeta_Datasheet.pdf", nameAscList[2].FileName);
+
+        // WHEN retrieving documents sorted by date DESC:
+        var (dateDescItems, _) = await repo.GetPagedDocumentsAsync(1, 10, null, null, sortBy: "date", sortDir: "desc");
+        var dateDescList = dateDescItems.ToList();
+
+        // THEN records are returned with newest first:
+        Assert.Equal("Zeta_Datasheet.pdf", dateDescList[0].FileName);
+        Assert.Equal("Mike_Manual.pdf", dateDescList[1].FileName);
+        Assert.Equal("Alpha_Brochure.pdf", dateDescList[2].FileName);
+    }
+
     private class TestDbContextFactory : IDbContextFactory<DocumentDbContext>
     {
         private readonly DbContextOptions<DocumentDbContext> _options;

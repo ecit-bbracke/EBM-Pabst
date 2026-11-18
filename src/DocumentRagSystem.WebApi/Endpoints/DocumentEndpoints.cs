@@ -92,7 +92,7 @@ public static class DocumentEndpoints
             .RequireAuthorization("QueryPolicy")
             .WithName("GetUploadedFile");
 
-        // GET ALL DOCUMENTS ENDPOINT (Supports pagination and filtering)
+        // GET ALL DOCUMENTS ENDPOINT (Supports pagination, filtering and sorting)
         app.MapGet("/api/documents", async (
             [FromQuery] int? page,
             [FromQuery] int? pageSize,
@@ -100,6 +100,8 @@ public static class DocumentEndpoints
             [FromQuery] string? category,
             [FromQuery] bool? onlyExisting,
             [FromQuery] bool? onlyMissing,
+            [FromQuery] string? sortBy,
+            [FromQuery] string? sortDir,
             IDocumentRepository repository,
             IVectorStore vectorStore) =>
         {
@@ -159,12 +161,30 @@ public static class DocumentEndpoints
                     resolvedList = resolvedList.Where(d => string.IsNullOrWhiteSpace(d.FilePath)).ToList();
                 }
 
+                var isDesc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+                if (string.Equals(sortBy, "name", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "fileName", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedList = isDesc ? resolvedList.OrderByDescending(d => d.FileName).ToList() : resolvedList.OrderBy(d => d.FileName).ToList();
+                }
+                else if (string.Equals(sortBy, "status", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedList = isDesc ? resolvedList.OrderByDescending(d => d.Status).ToList() : resolvedList.OrderBy(d => d.Status).ToList();
+                }
+                else if (string.Equals(sortBy, "date", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "uploadedAt", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedList = isDesc ? resolvedList.OrderByDescending(d => d.UploadedAt).ToList() : resolvedList.OrderBy(d => d.UploadedAt).ToList();
+                }
+                else
+                {
+                    resolvedList = resolvedList.OrderByDescending(d => d.UploadedAt).ToList();
+                }
+
                 totalCount = resolvedList.Count;
                 items = resolvedList.Skip((p - 1) * size).Take(size).ToList();
             }
             else
             {
-                var (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+                var (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category, sortBy, sortDir);
 
                 // Auto-reconcile fallback: if repository is completely empty, check if vector store has indexed documents
                 if (count == 0 && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(category))
@@ -178,7 +198,7 @@ public static class DocumentEndpoints
                             {
                                 await repository.AddDocumentAsync(vDoc);
                             }
-                            (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category);
+                            (repoDocs, count) = await repository.GetPagedDocumentsAsync(p, size, search, category, sortBy, sortDir);
                         }
                     }
                     catch { }

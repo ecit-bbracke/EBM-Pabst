@@ -97,7 +97,7 @@
                                 <th onclick="sortDocuments('name')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter filnavn">
                                     <div class="flex items-center space-x-1.5">
                                         <span>Dokument</span>
-                                        <i id="doc-sort-icon-name" class="fa-solid fa-sort-up text-brand-600 text-xs"></i>
+                                        <i id="doc-sort-icon-name" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
                                     </div>
                                 </th>
                                 <th onclick="sortDocuments('status')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter status">
@@ -109,7 +109,7 @@
                                 <th onclick="sortDocuments('date')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter upload dato">
                                     <div class="flex items-center space-x-1.5">
                                         <span>Uploadet</span>
-                                        <i id="doc-sort-icon-date" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                        <i id="doc-sort-icon-date" class="fa-solid fa-sort-down text-brand-600 text-xs"></i>
                                     </div>
                                 </th>
                                 <th class="px-6 py-3 text-right">Handlinger</th>
@@ -451,8 +451,7 @@
             fetchDocuments();
         }
 
-        let currentDocsCache = [];
-        let currentDocSort = { column: 'name', asc: true };
+        let currentDocSort = { column: 'date', asc: false };
 
         function sortDocuments(column) {
             if (currentDocSort.column === column) {
@@ -463,7 +462,8 @@
                 currentDocSort.asc = (column !== 'date');
             }
             updateDocSortIcons();
-            applyDocSortAndRender();
+            currentPage = 1;
+            fetchDocuments();
         }
 
         function updateDocSortIcons() {
@@ -478,41 +478,6 @@
                     icon.className = 'fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs';
                 }
             });
-        }
-
-        function getDocStatusText(doc) {
-            if (doc.status === 0 || doc.status === "Pending") return "Afventer";
-            if (doc.status === 1 || doc.status === "Processing") return "Behandler";
-            if (doc.status === 2 || doc.status === "Processed") return "Behandlet (Engelsk)";
-            if (doc.status === 3 || doc.status === "Failed") return "Fejlet";
-            if (doc.status === 4 || doc.status === "Skipped") return formatLanguageName(doc.language);
-            return String(doc.status || '');
-        }
-
-        function applyDocSortAndRender() {
-            const { column, asc } = currentDocSort;
-            currentDocsCache.sort((a, b) => {
-                if (column === 'date') {
-                    const timeA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
-                    const timeB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
-                    return asc ? (timeA - timeB) : (timeB - timeA);
-                }
-
-                let valA = '';
-                let valB = '';
-                if (column === 'name') {
-                    valA = a.fileName || '';
-                    valB = b.fileName || '';
-                } else if (column === 'status') {
-                    valA = getDocStatusText(a);
-                    valB = getDocStatusText(b);
-                }
-
-                const cmp = valA.localeCompare(valB, 'da', { sensitivity: 'base' });
-                return asc ? cmp : -cmp;
-            });
-
-            renderDocumentsTable(currentDocsCache);
         }
 
         function renderDocumentsTable(docs) {
@@ -585,7 +550,7 @@
             }).join('');
         }
 
-        // Hent indlæste dokumenter fra API'et med paginering og søgning
+        // Hent indlæste dokumenter fra API'et med paginering, søgning og server-side sortering
         async function fetchDocuments() {
             const refreshIcon = document.getElementById('refresh-docs-icon');
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
@@ -597,7 +562,9 @@
             try {
                 const params = new URLSearchParams({
                     page: currentPage,
-                    pageSize: pageSize
+                    pageSize: pageSize,
+                    sortBy: currentDocSort.column,
+                    sortDir: currentDocSort.asc ? 'asc' : 'desc'
                 });
                 if (searchQuery) {
                     params.append('search', searchQuery);
@@ -654,9 +621,8 @@
                     return;
                 }
 
-                currentDocsCache = docs || [];
                 updateDocSortIcons();
-                applyDocSortAndRender();
+                renderDocumentsTable(docs);
 
                 if (paginationContainer) {
                     if (totalCount > pageSize || totalPages > 1) {

@@ -73,7 +73,7 @@ public interface IDocumentRepository
         });
     }
 
-    Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null)
+    Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null, string? sortBy = null, string? sortDir = null)
     {
         return GetAllDocumentsAsync().ContinueWith(t =>
         {
@@ -93,6 +93,25 @@ public interface IDocumentRepository
                     (!string.IsNullOrWhiteSpace(d.SourceDocumentId) && d.SourceDocumentId.Contains(term, StringComparison.OrdinalIgnoreCase))
                 );
             }
+
+            var isDesc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(sortBy, "name", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "fileName", StringComparison.OrdinalIgnoreCase))
+            {
+                docs = isDesc ? docs.OrderByDescending(d => d.FileName) : docs.OrderBy(d => d.FileName);
+            }
+            else if (string.Equals(sortBy, "status", StringComparison.OrdinalIgnoreCase))
+            {
+                docs = isDesc ? docs.OrderByDescending(d => d.Status) : docs.OrderBy(d => d.Status);
+            }
+            else if (string.Equals(sortBy, "date", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "uploadedAt", StringComparison.OrdinalIgnoreCase))
+            {
+                docs = isDesc ? docs.OrderByDescending(d => d.UploadedAt) : docs.OrderBy(d => d.UploadedAt);
+            }
+            else
+            {
+                docs = docs.OrderByDescending(d => d.UploadedAt);
+            }
+
             var list = docs.ToList();
             var totalCount = list.Count;
             var items = list.Skip((Math.Max(1, page) - 1) * pageSize).Take(pageSize).ToList();

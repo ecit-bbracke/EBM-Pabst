@@ -138,7 +138,13 @@ public class InMemoryDocumentRepository : IDocumentRepository
         return Task.FromResult<IEnumerable<Document>>(matches);
     }
 
-    public Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(int page, int pageSize, string? search, string? category = null)
+    public Task<(IEnumerable<Document> Items, int TotalCount)> GetPagedDocumentsAsync(
+        int page, 
+        int pageSize, 
+        string? search, 
+        string? category = null,
+        string? sortBy = null,
+        string? sortDir = null)
     {
         var docs = _documents.Values.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(category))
@@ -157,9 +163,28 @@ public class InMemoryDocumentRepository : IDocumentRepository
             );
         }
 
-        var list = docs.ToList();
+        var isDesc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        IEnumerable<Document> ordered = docs;
+        if (string.Equals(sortBy, "name", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "fileName", StringComparison.OrdinalIgnoreCase))
+        {
+            ordered = isDesc ? docs.OrderByDescending(d => d.FileName) : docs.OrderBy(d => d.FileName);
+        }
+        else if (string.Equals(sortBy, "status", StringComparison.OrdinalIgnoreCase))
+        {
+            ordered = isDesc ? docs.OrderByDescending(d => d.Status) : docs.OrderBy(d => d.Status);
+        }
+        else if (string.Equals(sortBy, "date", StringComparison.OrdinalIgnoreCase) || string.Equals(sortBy, "uploadedAt", StringComparison.OrdinalIgnoreCase))
+        {
+            ordered = isDesc ? docs.OrderByDescending(d => d.UploadedAt) : docs.OrderBy(d => d.UploadedAt);
+        }
+        else
+        {
+            ordered = docs.OrderByDescending(d => d.UploadedAt);
+        }
+
+        var list = ordered.ToList();
         var totalCount = list.Count;
-        var items = list.OrderByDescending(d => d.UploadedAt)
+        var items = list
             .Skip((Math.Max(1, page) - 1) * pageSize)
             .Take(pageSize)
             .ToList();
