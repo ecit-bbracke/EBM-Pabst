@@ -80,18 +80,19 @@
                 <!-- Status Banner -->
                 <div id="create-status" class="hidden mb-4 p-3 rounded-lg text-xs"></div>
 
-                <form id="create-user-form" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                    <div>
-                        <label for="new-email" class="block text-xs font-medium text-slate-600 mb-1">Email adresse</label>
+                <form id="create-user-form" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div class="flex flex-col justify-center">
+                        <label for="new-email" class="block text-xs font-medium text-slate-600 mb-1 h-5 flex items-center">Email adresse</label>
                         <input 
                             type="email" 
                             id="new-email" 
                             required 
                             placeholder="bruger@ebmpabst.dk" 
-                            class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                            class="w-full h-[38px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition">
+                        <div class="hidden md:block h-6 mt-1.5" aria-hidden="true"></div>
                     </div>
-                    <div>
-                        <div class="flex items-center justify-between mb-1">
+                    <div class="flex flex-col justify-center">
+                        <div class="flex items-center justify-between mb-1 h-5">
                             <label for="new-password" class="block text-xs font-medium text-slate-600">Adgangskode (min. 6 tegn)</label>
                             <button type="button" onclick="generateAndSetPassword('new-password', 'create-user-strength-bar', 'create-user-strength-text')"
                                 class="text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline cursor-pointer" title="Generer sikker kode automatisk">
@@ -107,7 +108,7 @@
                                 minlength="6"
                                 placeholder="••••••••" 
                                 oninput="updatePasswordStrength(this.value, 'create-user-strength-bar', 'create-user-strength-text')"
-                                class="w-full pl-3.5 pr-16 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition font-mono">
+                                class="w-full h-[38px] pl-3.5 pr-16 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition font-mono">
                             <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center space-x-0.5">
                                 <button type="button" onclick="copyPasswordValue('new-password', this)" class="text-slate-400 hover:text-brand-600 p-1 rounded hover:bg-slate-200/50 transition" title="Kopier adgangskode">
                                     <i class="fa-regular fa-copy text-xs"></i>
@@ -117,7 +118,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="mt-1 space-y-0.5">
+                        <div class="mt-1.5 space-y-1 h-6">
                             <div class="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                                 <div id="create-user-strength-bar" class="h-full w-0 transition-all duration-300 rounded-full"></div>
                             </div>
@@ -127,14 +128,16 @@
                             </div>
                         </div>
                     </div>
-                    <div>
+                    <div class="flex flex-col justify-center">
+                        <div class="hidden md:block h-5 mb-1" aria-hidden="true"></div>
                         <button 
                             type="submit" 
                             id="create-btn"
-                            class="w-full bg-brand-600 hover:bg-brand-500 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm flex items-center justify-center space-x-2 cursor-pointer">
+                            class="w-full h-[38px] bg-brand-600 hover:bg-brand-500 text-white font-medium px-4 rounded-lg text-sm transition shadow-sm flex items-center justify-center space-x-2 cursor-pointer">
                             <i class="fa-solid fa-plus text-xs"></i>
                             <span>Opret bruger</span>
                         </button>
+                        <div class="hidden md:block h-6 mt-1.5" aria-hidden="true"></div>
                     </div>
                 </form>
             </div>
