@@ -239,6 +239,9 @@ public class CategorizationTests
     [InlineData("Er K3G560PC0401 kompatibel med K3G355HA3401?", "COMPATIBILITY", "K3G560PC0401")]
     [InlineData("Hvilken ventilator er kompatibel med K3G560PC0401?", "COMPATIBILITY", "K3G560PC0401")]
     [InlineData("Specifikationer for 4114N", "SPEC_LOOKUP", "4114N")]
+    [InlineData("modelnavn = 4420", "SPEC_LOOKUP", "4420")]
+    [InlineData("model: 4414", "SPEC_LOOKUP", "4414")]
+    [InlineData("4420", "SPEC_LOOKUP", "4420")]
     [InlineData("Hvorfor viser 6314H en fejl?", "TROUBLESHOOTING", "6314H")]
     [InlineData("Hvordan tilslutter jeg K3G560PC0401?", "PROCEDURE", "K3G560PC0401")]
     public async Task InputGovernor_ShouldShortCircuitDeterministicQueries_WithoutLlmCalls(
