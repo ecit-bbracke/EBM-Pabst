@@ -544,7 +544,7 @@
                                     <i class="fa-solid fa-magnifying-glass text-xs"></i>
                                 </button>
                                 ${promptText.trim()
-                                    ? `<button onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-emerald-600 hover:text-emerald-800 p-1 rounded-md hover:bg-emerald-50 transition flex-shrink-0" title="Gentag søgning i Chat Assistent">
+                                    ? `<button onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-brand-600 hover:text-brand-800 p-1 rounded-md hover:bg-brand-50 transition flex-shrink-0" title="Gentag søgning i Chat Assistent">
                                            <i class="fa-solid fa-comments text-xs"></i>
                                        </button>`
                                     : `<button disabled class="text-slate-300 p-1 rounded-md cursor-not-allowed flex-shrink-0" title="Ingen prompt registreret">
@@ -612,7 +612,7 @@
                 <div class="space-y-1.5">
                     <div class="flex items-center justify-between">
                         <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Medsendt søgeprompt:</label>
-                        ${(fb.search_prompts || fb.searchPrompts || '').trim() ? `<button type="button" onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-[11px] font-semibold text-emerald-600 hover:text-emerald-800 hover:underline flex items-center space-x-1"><i class="fa-solid fa-comments text-[10px]"></i><span>Gentag søgning i Chat Assistent</span></button>` : ''}
+                        ${(fb.search_prompts || fb.searchPrompts || '').trim() ? `<button type="button" onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-[11px] font-semibold text-brand-600 hover:text-brand-800 hover:underline flex items-center space-x-1"><i class="fa-solid fa-comments text-[10px]"></i><span>Gentag søgning i Chat Assistent</span></button>` : ''}
                     </div>
                     <div class="p-3 bg-slate-100 border border-slate-200 rounded-lg text-slate-800 font-mono text-[11px] whitespace-pre-wrap max-h-36 overflow-y-auto">${escapeHtml(fb.search_prompts || fb.searchPrompts || 'Ingen prompt registreret')}</div>
                 </div>
