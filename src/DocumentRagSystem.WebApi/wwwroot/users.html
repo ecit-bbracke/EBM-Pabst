@@ -520,13 +520,14 @@
                             <p class="text-xs text-slate-800 leading-relaxed max-w-xs break-words">${commentPreview}</p>
                         </td>
                         <td class="px-6 py-4 align-top">
-                            <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
-                                <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
+                            <div class="flex items-center space-x-1.5">
+                                <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
+                                    <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
+                                </div>
+                                <button onclick="openFeedbackDetails('${escapeHtml(fb.id)}')" class="text-brand-600 hover:text-brand-800 p-1 rounded-md hover:bg-brand-50 transition flex-shrink-0" title="Vis fuld kontekst">
+                                    <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                                </button>
                             </div>
-                            <button onclick="openFeedbackDetails('${escapeHtml(fb.id)}')" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
-                                <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
-                                <span>Vis fuld kontekst</span>
-                            </button>
                         </td>
                         <td class="px-6 py-4 text-right align-top">
                             <button onclick="deleteFeedback('${fb.id}')" class="text-red-600 hover:text-red-800 p-1.5 rounded-lg hover:bg-red-50 transition" title="Slet feedback">
