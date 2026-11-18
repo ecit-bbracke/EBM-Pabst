@@ -187,16 +187,24 @@
 
             <!-- Feedback Table Card -->
             <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
-                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                <div class="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
-                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                            <i class="fa-solid fa-comment-dots text-emerald-600 mr-2 text-sm"></i>
-                            Indkommen brugerfeedback
-                        </h2>
+                        <div class="flex items-center space-x-2">
+                            <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                                <i class="fa-solid fa-comment-dots text-emerald-600 mr-2 text-sm"></i>
+                                Indkommen brugerfeedback
+                            </h2>
+                            <span id="feedback-count-badge" class="hidden px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full"></span>
+                        </div>
                         <p class="text-xs text-slate-400 mt-0.5">Feedback indsendt fra AI assistenten med tilhørende søgekontekst.</p>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <span id="feedback-count-badge" class="hidden px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full"></span>
+                    <div class="flex items-center space-x-2.5">
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                            <input type="text" id="feedback-search-input" oninput="filterFeedbackList(this.value)"
+                                placeholder="Filtrér feedback..."
+                                class="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 w-48 sm:w-56 transition" />
+                        </div>
                         <button onclick="fetchFeedbacks()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater feedback-liste">
                             <i class="fa-solid fa-arrows-rotate" id="feedback-refresh-icon"></i>
                         </button>
@@ -353,61 +361,106 @@
                     badge.classList.remove('hidden');
                 }
 
-                if (!feedbacks || feedbacks.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-inbox mr-1.5"></i> Ingen indkommen feedback endnu.</td></tr>`;
-                    return;
+                const searchInput = document.getElementById('feedback-search-input');
+                if (searchInput && searchInput.value.trim()) {
+                    filterFeedbackList(searchInput.value);
+                } else {
+                    renderFeedbackTable(feedbackListCache);
                 }
 
-                tbody.innerHTML = feedbacks.map((fb, idx) => {
-                    const dateObj = new Date(fb.created_at || fb.createdAt);
-                    const formattedDate = dateObj.toLocaleDateString('da-DK', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit'
-                    });
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente feedbackliste.</td></tr>`;
+            } finally {
+                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
+            }
+        }
 
-                    const userDisplay = fb.user_email || fb.userEmail || fb.user_id || fb.userId || 'Ukendt bruger';
-                    const contactEmail = fb.contact_email || fb.contactEmail;
-                    const contactBadge = contactEmail
-                        ? `<div class="mt-1"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200"><i class="fa-regular fa-envelope mr-1 text-[9px]"></i>${escapeHtml(contactEmail)}</span></div>`
-                        : '';
+        function filterFeedbackList(query) {
+            if (!query || !query.trim()) {
+                renderFeedbackTable(feedbackListCache);
+                return;
+            }
+            const q = query.trim().toLowerCase();
+            const filtered = feedbackListCache.filter(fb => {
+                const comment = (fb.comment || '').toLowerCase();
+                const user = (fb.user_email || fb.userEmail || fb.user_id || fb.userId || '').toLowerCase();
+                const contact = (fb.contact_email || fb.contactEmail || '').toLowerCase();
+                const prompts = (fb.search_prompts || fb.searchPrompts || '').toLowerCase();
+                const answer = (fb.assistant_answer || fb.assistantAnswer || '').toLowerCase();
+                return comment.includes(q) || user.includes(q) || contact.includes(q) || prompts.includes(q) || answer.includes(q);
+            });
+            renderFeedbackTable(filtered, true);
+        }
 
-                    const commentText = fb.comment || '';
-                    const commentPreview = commentText.length > 90
-                        ? escapeHtml(commentText.substring(0, 90)) + '...'
-                        : escapeHtml(commentText);
+        function renderFeedbackTable(feedbacks, isFiltered = false) {
+            const tbody = document.getElementById('feedback-table-body');
+            if (!tbody) return;
 
-                    const promptText = fb.search_prompts || fb.searchPrompts || '';
-                    const promptPreview = promptText.length > 50
-                        ? escapeHtml(promptText.substring(0, 50)) + '...'
-                        : (promptText ? escapeHtml(promptText) : '<span class="text-slate-400 italic">Ingen prompt</span>');
+            if (!feedbacks || feedbacks.length === 0) {
+                if (isFiltered) {
+                    const searchInput = document.getElementById('feedback-search-input');
+                    const q = searchInput ? searchInput.value : '';
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass mr-1.5"></i> Ingen feedback matcher søgningen '${escapeHtml(q)}'.</td></tr>`;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-inbox mr-1.5"></i> Ingen indkommen feedback endnu.</td></tr>`;
+                }
+                return;
+            }
 
-                    return `
-                        <tr class="hover:bg-slate-50/60 transition">
-                            <td class="px-6 py-4 align-top">
-                                <div class="font-semibold text-slate-800 text-xs">${escapeHtml(formattedDate)}</div>
-                                <div class="text-[11px] text-slate-500 truncate max-w-[180px]" title="${escapeHtml(userDisplay)}">${escapeHtml(userDisplay)}</div>
-                                ${contactBadge}
-                            </td>
-                            <td class="px-6 py-4 align-top">
-                                <p class="text-xs text-slate-800 leading-relaxed max-w-xs break-words">${commentPreview}</p>
-                            </td>
-                            <td class="px-6 py-4 align-top">
-                                <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
-                                    <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
-                                </div>
-                                <button onclick="openFeedbackDetails(${idx})" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
-                                    <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
-                                    <span>Vis fuld kontekst</span>
-                                </button>
-                            </td>
-                            <td class="px-6 py-4 text-right align-top">
-                                <button onclick="deleteFeedback('${fb.id}')" class="text-red-600 hover:text-red-800 p-1.5 rounded-lg hover:bg-red-50 transition" title="Slet feedback">
-                                    <i class="fa-solid fa-trash-can text-xs"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+            tbody.innerHTML = feedbacks.map((fb, idx) => {
+                const cacheIdx = feedbackListCache.findIndex(item => item.id === fb.id);
+                const targetIdx = cacheIdx >= 0 ? cacheIdx : idx;
+
+                const dateObj = new Date(fb.created_at || fb.createdAt);
+                const formattedDate = dateObj.toLocaleDateString('da-DK', {
+                    day: '2-digit', month: 'short', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+
+                const userDisplay = fb.user_email || fb.userEmail || fb.user_id || fb.userId || 'Ukendt bruger';
+                const contactEmail = fb.contact_email || fb.contactEmail;
+                const contactBadge = contactEmail
+                    ? `<div class="mt-1"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200"><i class="fa-regular fa-envelope mr-1 text-[9px]"></i>${escapeHtml(contactEmail)}</span></div>`
+                    : '';
+
+                const commentText = fb.comment || '';
+                const commentPreview = commentText.length > 90
+                    ? escapeHtml(commentText.substring(0, 90)) + '...'
+                    : escapeHtml(commentText);
+
+                const promptText = fb.search_prompts || fb.searchPrompts || '';
+                const promptPreview = promptText.length > 50
+                    ? escapeHtml(promptText.substring(0, 50)) + '...'
+                    : (promptText ? escapeHtml(promptText) : '<span class="text-slate-400 italic">Ingen prompt</span>');
+
+                return `
+                    <tr class="hover:bg-slate-50/60 transition">
+                        <td class="px-6 py-4 align-top">
+                            <div class="font-semibold text-slate-800 text-xs">${escapeHtml(formattedDate)}</div>
+                            <div class="text-[11px] text-slate-500 truncate max-w-[180px]" title="${escapeHtml(userDisplay)}">${escapeHtml(userDisplay)}</div>
+                            ${contactBadge}
+                        </td>
+                        <td class="px-6 py-4 align-top">
+                            <p class="text-xs text-slate-800 leading-relaxed max-w-xs break-words">${commentPreview}</p>
+                        </td>
+                        <td class="px-6 py-4 align-top">
+                            <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
+                                <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
+                            </div>
+                            <button onclick="openFeedbackDetails(${targetIdx})" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
+                                <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
+                                <span>Vis fuld kontekst</span>
+                            </button>
+                        </td>
+                        <td class="px-6 py-4 text-right align-top">
+                            <button onclick="deleteFeedback('${fb.id}')" class="text-red-600 hover:text-red-800 p-1.5 rounded-lg hover:bg-red-50 transition" title="Slet feedback">
+                                <i class="fa-solid fa-trash-can text-xs"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
 
             } catch (err) {
                 tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente feedbackliste.</td></tr>`;
