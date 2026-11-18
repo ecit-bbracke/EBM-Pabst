@@ -39,9 +39,8 @@ class PortalHeader extends HTMLElement {
                     <div class="bg-brand-500 p-2 rounded-lg text-white shadow-sm flex items-center justify-center">
                         <i class="fa-solid ${icon} text-xl"></i>
                     </div>
-                    <div class="flex items-center space-x-2.5">
+                    <div>
                         <h1 class="text-xl font-bold tracking-tight">${title}</h1>
-                        <span class="text-[10px] font-mono font-normal px-1.5 py-0.5 rounded bg-brand-800/90 text-brand-300 border border-brand-700/60 select-all cursor-default" title="Aktiv commit revision: ${version}">${version}</span>
                     </div>
                 </div>
                 <nav class="flex items-center space-x-2.5">
