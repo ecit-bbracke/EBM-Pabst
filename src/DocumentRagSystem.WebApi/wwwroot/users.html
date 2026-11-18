@@ -116,13 +116,10 @@
             <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
                 <div class="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
-                        <div class="flex items-center space-x-2">
-                            <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                                <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
-                                Eksisterende brugere
-                            </h2>
-                            <span id="user-count-badge" class="hidden px-2 py-0.5 text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200/60 rounded-full"></span>
-                        </div>
+                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                            <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
+                            Eksisterende brugere
+                        </h2>
                     </div>
                     <div class="flex items-center space-x-2.5">
                         <div class="relative">
@@ -177,13 +174,10 @@
             <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
                 <div class="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
-                        <div class="flex items-center space-x-2">
-                            <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                                <i class="fa-solid fa-comment-dots text-emerald-600 mr-2 text-sm"></i>
-                                Indkommen brugerfeedback
-                            </h2>
-                            <span id="feedback-count-badge" class="hidden px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 rounded-full"></span>
-                        </div>
+                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                            <i class="fa-solid fa-comment-dots text-emerald-600 mr-2 text-sm"></i>
+                            Indkommen brugerfeedback
+                        </h2>
                     </div>
                     <div class="flex items-center space-x-2.5">
                         <div class="relative">
@@ -464,7 +458,6 @@
         async function fetchFeedbacks() {
             const tbody = document.getElementById('feedback-table-body');
             const icon = document.getElementById('feedback-refresh-icon');
-            const badge = document.getElementById('feedback-count-badge');
             if (icon) icon.classList.add('animate-spin');
 
             try {
@@ -477,11 +470,6 @@
 
                 const feedbacks = await response.json();
                 feedbackListCache = feedbacks || [];
-
-                if (badge) {
-                    badge.textContent = `${feedbackListCache.length} indlæg`;
-                    badge.classList.remove('hidden');
-                }
 
                 updateFeedbackSortIcons();
                 applyFeedbackView();
@@ -891,7 +879,6 @@
         async function fetchUsers() {
             const tbody = document.getElementById('users-table-body');
             const icon = document.getElementById('refresh-icon');
-            const badge = document.getElementById('user-count-badge');
             if (icon) icon.classList.add('animate-spin');
 
             try {
@@ -902,11 +889,6 @@
                 }
                 const users = await response.json();
                 usersListCache = users || [];
-
-                if (badge) {
-                    badge.textContent = `${usersListCache.length} brugere`;
-                    badge.classList.remove('hidden');
-                }
 
                 updateUserSortIcons();
                 applyUsersView();
