@@ -504,6 +504,54 @@ public class SpecializedWorkflowTests
     }
 
     [Fact]
+    public async Task OverviewWorkflow_WithDanishCatalogQuery_ProducesDanishCatalog()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var mockVectorStore = new Mock<IVectorStore>();
+
+        mockVectorStore.Setup(x => x.GetDocumentsAsync(It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new Document("doc1", "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf", "/data/s4e.pdf", DateTime.UtcNow),
+                new Document("doc2", "Data_sheet_DA_-_K3G560PC0401_KM260717_ (1).pdf", "/data/k3g.pdf", DateTime.UtcNow),
+                new Document("doc3", "9694300352_4114N_2H6PU_PDB_EN.PDF", "/data/4114.pdf", DateTime.UtcNow)
+            });
+
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "S4E315 series axial fan", 0, "Data_sheet_US_-_S4E315BS2035_VNA0315H4MGZ_KM312852_.pdf")
+            });
+
+        var parser = new EbmProductCodeParser();
+        var executor = new OverviewWorkflowExecutor(mockLlm.Object, parser);
+        var governorResult = new InputGovernorResult(
+            Intent: "OVERVIEW",
+            Confidence: 0.95,
+            Entities: new(),
+            RequestedAttributes: new(),
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null
+        );
+
+        // Act - this exact user question with "katalog" and "kompaktventilatorer"
+        var (draftResponse, contextChunks, workflowData) = await executor.ExecuteAsync(
+            "kan du finde et link til et katalog med kompaktventilatorer",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert - must produce Danish overview heading, NOT German
+        Assert.NotNull(draftResponse);
+        Assert.StartsWith("### ebm-papst Ventilator- og Produktoversigt", draftResponse);
+        Assert.DoesNotContain("Ventilator- und Produktübersicht", draftResponse);
+        Assert.DoesNotContain("Das System indexiert derzeit", draftResponse);
+        Assert.Contains("Systemet indeholder", draftResponse);
+    }
+
+    [Fact]
     public async Task OverviewWorkflow_WithGermanQuery_ProducesGermanCatalog()
     {
         // Arrange

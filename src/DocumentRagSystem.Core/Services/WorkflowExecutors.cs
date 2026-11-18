@@ -1312,20 +1312,20 @@ public class OverviewWorkflowExecutor : IWorkflowExecutor
 
         var q = question.Trim();
 
-        // 1. Definite German indicators
-        if (Regex.IsMatch(q, @"\b(welche(s|r|n)?|was|wo|gibt\s+es|übersicht|uebersicht|lüfter|luefter|ventilatoren|modelle|datenbl[äa]tter|zeige|katalog|sortiment|hilf(e)?|guten\s+tag|danke)\b", RegexOptions.IgnoreCase))
+        // 1. Definite German indicators (genuine German-only phrases and words)
+        if (Regex.IsMatch(q, @"\b(welche(s|r|n)?|gibt\s+es|übersicht|uebersicht|lüfter|luefter|datenbl[äa]tter|zeige|guten\s+tag|danke|bitte|f[üu]r|k[öo]nnen\s+sie|kannst\s+du|deutsch(e|en)?)\b", RegexOptions.IgnoreCase))
         {
             return ContentLanguage.German;
         }
 
-        // 2. Definite Danish indicators
-        if (Regex.IsMatch(q, @"\b(hvilke?|hvad|hvor|findes|modeller|oversigt|sortiment|blæser(e)?|vis|alle|nogle|ventilatorer|datablade)\b", RegexOptions.IgnoreCase))
+        // 2. Definite Danish indicators (prioritized for ebm-papst Danmark portal)
+        if (Regex.IsMatch(q, @"\b(kan\s+du|finde?|hvilke?|hvad|hvor|findes|blæser(e)?|kompaktblæser(e)?|ventilatorer|kompaktventilatorer|datablade|oversigt|hjælp|tak|med|til|på|for|er\s+der|har\s+I|kan\s+man)\b", RegexOptions.IgnoreCase))
         {
             return ContentLanguage.Danish;
         }
 
         // 3. Definite English indicators
-        if (Regex.IsMatch(q, @"\b(which|what|where|fans?|models?|overview|catalog(ue)?|list|show|available|any|datasheets?)\b", RegexOptions.IgnoreCase))
+        if (Regex.IsMatch(q, @"\b(can\s+you|which|what|where|fans?|models?|overview|catalog(ue)?|list|show|available|any|datasheets?|find|link|help|please)\b", RegexOptions.IgnoreCase))
         {
             return ContentLanguage.English;
         }
