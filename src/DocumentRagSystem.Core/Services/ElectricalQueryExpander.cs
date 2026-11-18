@@ -187,7 +187,16 @@ public static class ElectricalQueryExpander
             expanded = true;
         }
 
-        return sb.ToString();
+        var expandedElectrical = sb.ToString();
+        var expandedDimensional = DimensionalQueryExpander.Expand(query);
+
+        if (!string.Equals(expandedDimensional, query.Trim(), StringComparison.Ordinal))
+        {
+            var dimensionalAdditions = expandedDimensional.Substring(query.Trim().Length);
+            return expandedElectrical + dimensionalAdditions;
+        }
+
+        return expandedElectrical;
     }
 
     public static ElectricalFilter? ExtractVoltageFilter(string? query)

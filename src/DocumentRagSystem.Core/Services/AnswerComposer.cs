@@ -222,7 +222,15 @@ public class AnswerComposer : IAnswerComposer
         bool hasCompact = ebmProducts.Any(p => p.FanFamily == FanFamilyType.CompactOrSpecial) ||
                           question.Contains("kompakt", StringComparison.OrdinalIgnoreCase) ||
                           question.Contains("compact", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("computer", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("kabinet", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("118", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("119", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("120", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("121", StringComparison.OrdinalIgnoreCase) ||
                           question.Contains("4114", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("4400", StringComparison.OrdinalIgnoreCase) ||
+                          question.Contains("4300", StringComparison.OrdinalIgnoreCase) ||
                           question.Contains("6314", StringComparison.OrdinalIgnoreCase) ||
                           question.Contains("3258", StringComparison.OrdinalIgnoreCase);
 
@@ -267,7 +275,13 @@ public class AnswerComposer : IAnswerComposer
 
         if (hasCompact || isGeneral)
         {
-            sb.AppendLine("- **Compact Fans**: 10-digit codes (96/94/92/97...) or series numbers (4114N, 6314H, 3258J, RLF100).");
+            sb.AppendLine("- **Compact Fans & Colloquial / Non-Standard Dimensions (e.g. 120 mm, 121 mm, 118 mm, computer/cabinet fans)**:");
+            sb.AppendLine("  - ebm-papst does not produce nominal '120 mm' or '121 mm' compact fans. The official global industrial standard size is **119 x 119 mm** (standard mounting hole distance 104,8 mm, often referred to colloquially by customers as 120 mm computer or cabinet fans).");
+            sb.AppendLine("  - When users ask about 120 mm, 121 mm, 118 mm, or computer/cabinet fans:");
+            sb.AppendLine("    * Politely and clearly inform the user that 121 mm (or 120 mm) corresponds to ebm-papst' standard **119 x 119 mm** series (e.g. ACi 4400, 4400, 4300, 4100 series).");
+            sb.AppendLine("    * If matching 119 mm compact fan models are present in the Context chunks, present them with their specifications (e.g. air flow, voltage, noise, power).");
+            sb.AppendLine("    * If the Context chunks only contain large industrial fans (e.g. 300 mm+ W3G/A3G) and lack compact fan datasheets, clearly explain that while ebm-papst standard models for 120/121 mm applications are the 119x119 mm series (such as ACi 4400 / 4400 / 4300 with typical airflow ~170–180 m³/h), specific datasheets for these compact models are not documented in the retrieved catalog context.");
+            sb.AppendLine("- **Compact Fans**: 10-digit codes (96/94/92/97...) or series numbers (4114N, 4414F, 4314N, 6314H, 3258J, RLF100).");
         }
 
         sb.AppendLine("- **Motor Technology**: '3G' = EC-motor (electronically commutated); AC motor codes = poles + phase ('E' = 1~ 230V, 'D' = 3~ 400V).");

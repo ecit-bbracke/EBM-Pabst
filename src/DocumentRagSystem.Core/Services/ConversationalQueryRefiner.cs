@@ -17,10 +17,7 @@ public class ConversationalQueryRefiner : IConversationalQueryRefiner
     private readonly IEbmProductCodeParser _ebmParser;
     private readonly ILogger<ConversationalQueryRefiner>? _logger;
 
-    private static readonly HashSet<int> KnownEbmDiameters = new()
-    {
-        68, 92, 119, 133, 140, 160, 172, 175, 180, 190, 200, 206, 220, 225, 250, 280, 300, 310, 315, 355, 400, 450, 500, 560, 630, 710, 800, 910, 990
-    };
+    private static readonly HashSet<int> KnownEbmDiameters = new(DimensionalQueryExpander.KnownEbmDimensions);
 
     public ConversationalQueryRefiner(
         ILlmClient llmClient,
@@ -67,6 +64,7 @@ Rules:
 4. NEW_TOPIC: new subject.
 5. RESET: start over.
 6. Keep effective_question in the exact same language as latest user message (if language cannot be detected, use Danish).
+7. DIMENSIONAL & COLLOQUIAL MAPPING: When users specify approximate, colloquial, or non-standard fan dimensions (such as 120mm, 121mm, 118mm, 120x120) or colloquial terms ('computerblæser', 'kabinetblæser', 'PC fan'), map and expand the effective_question to include the official ebm-papst standard dimensions (119 mm / 119x119 mm) and standard product category ('axial compact fan' / 'kompaktblæser', series 4400/4300).
 """;
 
     public async Task<QueryRefinementResult> RefineQueryAsync(
@@ -133,13 +131,15 @@ Rules:
             );
         }
 
-        // Fast-path: Follow-up diameter refinement (e.g. "Ø280", "280", "280 mm", "Ø560")
+        // Fast-path: Follow-up diameter refinement (e.g. "Ø280", "280", "280 mm", "Ø560", "121 mm")
         var cleanMsg = userMessage.Trim();
         var shortDiamMatch = Regex.Match(cleanMsg, @"^(?:Ø\s*|\b)(1[0-9]{2}|[2-9][0-9]{2})(?:\s*mm)?$", RegexOptions.IgnoreCase);
         if (conversationState != null && shortDiamMatch.Success && int.TryParse(shortDiamMatch.Groups[1].Value, out var targetDiam))
         {
+            var resolved = DimensionalQueryExpander.ResolveNearestStandardSize(targetDiam, maxToleranceMm: 3);
+            int standardDiam = resolved?.StandardSize ?? targetDiam;
             bool hasExplicitDiameterUnit = cleanMsg.Contains('Ø') || cleanMsg.Contains("mm", StringComparison.OrdinalIgnoreCase);
-            bool isKnownEbmDiameter = KnownEbmDiameters.Contains(targetDiam);
+            bool isKnownEbmDiameter = KnownEbmDiameters.Contains(targetDiam) || resolved != null;
 
             if (hasExplicitDiameterUnit || isKnownEbmDiameter)
             {
@@ -147,11 +147,14 @@ Rules:
                     ? conversationState.LastEffectiveQuestion
                     : "hvilke produkter kan vi tilbyde";
 
-                var effectiveQ = $"{baseQuestion} på Ø{targetDiam} mm";
+                var effectiveQ = (standardDiam != targetDiam)
+                    ? $"{baseQuestion} på Ø{standardDiam} mm (standard for {targetDiam} mm)"
+                    : $"{baseQuestion} på Ø{targetDiam} mm";
+
                 var diamConstraint = new ConversationConstraint(
                     Attribute: "diameter",
                     Operator: "equals",
-                    Value: $"{targetDiam} mm",
+                    Value: $"{standardDiam} mm",
                     Unit: "mm",
                     SourceTurn: conversationState.TurnCount + 1,
                     Status: "USER_CONSTRAINT"
