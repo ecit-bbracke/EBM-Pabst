@@ -141,17 +141,28 @@
 
             <!-- Users Table Card -->
             <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
-                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                <div class="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
-                        <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                            <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
-                            Eksisterende brugere
-                        </h2>
+                        <div class="flex items-center space-x-2">
+                            <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                                <i class="fa-solid fa-users text-brand-600 mr-2 text-sm"></i>
+                                Eksisterende brugere
+                            </h2>
+                            <span id="user-count-badge" class="hidden px-2 py-0.5 text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200/60 rounded-full"></span>
+                        </div>
                         <p class="text-xs text-slate-400 mt-0.5">Oversigt over alle registrerede konti.</p>
                     </div>
-                    <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
-                        <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
-                    </button>
+                    <div class="flex items-center space-x-2.5">
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                            <input type="text" id="user-search-input" oninput="filterUsersList(this.value)"
+                                placeholder="Filtrér brugere..."
+                                class="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48 sm:w-56 transition" />
+                        </div>
+                        <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
+                            <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="overflow-x-auto">
@@ -650,9 +661,12 @@
             }
         }
 
+        let usersListCache = [];
+
         async function fetchUsers() {
             const tbody = document.getElementById('users-table-body');
             const icon = document.getElementById('refresh-icon');
+            const badge = document.getElementById('user-count-badge');
             if (icon) icon.classList.add('animate-spin');
 
             try {
@@ -662,66 +676,113 @@
                     return;
                 }
                 const users = await response.json();
+                usersListCache = users || [];
 
-                if (!users || users.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">Ingen brugere fundet.</td></tr>`;
-                    return;
+                if (badge) {
+                    badge.textContent = `${usersListCache.length} brugere`;
+                    badge.classList.remove('hidden');
                 }
 
-                tbody.innerHTML = users.map(user => {
-                    const isDefaultAdmin = user.email.toLowerCase() === 'admin@ebmpabst.dk';
-                    const statusBadge = user.isLockedOut
-                        ? `<span class="bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-lock mr-1.5 text-[10px]"></i> Låst ude</span>`
-                        : `<span class="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-circle-check mr-1.5 text-[10px]"></i> Aktiv</span>`;
+                const searchInput = document.getElementById('user-search-input');
+                if (searchInput && searchInput.value.trim()) {
+                    filterUsersList(searchInput.value);
+                } else {
+                    renderUsersTable(usersListCache);
+                }
 
-                    let actions = '';
-                    if (user.isLockedOut) {
-                        actions += `<button onclick="unlockUser('${user.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 px-2.5 py-1 rounded-md font-medium transition mr-2"><i class="fa-solid fa-unlock mr-1"></i> Lås op</button>`;
-                    }
-                    actions += `<button onclick="promptResetPassword('${user.id}', '${escapeHtml(user.email)}')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-md font-medium transition mr-2" title="Nulstil adgangskode"><i class="fa-solid fa-key mr-1"></i> Nulstil kode</button>`;
-                    if (!isDefaultAdmin) {
-                        actions += `<button onclick="deleteUser('${user.id}', '${escapeHtml(user.email)}')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1 rounded-md font-medium transition"><i class="fa-solid fa-trash mr-1"></i> Slet</button>`;
-                    } else {
-                        actions += `<span class="text-[11px] text-slate-400 italic ml-1">Beskyttet</span>`;
-                    }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
+            } finally {
+                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
+            }
+        }
 
-                    const createdInfo = user.createdBy
-                        ? `Oprettet af: ${escapeHtml(user.createdBy)}`
-                        : (isDefaultAdmin ? 'System administrator' : 'Oprettet');
-                    const createdDate = user.createdAt ? ` &bull; ${formatAuditDate(user.createdAt)}` : '';
+        function filterUsersList(query) {
+            if (!query || !query.trim()) {
+                renderUsersTable(usersListCache);
+                return;
+            }
+            const q = query.trim().toLowerCase();
+            const filtered = usersListCache.filter(u => {
+                const email = (u.email || '').toLowerCase();
+                const createdBy = (u.createdBy || '').toLowerCase();
+                const resetBy = (u.lastResetBy || '').toLowerCase();
+                const status = u.isLockedOut ? 'låst ude lockout' : 'aktiv active';
+                return email.includes(q) || createdBy.includes(q) || resetBy.includes(q) || status.includes(q);
+            });
+            renderUsersTable(filtered, true);
+        }
 
-                    const lastLoginInfo = user.lastLoginAt
-                        ? `<span class="text-emerald-700 font-medium"><i class="fa-solid fa-clock-rotate-left text-[10px] mr-1"></i>Sidst logget ind: ${formatAuditDate(user.lastLoginAt)}</span>`
-                        : `<span class="text-slate-400 italic"><i class="fa-regular fa-clock text-[10px] mr-1"></i>Aldrig logget ind</span>`;
+        function renderUsersTable(users, isFiltered = false) {
+            const tbody = document.getElementById('users-table-body');
+            if (!tbody) return;
 
-                    const resetInfo = user.lastResetBy
-                        ? `<div class="mt-1"><span class="inline-block text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80" title="Adgangskode nulstillet af admin"><i class="fa-solid fa-key text-[9px] mr-1"></i>Nulstillet: ${escapeHtml(user.lastResetBy)}</span></div>`
-                        : '';
+            if (!users || users.length === 0) {
+                if (isFiltered) {
+                    const searchInput = document.getElementById('user-search-input');
+                    const q = searchInput ? searchInput.value : '';
+                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass mr-1.5"></i> Ingen brugere matcher søgningen '${escapeHtml(q)}'.</td></tr>`;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">Ingen brugere fundet.</td></tr>`;
+                }
+                return;
+            }
 
-                    return `
-                        <tr class="hover:bg-slate-50/50 transition">
-                            <td class="px-6 py-4 font-medium text-slate-900">
-                                <div class="flex items-start space-x-3">
-                                    <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase shrink-0 mt-0.5">
-                                        ${user.email.substring(0, 2)}
-                                    </div>
-                                    <div class="min-w-0">
-                                        <div class="font-semibold text-slate-800">${escapeHtml(user.email)}</div>
-                                        <div class="text-[11px] text-slate-400 mt-0.5">
-                                            <span><i class="fa-solid fa-user-shield text-[10px] mr-1 text-slate-400"></i>${createdInfo}</span>${createdDate}
-                                        </div>
-                                        <div class="text-[11px] text-slate-500 mt-0.5">
-                                            ${lastLoginInfo}
-                                        </div>
-                                        ${resetInfo}
-                                    </div>
+            tbody.innerHTML = users.map(user => {
+                const isDefaultAdmin = user.email.toLowerCase() === 'admin@ebmpabst.dk';
+                const statusBadge = user.isLockedOut
+                    ? `<span class="bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-lock mr-1.5 text-[10px]"></i> Låst ude</span>`
+                    : `<span class="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center w-fit"><i class="fa-solid fa-circle-check mr-1.5 text-[10px]"></i> Aktiv</span>`;
+
+                let actions = '';
+                if (user.isLockedOut) {
+                    actions += `<button onclick="unlockUser('${user.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 px-2.5 py-1 rounded-md font-medium transition mr-2"><i class="fa-solid fa-unlock mr-1"></i> Lås op</button>`;
+                }
+                actions += `<button onclick="promptResetPassword('${user.id}', '${escapeHtml(user.email)}')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-md font-medium transition mr-2" title="Nulstil adgangskode"><i class="fa-solid fa-key mr-1"></i> Nulstil kode</button>`;
+                if (!isDefaultAdmin) {
+                    actions += `<button onclick="deleteUser('${user.id}', '${escapeHtml(user.email)}')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1 rounded-md font-medium transition"><i class="fa-solid fa-trash mr-1"></i> Slet</button>`;
+                } else {
+                    actions += `<span class="text-[11px] text-slate-400 italic ml-1">Beskyttet</span>`;
+                }
+
+                const createdInfo = user.createdBy
+                    ? `Oprettet af: ${escapeHtml(user.createdBy)}`
+                    : (isDefaultAdmin ? 'System administrator' : 'Oprettet');
+                const createdDate = user.createdAt ? ` &bull; ${formatAuditDate(user.createdAt)}` : '';
+
+                const lastLoginInfo = user.lastLoginAt
+                    ? `<span class="text-emerald-700 font-medium"><i class="fa-solid fa-clock-rotate-left text-[10px] mr-1"></i>Sidst logget ind: ${formatAuditDate(user.lastLoginAt)}</span>`
+                    : `<span class="text-slate-400 italic"><i class="fa-regular fa-clock text-[10px] mr-1"></i>Aldrig logget ind</span>`;
+
+                const resetInfo = user.lastResetBy
+                    ? `<div class="mt-1"><span class="inline-block text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80" title="Adgangskode nulstillet af admin"><i class="fa-solid fa-key text-[9px] mr-1"></i>Nulstillet: ${escapeHtml(user.lastResetBy)}</span></div>`
+                    : '';
+
+                return `
+                    <tr class="hover:bg-slate-50/50 transition">
+                        <td class="px-6 py-4 font-medium text-slate-900">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase shrink-0 mt-0.5">
+                                    ${user.email.substring(0, 2)}
                                 </div>
-                            </td>
-                            <td class="px-6 py-4 align-top">${statusBadge}</td>
-                            <td class="px-6 py-4 text-right align-top">${actions}</td>
-                        </tr>
-                    `;
-                }).join('');
+                                <div class="min-w-0">
+                                    <div class="font-semibold text-slate-800">${escapeHtml(user.email)}</div>
+                                    <div class="text-[11px] text-slate-400 mt-0.5">
+                                        <span><i class="fa-solid fa-user-shield text-[10px] mr-1 text-slate-400"></i>${createdInfo}</span>${createdDate}
+                                    </div>
+                                    <div class="text-[11px] text-slate-500 mt-0.5">
+                                        ${lastLoginInfo}
+                                    </div>
+                                    ${resetInfo}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 align-top">${statusBadge}</td>
+                        <td class="px-6 py-4 text-right align-top">${actions}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
 
             } catch (err) {
                 tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
