@@ -90,8 +90,24 @@
                     </div>
                 </div>
                 
-                <div id="documents-list" class="space-y-3 min-h-[300px]">
-                    <!-- Indlæste dokumenter tilføjes her via JS -->
+                <div class="overflow-x-auto min-h-[300px]">
+                    <table class="w-full text-left text-sm text-slate-600">
+                        <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-6 py-3">Dokument</th>
+                                <th class="px-6 py-3">Status</th>
+                                <th class="px-6 py-3">Uploadet</th>
+                                <th class="px-6 py-3 text-right">Handlinger</th>
+                            </tr>
+                        </thead>
+                        <tbody id="documents-table-body" class="divide-y divide-slate-100">
+                            <tr>
+                                <td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs">
+                                    <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser dokumenter...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
 
                 <!-- Paginering bundpanel -->
@@ -425,7 +441,7 @@
             const refreshIcon = document.getElementById('refresh-docs-icon');
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
 
-            const listContainer = document.getElementById('documents-list');
+            const tableBody = document.getElementById('documents-table-body');
             const paginationContainer = document.getElementById('pagination-container');
             const countBadge = document.getElementById('docs-count-badge');
 
@@ -475,19 +491,21 @@
                     countBadge.classList.remove('hidden');
                 }
 
-                listContainer.innerHTML = '';
+                if (!tableBody) return;
 
                 if (docs.length === 0) {
-                    listContainer.innerHTML = `
-                        <div class="text-center py-12 text-slate-400 text-sm">
-                            <i class="fa-solid fa-folder-open text-3xl mb-3 block"></i>
-                            ${searchQuery || selectedCategory || selectedFileFilter ? 'Ingen dokumenter på serveren matchede de valgte filtre/søgning.' : 'Ingen dokumenter indlæst endnu.'}
-                        </div>`;
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="px-6 py-12 text-center text-slate-400 text-sm">
+                                <i class="fa-solid fa-folder-open text-3xl mb-3 block"></i>
+                                ${searchQuery || selectedCategory || selectedFileFilter ? 'Ingen dokumenter på serveren matchede de valgte filtre/søgning.' : 'Ingen dokumenter indlæst endnu.'}
+                            </td>
+                        </tr>`;
                     if (paginationContainer) paginationContainer.classList.add('hidden');
                     return;
                 }
 
-                docs.forEach(doc => {
+                tableBody.innerHTML = docs.map(doc => {
                     let statusColor = "bg-slate-100 text-slate-600";
                     let statusText = doc.status;
 
@@ -512,41 +530,48 @@
                     const fileName = escapeHtml(doc.fileName || 'Uden navn');
                     const hasPhysicalFile = isDocumentUrl(doc.FilePath || doc.filePath);
                     const documentLink = hasPhysicalFile
-                        ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-medium text-brand-700 hover:text-brand-800 hover:underline truncate text-sm flex-1 font-semibold" title="${fileName}">
+                        ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-brand-700 hover:text-brand-800 hover:underline truncate text-xs block" title="${fileName}">
                                ${fileName}
                            </a>`
-                        : `<div class="flex items-center space-x-2 truncate flex-1">
-                               <span class="font-medium text-slate-700 truncate text-sm font-semibold" title="${fileName}">
+                        : `<div class="flex items-center space-x-1.5 truncate">
+                               <span class="font-semibold text-slate-700 truncate text-xs" title="${fileName}">
                                    ${fileName}
                                </span>
-                               <span class="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-md shrink-0" title="Denne fil findes ikke i serverens uploads-mappe">Fil mangler på disk</span>
+                               <span class="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200/80 px-1.5 py-0.5 rounded shrink-0" title="Denne fil findes ikke i serverens uploads-mappe">Mangler på disk</span>
                            </div>`;
 
-                    listContainer.innerHTML += `
-                        <div class="p-4 bg-slate-50 border border-slate-200/60 rounded-xl hover:border-slate-300 transition duration-150 shadow-sm">
-                            <div class="flex justify-between items-center gap-4">
-                                <div class="flex items-center space-x-3 truncate flex-1 min-w-0">
-                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg shrink-0 flex items-center justify-center"></i>
-                                    ${documentLink}
+                    return `
+                        <tr class="hover:bg-slate-50/60 transition">
+                            <td class="px-6 py-4 align-middle font-medium text-slate-900">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg shrink-0"></i>
+                                    <div class="min-w-0 max-w-xs sm:max-w-sm">
+                                        ${documentLink}
+                                        <div class="text-[11px] text-slate-400 truncate mt-0.5" title="${escapeHtml(doc.id || '')}">
+                                            ID: ${escapeHtml(doc.id || '')}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="flex items-center space-x-2 shrink-0">
-                                    <span class="text-xs px-2.5 py-1 rounded-full font-semibold leading-none flex items-center shrink-0 ${statusColor}">
-                                        ${statusText}
-                                    </span>
-                                    <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150 flex items-center justify-center shrink-0"
-                                            data-id="${encodeURIComponent(doc.id || '')}"
-                                            data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
-                                            title="Slet dokument og chunks">
-                                        <i class="fa-solid fa-trash-can text-sm pointer-events-none"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-400">
-                                <span>ID: ${escapeHtml(doc.id || '')}</span>
-                                <span>Uploadet: ${date}</span>
-                            </div>
-                        </div>`;
-                });
+                            </td>
+                            <td class="px-6 py-4 align-middle whitespace-nowrap">
+                                <span class="text-xs px-2.5 py-1 rounded-full font-semibold leading-none inline-flex items-center ${statusColor}">
+                                    ${statusText}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 align-middle whitespace-nowrap text-xs text-slate-700 font-medium">
+                                ${date}
+                            </td>
+                            <td class="px-6 py-4 text-right align-middle whitespace-nowrap">
+                                <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150 inline-flex items-center justify-center"
+                                        data-id="${encodeURIComponent(doc.id || '')}"
+                                        data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
+                                        title="Slet dokument og chunks">
+                                    <i class="fa-solid fa-trash-can text-sm pointer-events-none"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
 
                 if (paginationContainer) {
                     if (totalCount > pageSize || totalPages > 1) {
@@ -558,11 +583,15 @@
                 }
             } catch (error) {
                 console.error('Fejl ved indlæsning af dokumenter:', error);
-                listContainer.innerHTML = `
-                    <div class="text-center py-12 text-red-500 text-sm">
-                        <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 block"></i>
-                        <span>Kunne ikke indlæse dokumenter: ${escapeHtml(error.message)}</span>
-                    </div>`;
+                if (tableBody) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="px-6 py-12 text-center text-red-500 text-sm">
+                                <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 block"></i>
+                                <span>Kunne ikke indlæse dokumenter: ${escapeHtml(error.message)}</span>
+                            </td>
+                        </tr>`;
+                }
                 if (paginationContainer) paginationContainer.classList.add('hidden');
             } finally {
                 if (refreshIcon) {
