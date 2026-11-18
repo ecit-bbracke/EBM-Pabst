@@ -389,6 +389,39 @@ function togglePasswordVisibility(inputId, btn) {
     }
 }
 
+async function copyPasswordValue(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input || !input.value) return;
+
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(input.value);
+        } else {
+            input.select();
+            document.execCommand('copy');
+        }
+        if (btn) {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                const origClass = icon.className;
+                icon.className = 'fa-solid fa-check text-xs text-emerald-600';
+                setTimeout(() => { icon.className = origClass; }, 2000);
+            }
+        }
+    } catch {
+        input.select();
+        document.execCommand('copy');
+        if (btn) {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                const origClass = icon.className;
+                icon.className = 'fa-solid fa-check text-xs text-emerald-600';
+                setTimeout(() => { icon.className = origClass; }, 2000);
+            }
+        }
+    }
+}
+
 // Global keyboard accessibility: Escape closes open modal dialogs
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Esc') {

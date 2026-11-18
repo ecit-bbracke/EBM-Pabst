@@ -107,10 +107,15 @@
                                 minlength="6"
                                 placeholder="••••••••" 
                                 oninput="updatePasswordStrength(this.value, 'create-user-strength-bar', 'create-user-strength-text')"
-                                class="w-full pl-3.5 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition font-mono">
-                            <button type="button" onclick="togglePasswordVisibility('new-password', this)" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1" title="Vis/skjul kode">
-                                <i class="fa-solid fa-eye text-xs text-brand-600"></i>
-                            </button>
+                                class="w-full pl-3.5 pr-16 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition font-mono">
+                            <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center space-x-0.5">
+                                <button type="button" onclick="copyPasswordValue('new-password', this)" class="text-slate-400 hover:text-brand-600 p-1 rounded hover:bg-slate-200/50 transition" title="Kopier adgangskode">
+                                    <i class="fa-regular fa-copy text-xs"></i>
+                                </button>
+                                <button type="button" onclick="togglePasswordVisibility('new-password', this)" class="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-200/50 transition" title="Vis/skjul kode">
+                                    <i class="fa-solid fa-eye text-xs text-brand-600"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="mt-1 space-y-0.5">
                             <div class="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -269,10 +274,15 @@
                     <div class="relative">
                         <input type="text" id="admin-reset-new-pw" required minlength="6" placeholder="••••••••" autocomplete="new-password"
                             oninput="updatePasswordStrength(this.value, 'admin-reset-strength-bar', 'admin-reset-strength-text')"
-                            class="w-full pl-3.5 pr-9 py-2 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 bg-slate-50/50 font-mono" />
-                        <button type="button" onclick="togglePasswordVisibility('admin-reset-new-pw', this)" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1" title="Vis/skjul kode">
-                            <i class="fa-solid fa-eye text-xs text-brand-600"></i>
-                        </button>
+                            class="w-full pl-3.5 pr-16 py-2 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 bg-slate-50/50 font-mono" />
+                        <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center space-x-0.5">
+                            <button type="button" onclick="copyPasswordValue('admin-reset-new-pw', this)" class="text-slate-400 hover:text-brand-600 p-1 rounded hover:bg-slate-200/50 transition" title="Kopier adgangskode">
+                                <i class="fa-regular fa-copy text-xs"></i>
+                            </button>
+                            <button type="button" onclick="togglePasswordVisibility('admin-reset-new-pw', this)" class="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-200/50 transition" title="Vis/skjul kode">
+                                <i class="fa-solid fa-eye text-xs text-brand-600"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="mt-1.5 space-y-1">
                         <div class="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
