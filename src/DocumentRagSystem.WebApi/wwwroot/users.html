@@ -38,35 +38,7 @@
     <!-- Main Content -->
     <main class="container mx-auto px-6 py-8 flex-1 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-        <!-- Venstre side: Systemstatus & Helbred Panel (1/3 bredde) -->
-        <div class="space-y-6 lg:col-span-1">
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col lg:sticky lg:top-8">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-                    <h2 class="text-base font-semibold text-slate-900 flex items-center">
-                        <i class="fa-solid fa-heart-pulse text-emerald-500 mr-2 text-sm"></i>
-                        Systemstatus
-                    </h2>
-                    <button onclick="fetchSystemHealth()" class="text-slate-400 hover:text-brand-600 transition p-1.5 rounded hover:bg-slate-100 text-xs" title="Opdater status">
-                        <i id="health-refresh-icon" class="fa-solid fa-rotate"></i>
-                    </button>
-                </div>
-
-                <div id="system-health-panel" class="space-y-4">
-                    <div class="flex items-center justify-center py-8">
-                        <div class="w-7 h-7 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
-                    </div>
-                </div>
-
-                <div class="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex justify-between items-center">
-                    <span id="health-last-updated">Indlæser status...</span>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span> Online
-                    </span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Højre side: Opret bruger & Brugerliste (2/3 bredde) -->
+        <!-- Venstre side: Opret bruger, Brugerliste & Feedback (2/3 bredde) -->
         <div class="lg:col-span-2 space-y-6">
 
             <!-- Top Section: Create User Card -->
@@ -256,6 +228,34 @@
                 </div>
             </div>
 
+        </div>
+
+        <!-- Højre side: Systemstatus & Helbred Panel (1/3 bredde) -->
+        <div class="space-y-6 lg:col-span-1">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col lg:sticky lg:top-8">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                    <h2 class="text-base font-semibold text-slate-900 flex items-center">
+                        <i class="fa-solid fa-heart-pulse text-emerald-500 mr-2 text-sm"></i>
+                        Systemstatus
+                    </h2>
+                    <button onclick="fetchSystemHealth()" class="text-slate-400 hover:text-brand-600 transition p-1.5 rounded hover:bg-slate-100 text-xs" title="Opdater status">
+                        <i id="health-refresh-icon" class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+
+                <div id="system-health-panel" class="space-y-4">
+                    <div class="flex items-center justify-center py-8">
+                        <div class="w-7 h-7 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex justify-between items-center">
+                    <span id="health-last-updated">Indlæser status...</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span> Online
+                    </span>
+                </div>
+            </div>
         </div>
 
     </main>
