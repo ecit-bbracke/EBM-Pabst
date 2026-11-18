@@ -289,6 +289,14 @@ public class AnswerComposer : IAnswerComposer
         sb.AppendLine("  - When user questions specify airflow in CFM or l/s, always provide the metric m³/h equivalent alongside for clarity (1 CFM ≈ 1,7 m³/h; 1 l/s = 3,6 m³/h; e.g. 100 CFM ≈ 170 m³/h).");
         sb.AppendLine("  - When user questions specify pressure in mmVS, mm H2O, or in. wg, show the Pascal (Pa) equivalent (1 mmVS ≈ 9,81 Pa; 1 in. wg ≈ 249 Pa).");
         sb.AppendLine("  - When discussing harsh, wet, or outdoor environments, explicitly mention ingress protection ratings (IP20 for standard indoor/IT racks, IP54/IP55 for industrial dust/splash protection, IP68 for fully potted/washdown/outdoor).");
+        sb.AppendLine("- **Danish Technical Jargon & Mounting Conventions**:");
+        sb.AppendLine("  - **'Sugende blæser'** corresponds to **Airflow direction 'V'** (intake over struts/guard, odd suffix digit e.g. ..01 / ..03).");
+        sb.AppendLine("  - **'Trykkende / Blæsende blæser'** corresponds to **Airflow direction 'A'** (discharge over struts/guard, even suffix digit e.g. ..02 / ..04).");
+        sb.AppendLine("  - **'Vægramme / Vægring'** corresponds to ebm-papst **W-series** axial fans with square wall mounting plate (e.g. W3G, W4E).");
+        sb.AppendLine("  - **'Gitter / Kurvegitter'** corresponds to ebm-papst **S-series** axial fans mounted in wire guard grille (e.g. S3G, S4E).");
+        sb.AppendLine("  - **'Pillefyr / Røggasblæser'** corresponds to ebm-papst flue gas blowers (e.g. R2E120, R2E150, G2E).");
+        sb.AppendLine("  - **'Tavlekøling / Tavleblæser'** corresponds to control cabinet filter fans and compact axial fans.");
+        sb.AppendLine("  - **'Kraftstrøm'** corresponds to 3-phase 400 VAC (3~ 400V). **'Lysnet'** corresponds to single-phase 230 VAC (1~ 230V).");
 
         if (isReplacement)
         {

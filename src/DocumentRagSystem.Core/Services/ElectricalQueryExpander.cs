@@ -110,6 +110,16 @@ public static class ElectricalQueryExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
+    private static readonly Regex Generic230VRegex = new(
+        @"\b(?:230\s*v(?:ac)?|230\s*volt)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
+    private static readonly Regex Generic400VRegex = new(
+        @"\b(?:400\s*v(?:ac)?|400\s*volt)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
     private static readonly Regex GenericSinglePhaseRegex = new(
         @"\b(?:1\s*[- ]?(?:fase[rt]?|phase[sd]?|phasig[en]?|phasen)|single[- ]phase|one[- ]phase|enkeltfase[rt]?|einphas(?:ig[en]?|en)|1~)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -145,7 +155,7 @@ public static class ElectricalQueryExpander
             expanded = true;
         }
 
-        if (ThreePhase400Regex.IsMatch(query))
+        if (ThreePhase400Regex.IsMatch(query) || Generic400VRegex.IsMatch(query))
         {
             sb.Append(" \"Phase 3~\" \"3~\" \"3-phase\" \"Dreiphasen\" \"400 VAC\" \"380 .. 480\" \"380-480\" \"380..480\"");
             expanded = true;
@@ -157,7 +167,7 @@ public static class ElectricalQueryExpander
             expanded = true;
         }
 
-        if (SinglePhase230Regex.IsMatch(query))
+        if (SinglePhase230Regex.IsMatch(query) || (!ThreePhase230Regex.IsMatch(query) && Generic230VRegex.IsMatch(query)))
         {
             sb.Append(" \"Phase 1~\" \"1~\" \"1-phase\" \"Einphasen\" \"230 VAC\" \"200 .. 277\" \"200-277\" \"200..277\"");
             expanded = true;
@@ -190,6 +200,7 @@ public static class ElectricalQueryExpander
         var expandedElectrical = sb.ToString();
         var expandedDimensional = DimensionalQueryExpander.Expand(query);
         var expandedUnits = EngineeringUnitsQueryExpander.Expand(query);
+        var expandedDanish = DanishTerminologyExpander.Expand(query);
 
         var finalResult = new StringBuilder(expandedElectrical);
 
@@ -203,6 +214,12 @@ public static class ElectricalQueryExpander
         {
             var unitAdditions = expandedUnits.Substring(query.Trim().Length);
             finalResult.Append(unitAdditions);
+        }
+
+        if (!string.Equals(expandedDanish, query.Trim(), StringComparison.Ordinal))
+        {
+            var danishAdditions = expandedDanish.Substring(query.Trim().Length);
+            finalResult.Append(danishAdditions);
         }
 
         return finalResult.ToString();
@@ -235,6 +252,18 @@ public static class ElectricalQueryExpander
         if (m1_230.Success)
         {
             return new ElectricalFilter("1~", 230, "VAC", m1_230.Value);
+        }
+
+        var m_gen230 = Generic230VRegex.Match(query);
+        if (m_gen230.Success)
+        {
+            return new ElectricalFilter("1~", 230, "VAC", m_gen230.Value);
+        }
+
+        var m_gen400 = Generic400VRegex.Match(query);
+        if (m_gen400.Success)
+        {
+            return new ElectricalFilter("3~", 400, "VAC", m_gen400.Value);
         }
 
         var m1 = GenericSinglePhaseRegex.Match(query);
