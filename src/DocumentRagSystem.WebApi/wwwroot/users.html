@@ -144,12 +144,13 @@
                             <tr>
                                 <th class="px-6 py-3">Bruger / Email</th>
                                 <th class="px-6 py-3">Status</th>
+                                <th class="px-6 py-3">Sidst logget ind</th>
                                 <th class="px-6 py-3 text-right">Handlinger</th>
                             </tr>
                         </thead>
                         <tbody id="users-table-body" class="divide-y divide-slate-100">
                             <tr>
-                                <td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">
+                                <td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs">
                                     <i class="fa-solid fa-spinner animate-spin mr-2"></i> Indlæser brugere...
                                 </td>
                             </tr>
@@ -859,9 +860,9 @@
                 if (isFiltered) {
                     const searchInput = document.getElementById('user-search-input');
                     const q = searchInput ? searchInput.value : '';
-                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass mr-1.5"></i> Ingen brugere matcher søgningen '${escapeHtml(q)}'.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs"><i class="fa-solid fa-magnifying-glass mr-1.5"></i> Ingen brugere matcher søgningen '${escapeHtml(q)}'.</td></tr>`;
                 } else {
-                    tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs">Ingen brugere fundet.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs">Ingen brugere fundet.</td></tr>`;
                 }
                 return;
             }
@@ -888,13 +889,13 @@
                     : (isDefaultAdmin ? 'System administrator' : 'Oprettet');
                 const createdDate = user.createdAt ? ` &bull; ${formatAuditDate(user.createdAt)}` : '';
 
-                const lastLoginInfo = user.lastLoginAt
-                    ? `<span class="text-emerald-700 font-medium"><i class="fa-solid fa-clock-rotate-left text-[10px] mr-1"></i>Sidst logget ind: ${formatAuditDate(user.lastLoginAt)}</span>`
-                    : `<span class="text-slate-400 italic"><i class="fa-regular fa-clock text-[10px] mr-1"></i>Aldrig logget ind</span>`;
-
                 const resetInfo = user.lastResetBy
                     ? `<div class="mt-1"><span class="inline-block text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80" title="Adgangskode nulstillet af admin"><i class="fa-solid fa-key text-[9px] mr-1"></i>Nulstillet: ${escapeHtml(user.lastResetBy)}</span></div>`
                     : '';
+
+                const lastLoginContent = user.lastLoginAt
+                    ? `<div class="font-medium text-slate-800 text-xs">${formatAuditDate(user.lastLoginAt)}</div>`
+                    : `<div class="text-xs text-slate-400 italic">Aldrig logget ind</div>`;
 
                 return `
                     <tr class="hover:bg-slate-50/50 transition">
@@ -908,15 +909,13 @@
                                     <div class="text-[11px] text-slate-400 mt-0.5">
                                         <span><i class="fa-solid fa-user-shield text-[10px] mr-1 text-slate-400"></i>${createdInfo}</span>${createdDate}
                                     </div>
-                                    <div class="text-[11px] text-slate-500 mt-0.5">
-                                        ${lastLoginInfo}
-                                    </div>
                                     ${resetInfo}
                                 </div>
                             </div>
                         </td>
-                        <td class="px-6 py-4 align-top">${statusBadge}</td>
-                        <td class="px-6 py-4 text-right align-top">${actions}</td>
+                        <td class="px-6 py-4 align-top whitespace-nowrap">${statusBadge}</td>
+                        <td class="px-6 py-4 align-top whitespace-nowrap">${lastLoginContent}</td>
+                        <td class="px-6 py-4 text-right align-top whitespace-nowrap">${actions}</td>
                     </tr>
                 `;
             }).join('');
