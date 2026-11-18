@@ -142,9 +142,24 @@
                     <table class="w-full text-left text-sm text-slate-600">
                         <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <tr>
-                                <th class="px-6 py-3">Bruger / Email</th>
-                                <th class="px-6 py-3">Status</th>
-                                <th class="px-6 py-3">Sidst logget ind</th>
+                                <th onclick="sortUsers('email')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter email">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Bruger / Email</span>
+                                        <i id="user-sort-icon-email" class="fa-solid fa-sort-up text-brand-600 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortUsers('status')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter status">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Status</span>
+                                        <i id="user-sort-icon-status" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortUsers('last_login')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter sidst logget ind">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Sidst logget ind</span>
+                                        <i id="user-sort-icon-last_login" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
                                 <th class="px-6 py-3 text-right">Handlinger</th>
                             </tr>
                         </thead>
@@ -801,6 +816,78 @@
         }
 
         let usersListCache = [];
+        let currentUserSort = { column: 'email', asc: true };
+
+        function sortUsers(column) {
+            if (currentUserSort.column === column) {
+                currentUserSort.asc = !currentUserSort.asc;
+            } else {
+                currentUserSort.column = column;
+                // Default to newest first (desc) for date column, and A-Z (asc) for text columns
+                currentUserSort.asc = (column !== 'last_login');
+            }
+            updateUserSortIcons();
+            applyUsersView();
+        }
+
+        function updateUserSortIcons() {
+            const columns = ['email', 'status', 'last_login'];
+            columns.forEach(col => {
+                const icon = document.getElementById(`user-sort-icon-${col}`);
+                if (!icon) return;
+
+                if (col === currentUserSort.column) {
+                    icon.className = `fa-solid ${currentUserSort.asc ? 'fa-sort-up' : 'fa-sort-down'} text-brand-600 text-xs`;
+                } else {
+                    icon.className = 'fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs';
+                }
+            });
+        }
+
+        function getFilteredAndSortedUsers() {
+            const searchInput = document.getElementById('user-search-input');
+            const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+            let list = [...usersListCache];
+            if (query) {
+                list = list.filter(u => {
+                    const email = (u.email || '').toLowerCase();
+                    const createdBy = (u.createdBy || '').toLowerCase();
+                    const resetBy = (u.lastResetBy || '').toLowerCase();
+                    const status = u.isLockedOut ? 'låst ude lockout' : 'aktiv active';
+                    return email.includes(query) || createdBy.includes(query) || resetBy.includes(query) || status.includes(query);
+                });
+            }
+
+            const { column, asc } = currentUserSort;
+            list.sort((a, b) => {
+                if (column === 'last_login') {
+                    const timeA = a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : 0;
+                    const timeB = b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : 0;
+                    return asc ? (timeA - timeB) : (timeB - timeA);
+                }
+
+                let valA = '';
+                let valB = '';
+                if (column === 'email') {
+                    valA = a.email || '';
+                    valB = b.email || '';
+                } else if (column === 'status') {
+                    valA = a.isLockedOut ? 'Låst' : 'Aktiv';
+                    valB = b.isLockedOut ? 'Låst' : 'Aktiv';
+                }
+
+                const cmp = valA.localeCompare(valB, 'da', { sensitivity: 'base' });
+                return asc ? cmp : -cmp;
+            });
+
+            return { list, isFiltered: !!query };
+        }
+
+        function applyUsersView() {
+            const { list, isFiltered } = getFilteredAndSortedUsers();
+            renderUsersTable(list, isFiltered);
+        }
 
         async function fetchUsers() {
             const tbody = document.getElementById('users-table-body');
@@ -822,34 +909,18 @@
                     badge.classList.remove('hidden');
                 }
 
-                const searchInput = document.getElementById('user-search-input');
-                if (searchInput && searchInput.value.trim()) {
-                    filterUsersList(searchInput.value);
-                } else {
-                    renderUsersTable(usersListCache);
-                }
+                updateUserSortIcons();
+                applyUsersView();
 
             } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
             } finally {
                 if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
             }
         }
 
         function filterUsersList(query) {
-            if (!query || !query.trim()) {
-                renderUsersTable(usersListCache);
-                return;
-            }
-            const q = query.trim().toLowerCase();
-            const filtered = usersListCache.filter(u => {
-                const email = (u.email || '').toLowerCase();
-                const createdBy = (u.createdBy || '').toLowerCase();
-                const resetBy = (u.lastResetBy || '').toLowerCase();
-                const status = u.isLockedOut ? 'låst ude lockout' : 'aktiv active';
-                return email.includes(q) || createdBy.includes(q) || resetBy.includes(q) || status.includes(q);
-            });
-            renderUsersTable(filtered, true);
+            applyUsersView();
         }
 
         function renderUsersTable(users, isFiltered = false) {
