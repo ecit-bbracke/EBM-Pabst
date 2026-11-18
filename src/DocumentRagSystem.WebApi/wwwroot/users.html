@@ -462,13 +462,6 @@
             }).join('');
         }
 
-            } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente feedbackliste.</td></tr>`;
-            } finally {
-                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
-            }
-        }
-
         function openFeedbackDetails(index) {
             const fb = feedbackListCache[index];
             if (!fb) return;
@@ -835,13 +828,6 @@
                     </tr>
                 `;
             }).join('');
-        }
-
-            } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente brugere.</td></tr>`;
-            } finally {
-                if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 400);
-            }
         }
 
         async function handleCreateUser(e) {
