@@ -58,8 +58,8 @@ class PortalHeader extends HTMLElement {
                         : `<a href="databeregning.html" class="${inactiveClass}"><i class="fa-solid fa-calculator text-xs"></i><span>Databeregning</span></a>`
                     }
                     ${isUsers
-                        ? `<span id="nav-users" class="${activeClass}"><i class="fa-solid fa-users text-xs"></i><span>Brugere</span></span>`
-                        : `<a id="nav-users" href="users.html" class="${inactiveClass} hidden"><i class="fa-solid fa-users text-xs"></i><span>Brugere</span></a>`
+                        ? `<span id="nav-users" class="${activeClass}"><i class="fa-solid fa-users text-xs"></i><span>Administration</span></span>`
+                        : `<a id="nav-users" href="users.html" class="${inactiveClass} hidden"><i class="fa-solid fa-users text-xs"></i><span>Administration</span></a>`
                     }
                     <button onclick="openChangePasswordModal()" class="bg-brand-800/80 hover:bg-brand-700 text-slate-100 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center space-x-1.5 border border-brand-700/40" title="Skift adgangskode">
                         <i class="fa-solid fa-key text-xs"></i>
