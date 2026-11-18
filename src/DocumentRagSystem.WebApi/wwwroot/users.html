@@ -218,10 +218,30 @@
                     <table class="w-full text-left text-sm text-slate-600">
                         <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <tr>
-                                <th class="px-6 py-3">Tidspunkt</th>
-                                <th class="px-6 py-3">Bruger</th>
-                                <th class="px-6 py-3">Kommentar</th>
-                                <th class="px-6 py-3">Søgekontekst</th>
+                                <th onclick="sortFeedback('created_at')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter tidspunkt">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Tidspunkt</span>
+                                        <i id="feedback-sort-icon-created_at" class="fa-solid fa-sort-down text-emerald-600 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortFeedback('user')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter bruger">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Bruger</span>
+                                        <i id="feedback-sort-icon-user" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortFeedback('comment')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter kommentar">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Kommentar</span>
+                                        <i id="feedback-sort-icon-comment" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortFeedback('context')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter søgekontekst">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Søgekontekst</span>
+                                        <i id="feedback-sort-icon-context" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
                                 <th class="px-6 py-3 text-right">Handlinger</th>
                             </tr>
                         </thead>
@@ -339,6 +359,79 @@
         }
 
         let feedbackListCache = [];
+        let currentFeedbackSort = { column: 'created_at', asc: false };
+
+        function sortFeedback(column) {
+            if (currentFeedbackSort.column === column) {
+                currentFeedbackSort.asc = !currentFeedbackSort.asc;
+            } else {
+                currentFeedbackSort.column = column;
+                // Default to newest first (desc) for date, and A-Z (asc) for text columns
+                currentFeedbackSort.asc = (column !== 'created_at');
+            }
+            updateFeedbackSortIcons();
+            applyFeedbackView();
+        }
+
+        function updateFeedbackSortIcons() {
+            const columns = ['created_at', 'user', 'comment', 'context'];
+            columns.forEach(col => {
+                const icon = document.getElementById(`feedback-sort-icon-${col}`);
+                if (!icon) return;
+
+                if (col === currentFeedbackSort.column) {
+                    icon.className = `fa-solid ${currentFeedbackSort.asc ? 'fa-sort-up' : 'fa-sort-down'} text-emerald-600 text-xs`;
+                } else {
+                    icon.className = 'fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs';
+                }
+            });
+        }
+
+        function getFilteredAndSortedFeedback() {
+            const searchInput = document.getElementById('feedback-search-input');
+            const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+            let list = [...feedbackListCache];
+            if (query) {
+                list = list.filter(fb => {
+                    const comment = (fb.comment || '').toLowerCase();
+                    const user = (fb.user_email || fb.userEmail || fb.user_id || fb.userId || '').toLowerCase();
+                    const contact = (fb.contact_email || fb.contactEmail || '').toLowerCase();
+                    const prompts = (fb.search_prompts || fb.searchPrompts || '').toLowerCase();
+                    const answer = (fb.assistant_answer || fb.assistantAnswer || '').toLowerCase();
+                    return comment.includes(query) || user.includes(query) || contact.includes(query) || prompts.includes(query) || answer.includes(query);
+                });
+            }
+
+            const { column, asc } = currentFeedbackSort;
+            list.sort((a, b) => {
+                if (column === 'created_at') {
+                    const timeA = new Date(a.created_at || a.createdAt || 0).getTime();
+                    const timeB = new Date(b.created_at || b.createdAt || 0).getTime();
+                    return asc ? (timeA - timeB) : (timeB - timeA);
+                }
+
+                let valA = '';
+                let valB = '';
+                if (column === 'user') {
+                    valA = a.user_email || a.userEmail || a.user_id || a.userId || '';
+                } else if (column === 'comment') {
+                    valA = a.comment || '';
+                } else if (column === 'context') {
+                    valA = a.search_prompts || a.searchPrompts || '';
+                }
+
+                const cmp = valA.localeCompare(valB, 'da', { sensitivity: 'base' });
+                return asc ? cmp : -cmp;
+            });
+
+            return { list, isFiltered: !!query };
+        }
+
+        function applyFeedbackView() {
+            const { list, isFiltered } = getFilteredAndSortedFeedback();
+            renderFeedbackTable(list, isFiltered);
+        }
 
         async function fetchFeedbacks() {
             const tbody = document.getElementById('feedback-table-body');
@@ -362,12 +455,8 @@
                     badge.classList.remove('hidden');
                 }
 
-                const searchInput = document.getElementById('feedback-search-input');
-                if (searchInput && searchInput.value.trim()) {
-                    filterFeedbackList(searchInput.value);
-                } else {
-                    renderFeedbackTable(feedbackListCache);
-                }
+                updateFeedbackSortIcons();
+                applyFeedbackView();
 
             } catch (err) {
                 tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-red-500 text-xs">Kunne ikke hente feedbackliste.</td></tr>`;
@@ -377,20 +466,7 @@
         }
 
         function filterFeedbackList(query) {
-            if (!query || !query.trim()) {
-                renderFeedbackTable(feedbackListCache);
-                return;
-            }
-            const q = query.trim().toLowerCase();
-            const filtered = feedbackListCache.filter(fb => {
-                const comment = (fb.comment || '').toLowerCase();
-                const user = (fb.user_email || fb.userEmail || fb.user_id || fb.userId || '').toLowerCase();
-                const contact = (fb.contact_email || fb.contactEmail || '').toLowerCase();
-                const prompts = (fb.search_prompts || fb.searchPrompts || '').toLowerCase();
-                const answer = (fb.assistant_answer || fb.assistantAnswer || '').toLowerCase();
-                return comment.includes(q) || user.includes(q) || contact.includes(q) || prompts.includes(q) || answer.includes(q);
-            });
-            renderFeedbackTable(filtered, true);
+            applyFeedbackView();
         }
 
         function renderFeedbackTable(feedbacks, isFiltered = false) {
@@ -409,9 +485,6 @@
             }
 
             tbody.innerHTML = feedbacks.map((fb, idx) => {
-                const cacheIdx = feedbackListCache.findIndex(item => item.id === fb.id);
-                const targetIdx = cacheIdx >= 0 ? cacheIdx : idx;
-
                 const dateObj = new Date(fb.created_at || fb.createdAt);
                 const formattedDate = dateObj.toLocaleDateString('da-DK', {
                     day: '2-digit', month: 'short', year: 'numeric',
@@ -450,7 +523,7 @@
                             <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
                                 <span class="text-slate-400 text-[10px] uppercase font-semibold">Prompt:</span> ${promptPreview}
                             </div>
-                            <button onclick="openFeedbackDetails(${targetIdx})" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
+                            <button onclick="openFeedbackDetails('${escapeHtml(fb.id)}')" class="mt-1.5 text-[11px] text-brand-600 hover:text-brand-800 font-semibold flex items-center space-x-1 hover:underline">
                                 <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
                                 <span>Vis fuld kontekst</span>
                             </button>
@@ -465,8 +538,11 @@
             }).join('');
         }
 
-        function openFeedbackDetails(index) {
-            const fb = feedbackListCache[index];
+        function openFeedbackDetails(idOrIndex) {
+            const fb = typeof idOrIndex === 'string'
+                ? feedbackListCache.find(x => x.id === idOrIndex)
+                : feedbackListCache[idOrIndex];
+            if (!fb) return;
             if (!fb) return;
 
             const modal = document.getElementById('feedback-modal');
