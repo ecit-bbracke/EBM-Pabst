@@ -94,9 +94,24 @@
                     <table class="w-full text-left text-sm text-slate-600">
                         <thead class="bg-slate-50/75 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <tr>
-                                <th class="px-6 py-3">Dokument</th>
-                                <th class="px-6 py-3">Status</th>
-                                <th class="px-6 py-3">Uploadet</th>
+                                <th onclick="sortDocuments('name')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter filnavn">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Dokument</span>
+                                        <i id="doc-sort-icon-name" class="fa-solid fa-sort-up text-brand-600 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortDocuments('status')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter status">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Status</span>
+                                        <i id="doc-sort-icon-status" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
+                                <th onclick="sortDocuments('date')" class="px-6 py-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors group" title="Klik for at sortere efter upload dato">
+                                    <div class="flex items-center space-x-1.5">
+                                        <span>Uploadet</span>
+                                        <i id="doc-sort-icon-date" class="fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs"></i>
+                                    </div>
+                                </th>
                                 <th class="px-6 py-3 text-right">Handlinger</th>
                             </tr>
                         </thead>
@@ -436,6 +451,140 @@
             fetchDocuments();
         }
 
+        let currentDocsCache = [];
+        let currentDocSort = { column: 'name', asc: true };
+
+        function sortDocuments(column) {
+            if (currentDocSort.column === column) {
+                currentDocSort.asc = !currentDocSort.asc;
+            } else {
+                currentDocSort.column = column;
+                // Default to newest first (desc) for date, and A-Z (asc) for text
+                currentDocSort.asc = (column !== 'date');
+            }
+            updateDocSortIcons();
+            applyDocSortAndRender();
+        }
+
+        function updateDocSortIcons() {
+            const columns = ['name', 'status', 'date'];
+            columns.forEach(col => {
+                const icon = document.getElementById(`doc-sort-icon-${col}`);
+                if (!icon) return;
+
+                if (col === currentDocSort.column) {
+                    icon.className = `fa-solid ${currentDocSort.asc ? 'fa-sort-up' : 'fa-sort-down'} text-brand-600 text-xs`;
+                } else {
+                    icon.className = 'fa-solid fa-sort text-slate-300 group-hover:text-slate-400 text-xs';
+                }
+            });
+        }
+
+        function getDocStatusText(doc) {
+            if (doc.status === 0 || doc.status === "Pending") return "Afventer";
+            if (doc.status === 1 || doc.status === "Processing") return "Behandler";
+            if (doc.status === 2 || doc.status === "Processed") return "Behandlet (Engelsk)";
+            if (doc.status === 3 || doc.status === "Failed") return "Fejlet";
+            if (doc.status === 4 || doc.status === "Skipped") return formatLanguageName(doc.language);
+            return String(doc.status || '');
+        }
+
+        function applyDocSortAndRender() {
+            const { column, asc } = currentDocSort;
+            currentDocsCache.sort((a, b) => {
+                if (column === 'date') {
+                    const timeA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+                    const timeB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+                    return asc ? (timeA - timeB) : (timeB - timeA);
+                }
+
+                let valA = '';
+                let valB = '';
+                if (column === 'name') {
+                    valA = a.fileName || '';
+                    valB = b.fileName || '';
+                } else if (column === 'status') {
+                    valA = getDocStatusText(a);
+                    valB = getDocStatusText(b);
+                }
+
+                const cmp = valA.localeCompare(valB, 'da', { sensitivity: 'base' });
+                return asc ? cmp : -cmp;
+            });
+
+            renderDocumentsTable(currentDocsCache);
+        }
+
+        function renderDocumentsTable(docs) {
+            const tableBody = document.getElementById('documents-table-body');
+            if (!tableBody) return;
+
+            tableBody.innerHTML = docs.map(doc => {
+                let statusColor = "bg-slate-100 text-slate-600";
+                let statusText = doc.status;
+
+                if (doc.status === 0 || doc.status === "Pending") {
+                    statusColor = "bg-amber-100 text-amber-700";
+                    statusText = "Afventer";
+                } else if (doc.status === 1 || doc.status === "Processing") {
+                    statusColor = "bg-blue-100 text-blue-700";
+                    statusText = "Behandler";
+                } else if (doc.status === 2 || doc.status === "Processed") {
+                    statusColor = "bg-green-100 text-green-700";
+                    statusText = "Behandlet (Engelsk)";
+                } else if (doc.status === 3 || doc.status === "Failed") {
+                    statusColor = "bg-red-100 text-red-700";
+                    statusText = "Fejlet";
+                } else if (doc.status === 4 || doc.status === "Skipped") {
+                    statusColor = "bg-purple-100 text-purple-700";
+                    statusText = formatLanguageName(doc.language);
+                }
+
+                const date = formatDanishDate(doc.uploadedAt);
+                const fileName = escapeHtml(doc.fileName || 'Uden navn');
+                const hasPhysicalFile = isDocumentUrl(doc.FilePath || doc.filePath);
+                const documentLink = hasPhysicalFile
+                    ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-brand-700 hover:text-brand-800 hover:underline truncate text-xs block" title="${fileName}">
+                           ${fileName}
+                       </a>`
+                    : `<div class="flex items-center space-x-1.5 truncate">
+                           <span class="font-semibold text-slate-700 truncate text-xs" title="${fileName}">
+                               ${fileName}
+                           </span>
+                           <span class="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200/80 px-1.5 py-0.5 rounded shrink-0" title="Denne fil findes ikke i serverens uploads-mappe">Mangler på disk</span>
+                       </div>`;
+
+                return `
+                    <tr class="hover:bg-slate-50/60 transition">
+                        <td class="px-6 py-4 align-middle font-medium text-slate-900">
+                            <div class="flex items-center space-x-3 min-w-0 max-w-xs sm:max-w-md">
+                                <i class="fa-solid fa-file-pdf text-red-500 text-lg shrink-0"></i>
+                                <div class="min-w-0 flex-1 truncate">
+                                    ${documentLink}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 align-middle whitespace-nowrap">
+                            <span class="text-xs px-2.5 py-1 rounded-full font-semibold leading-none inline-flex items-center ${statusColor}">
+                                ${statusText}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 align-middle whitespace-nowrap text-xs text-slate-700 font-medium">
+                            ${date}
+                        </td>
+                        <td class="px-6 py-4 text-right align-middle whitespace-nowrap">
+                            <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150 inline-flex items-center justify-center"
+                                    data-id="${encodeURIComponent(doc.id || '')}"
+                                    data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
+                                    title="Slet dokument og chunks">
+                                <i class="fa-solid fa-trash-can text-sm pointer-events-none"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
         // Hent indlæste dokumenter fra API'et med paginering og søgning
         async function fetchDocuments() {
             const refreshIcon = document.getElementById('refresh-docs-icon');
@@ -505,70 +654,9 @@
                     return;
                 }
 
-                tableBody.innerHTML = docs.map(doc => {
-                    let statusColor = "bg-slate-100 text-slate-600";
-                    let statusText = doc.status;
-
-                    if (doc.status === 0 || doc.status === "Pending") {
-                        statusColor = "bg-amber-100 text-amber-700";
-                        statusText = "Afventer";
-                    } else if (doc.status === 1 || doc.status === "Processing") {
-                        statusColor = "bg-blue-100 text-blue-700";
-                        statusText = "Behandler";
-                    } else if (doc.status === 2 || doc.status === "Processed") {
-                        statusColor = "bg-green-100 text-green-700";
-                        statusText = "Behandlet (Engelsk)";
-                    } else if (doc.status === 3 || doc.status === "Failed") {
-                        statusColor = "bg-red-100 text-red-700";
-                        statusText = "Fejlet";
-                    } else if (doc.status === 4 || doc.status === "Skipped") {
-                        statusColor = "bg-purple-100 text-purple-700";
-                        statusText = formatLanguageName(doc.language);
-                    }
-
-                    const date = formatDanishDate(doc.uploadedAt);
-                    const fileName = escapeHtml(doc.fileName || 'Uden navn');
-                    const hasPhysicalFile = isDocumentUrl(doc.FilePath || doc.filePath);
-                    const documentLink = hasPhysicalFile
-                        ? `<a href="${escapeHtml(doc.FilePath || doc.filePath)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-brand-700 hover:text-brand-800 hover:underline truncate text-xs block" title="${fileName}">
-                               ${fileName}
-                           </a>`
-                        : `<div class="flex items-center space-x-1.5 truncate">
-                               <span class="font-semibold text-slate-700 truncate text-xs" title="${fileName}">
-                                   ${fileName}
-                               </span>
-                               <span class="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200/80 px-1.5 py-0.5 rounded shrink-0" title="Denne fil findes ikke i serverens uploads-mappe">Mangler på disk</span>
-                           </div>`;
-
-                    return `
-                        <tr class="hover:bg-slate-50/60 transition">
-                            <td class="px-6 py-4 align-middle font-medium text-slate-900">
-                                <div class="flex items-center space-x-3 min-w-0 max-w-xs sm:max-w-md">
-                                    <i class="fa-solid fa-file-pdf text-red-500 text-lg shrink-0"></i>
-                                    <div class="min-w-0 flex-1 truncate">
-                                        ${documentLink}
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 align-middle whitespace-nowrap">
-                                <span class="text-xs px-2.5 py-1 rounded-full font-semibold leading-none inline-flex items-center ${statusColor}">
-                                    ${statusText}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 align-middle whitespace-nowrap text-xs text-slate-700 font-medium">
-                                ${date}
-                            </td>
-                            <td class="px-6 py-4 text-right align-middle whitespace-nowrap">
-                                <button class="delete-doc-btn text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition duration-150 inline-flex items-center justify-center"
-                                        data-id="${encodeURIComponent(doc.id || '')}"
-                                        data-filename="${encodeURIComponent(doc.fileName || 'Uden navn')}"
-                                        title="Slet dokument og chunks">
-                                    <i class="fa-solid fa-trash-can text-sm pointer-events-none"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+                currentDocsCache = docs || [];
+                updateDocSortIcons();
+                applyDocSortAndRender();
 
                 if (paginationContainer) {
                     if (totalCount > pageSize || totalPages > 1) {
