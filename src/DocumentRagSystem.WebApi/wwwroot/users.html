@@ -685,18 +685,40 @@
                         actions += `<span class="text-[11px] text-slate-400 italic ml-1">Beskyttet</span>`;
                     }
 
+                    const createdInfo = user.createdBy
+                        ? `Oprettet af: ${escapeHtml(user.createdBy)}`
+                        : (isDefaultAdmin ? 'System administrator' : 'Oprettet');
+                    const createdDate = user.createdAt ? ` &bull; ${formatAuditDate(user.createdAt)}` : '';
+
+                    const lastLoginInfo = user.lastLoginAt
+                        ? `<span class="text-emerald-700 font-medium"><i class="fa-solid fa-clock-rotate-left text-[10px] mr-1"></i>Sidst logget ind: ${formatAuditDate(user.lastLoginAt)}</span>`
+                        : `<span class="text-slate-400 italic"><i class="fa-regular fa-clock text-[10px] mr-1"></i>Aldrig logget ind</span>`;
+
+                    const resetInfo = user.lastResetBy
+                        ? `<div class="mt-1"><span class="inline-block text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80" title="Adgangskode nulstillet af admin"><i class="fa-solid fa-key text-[9px] mr-1"></i>Nulstillet: ${escapeHtml(user.lastResetBy)}</span></div>`
+                        : '';
+
                     return `
                         <tr class="hover:bg-slate-50/50 transition">
-                            <td class="px-6 py-4 font-medium text-slate-900 flex items-center space-x-3">
-                                <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase">
-                                    ${user.email.substring(0, 2)}
-                                </div>
-                                <div>
-                                    <div class="font-semibold text-slate-800">${escapeHtml(user.email)}</div>
+                            <td class="px-6 py-4 font-medium text-slate-900">
+                                <div class="flex items-start space-x-3">
+                                    <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs uppercase shrink-0 mt-0.5">
+                                        ${user.email.substring(0, 2)}
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="font-semibold text-slate-800">${escapeHtml(user.email)}</div>
+                                        <div class="text-[11px] text-slate-400 mt-0.5">
+                                            <span><i class="fa-solid fa-user-shield text-[10px] mr-1 text-slate-400"></i>${createdInfo}</span>${createdDate}
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 mt-0.5">
+                                            ${lastLoginInfo}
+                                        </div>
+                                        ${resetInfo}
+                                    </div>
                                 </div>
                             </td>
-                            <td class="px-6 py-4">${statusBadge}</td>
-                            <td class="px-6 py-4 text-right">${actions}</td>
+                            <td class="px-6 py-4 align-top">${statusBadge}</td>
+                            <td class="px-6 py-4 text-right align-top">${actions}</td>
                         </tr>
                     `;
                 }).join('');
@@ -873,6 +895,19 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+
+        function formatAuditDate(isoStr) {
+            if (!isoStr) return '';
+            try {
+                const d = new Date(isoStr);
+                return d.toLocaleDateString('da-DK', {
+                    day: '2-digit', month: 'short', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            } catch {
+                return isoStr;
+            }
         }
 
         // Keyboard accessibility: Escape closes open admin modals

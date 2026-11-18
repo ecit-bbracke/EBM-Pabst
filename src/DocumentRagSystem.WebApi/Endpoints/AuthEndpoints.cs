@@ -31,6 +31,17 @@ public static class AuthEndpoints
             var result = await signInManager.PasswordSignInAsync(user, model.Password, isPersistent: model.RememberMe, lockoutOnFailure: true);
             if (result.Succeeded)
             {
+                try
+                {
+                    var existingClaim = (await userManager.GetClaimsAsync(user)).FirstOrDefault(c => c.Type == "last_login_at");
+                    if (existingClaim != null)
+                    {
+                        await userManager.RemoveClaimAsync(user, existingClaim);
+                    }
+                    await userManager.AddClaimAsync(user, new Claim("last_login_at", DateTime.UtcNow.ToString("o")));
+                }
+                catch { }
+
                 return Results.Ok(new { message = "Logget ind", email = user.Email });
             }
 

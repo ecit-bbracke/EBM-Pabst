@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
 using DocumentRagSystem.Core.Models;
 using DocumentRagSystem.Core.Services;
+using DocumentRagSystem.WebApi.Data;
 using DocumentRagSystem.WebApi.DTOs;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -26,7 +27,8 @@ public static class AdminEndpoints
         // USER MANAGEMENT ENDPOINTS
         app.MapGet("/api/admin/users", async (
             ClaimsPrincipal currentUser,
-            UserManager<IdentityUser> userManager) =>
+            UserManager<IdentityUser> userManager,
+            ApplicationDbContext db) =>
         {
             if (!UserSecurityHelper.IsUserAdmin(currentUser))
             {
@@ -34,12 +36,39 @@ public static class AdminEndpoints
             }
 
             var users = await userManager.Users.ToListAsync();
-            var dtos = users.Select(u => new UserSummaryDto(
-                Id: u.Id,
-                Email: u.Email ?? u.UserName ?? string.Empty,
-                UserName: u.UserName,
-                IsLockedOut: u.LockoutEnd.HasValue && u.LockoutEnd.Value > DateTimeOffset.UtcNow
-            )).ToList();
+            var userIds = users.Select(u => u.Id).ToList();
+
+            var allClaims = await db.UserClaims
+                .Where(c => userIds.Contains(c.UserId))
+                .ToListAsync();
+
+            var claimsByUser = allClaims
+                .GroupBy(c => c.UserId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.ToDictionary(c => c.ClaimType ?? string.Empty, c => c.ClaimValue ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            var dtos = users.Select(u =>
+            {
+                claimsByUser.TryGetValue(u.Id, out var userClaims);
+                string? createdBy = userClaims != null && userClaims.TryGetValue("created_by", out var cb) ? cb : null;
+                DateTime? createdAt = userClaims != null && userClaims.TryGetValue("created_at", out var ca) && DateTime.TryParse(ca, out var caDt) ? caDt : null;
+                DateTime? lastLoginAt = userClaims != null && userClaims.TryGetValue("last_login_at", out var ll) && DateTime.TryParse(ll, out var llDt) ? llDt : null;
+                string? lastResetBy = userClaims != null && userClaims.TryGetValue("last_reset_by", out var rb) ? rb : null;
+
+                return new UserSummaryDto(
+                    Id: u.Id,
+                    Email: u.Email ?? u.UserName ?? string.Empty,
+                    UserName: u.UserName,
+                    IsLockedOut: u.LockoutEnd.HasValue && u.LockoutEnd.Value > DateTimeOffset.UtcNow,
+                    CreatedBy: createdBy,
+                    CreatedAt: createdAt,
+                    LastLoginAt: lastLoginAt,
+                    LastResetBy: lastResetBy
+                );
+            }).ToList();
 
             return Results.Ok(dtos);
         })
@@ -80,6 +109,14 @@ public static class AdminEndpoints
             var result = await userManager.CreateAsync(newUser, model.Password);
             if (result.Succeeded)
             {
+                var adminEmail = currentUser.Identity?.Name ?? "Admin";
+                try
+                {
+                    await userManager.AddClaimAsync(newUser, new Claim("created_by", adminEmail));
+                    await userManager.AddClaimAsync(newUser, new Claim("created_at", DateTime.UtcNow.ToString("o")));
+                }
+                catch { }
+
                 var logger = loggerFactory.CreateLogger("AdminEndpoints");
                 logger.LogInformation("New user created: {Email} by admin {Admin}.", newUser.Email, currentUser.Identity?.Name);
 
@@ -208,6 +245,18 @@ public static class AdminEndpoints
             {
                 await userManager.SetLockoutEndDateAsync(user, null);
                 await userManager.ResetAccessFailedCountAsync(user);
+
+                var adminEmail = currentUser.Identity?.Name ?? "Admin";
+                try
+                {
+                    var existingResetClaim = (await userManager.GetClaimsAsync(user)).FirstOrDefault(c => c.Type == "last_reset_by");
+                    if (existingResetClaim != null)
+                    {
+                        await userManager.RemoveClaimAsync(user, existingResetClaim);
+                    }
+                    await userManager.AddClaimAsync(user, new Claim("last_reset_by", $"{adminEmail} ({DateTime.UtcNow:yyyy-MM-dd HH:mm})"));
+                }
+                catch { }
 
                 var logger = loggerFactory.CreateLogger("AdminEndpoints");
                 logger.LogInformation("Password reset for user: {Email} by admin {Admin}.", user.Email, currentUser.Identity?.Name);

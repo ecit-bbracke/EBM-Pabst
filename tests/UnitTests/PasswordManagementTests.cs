@@ -48,6 +48,29 @@ public class PasswordManagementTests
     }
 
     [Fact]
+    public void UserSummaryDto_WithAuditFields_StoresAuditDataCorrectly()
+    {
+        // GIVEN a user summary DTO with audit trail:
+        var now = DateTime.UtcNow;
+        var dto = new UserSummaryDto(
+            Id: "u-1",
+            Email: "emp@ebmpabst.dk",
+            UserName: "emp@ebmpabst.dk",
+            IsLockedOut: false,
+            CreatedBy: "admin@ebmpabst.dk",
+            CreatedAt: now,
+            LastLoginAt: now.AddMinutes(5),
+            LastResetBy: "admin@ebmpabst.dk (2026-11-18)"
+        );
+
+        // THEN audit fields are preserved:
+        Assert.Equal("admin@ebmpabst.dk", dto.CreatedBy);
+        Assert.Equal(now, dto.CreatedAt);
+        Assert.Equal(now.AddMinutes(5), dto.LastLoginAt);
+        Assert.Equal("admin@ebmpabst.dk (2026-11-18)", dto.LastResetBy);
+    }
+
+    [Fact]
     public async Task UserManager_ChangePassword_WhenSuccessful_ReturnsSucceeded()
     {
         // GIVEN an authenticated user and mock user manager:
