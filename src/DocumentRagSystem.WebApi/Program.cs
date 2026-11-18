@@ -347,6 +347,7 @@ builder.Services.AddSingleton<IDocumentRepository, SqliteDocumentRepository>();
 builder.Services.AddSingleton<IFeedbackRepository, SqliteFeedbackRepository>();
 builder.Services.Configure<FeedbackNotificationOptions>(
     builder.Configuration.GetSection(FeedbackNotificationOptions.SectionName));
+builder.Services.AddSingleton<IEmailTemplateService, EmailTemplateService>();
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<IFeedbackNotificationService, FeedbackNotificationService>();
 builder.Services.AddSingleton<ITextExtractor, PdfTextExtractor>();

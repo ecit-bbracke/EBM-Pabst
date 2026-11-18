@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 20px; }
+    .card { max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+    .header { background: #0c4a6e; color: #ffffff; padding: 20px 24px; }
+    .header h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+    .content { padding: 24px; }
+    table.meta { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
+    table.meta th, table.meta td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+    table.meta th { width: 32%; color: #64748b; font-weight: 600; background-color: #f8fafc; }
+    table.meta td { color: #0f172a; font-weight: 500; }
+    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.05em; margin: 20px 0 6px; }
+    .comment-box { background-color: #fef3c7; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; padding: 14px 16px; border-radius: 6px; font-size: 14px; line-height: 1.5; color: #78350f; font-weight: 500; white-space: pre-wrap; }
+    .code-box { background-color: #f1f5f9; border: 1px solid #e2e8f0; padding: 12px 14px; border-radius: 6px; font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5; color: #334155; white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
+    .answer-box { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 16px; border-radius: 6px; font-size: 13px; line-height: 1.6; color: #1e293b; max-height: 320px; overflow-y: auto; }
+    .footer { background: #f8fafc; padding: 14px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h2>ebm-papst Portal &bull; Ny Brugerfeedback</h2>
+      <p>Automatisk videresendt til support og udviklingsteamet</p>
+    </div>
+    <div class="content">
+      <table class="meta">
+        <tr><th>Tidspunkt (UTC)</th><td>{{CreatedAt}}</td></tr>
+        <tr><th>Bruger-ID (Session)</th><td><code>{{UserId}}</code></td></tr>
+        <tr><th>Login-Email</th><td><a href="mailto:{{UserEmail}}">{{UserEmail}}</a></td></tr>
+        <tr><th>Valgfri Kontakt-Email</th><td><strong><a href="mailto:{{ContactEmail}}">{{ContactEmail}}</a></strong></td></tr>
+        <tr><th>Samtale-ID</th><td><code>{{ConversationId}}</code></td></tr>
+      </table>
+
+      <div class="section-title">Hvad var der galt med svaret? (Brugerens kommentar)</div>
+      <div class="comment-box">{{Comment}}</div>
+
+      <div class="section-title">Medsendt søgeprompt (Brugerens spørgsmål)</div>
+      <div class="code-box">{{SearchPrompts}}</div>
+
+      <div class="section-title">Assistentens svar</div>
+      <div class="answer-box">{{AssistantAnswer}}</div>
+    </div>
+    <div class="footer">
+      ebm-papst Document RAG Portal &bull; System ID: {{FeedbackId}} &bull; Modtaget {{CreatedAt}}
+    </div>
+  </div>
+</body>
+</html>
