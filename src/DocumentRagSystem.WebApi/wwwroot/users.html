@@ -125,8 +125,12 @@
                         <div class="relative">
                             <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
                             <input type="text" id="user-search-input" oninput="filterUsersList(this.value)"
+                                onkeydown="if(event.key==='Escape'){ clearUserSearch(); event.stopPropagation(); }"
                                 placeholder="Filtrér brugere..."
-                                class="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48 sm:w-56 transition" />
+                                class="pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48 sm:w-56 transition" />
+                            <button id="clear-user-search-btn" onclick="clearUserSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs hidden cursor-pointer" title="Ryd søgning">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
                         </div>
                         <button onclick="fetchUsers()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater liste">
                             <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i>
@@ -183,8 +187,12 @@
                         <div class="relative">
                             <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
                             <input type="text" id="feedback-search-input" oninput="filterFeedbackList(this.value)"
+                                onkeydown="if(event.key==='Escape'){ clearFeedbackSearch(); event.stopPropagation(); }"
                                 placeholder="Filtrér feedback..."
-                                class="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 w-48 sm:w-56 transition" />
+                                class="pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 w-48 sm:w-56 transition" />
+                            <button id="clear-feedback-search-btn" onclick="clearFeedbackSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs hidden cursor-pointer" title="Ryd søgning">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
                         </div>
                         <button onclick="fetchFeedbacks()" class="text-slate-400 hover:text-slate-600 transition p-2 rounded-lg hover:bg-slate-50" title="Opdater feedback-liste">
                             <i class="fa-solid fa-arrows-rotate" id="feedback-refresh-icon"></i>
@@ -451,6 +459,9 @@
         }
 
         function applyFeedbackView() {
+            const clearBtn = document.getElementById('clear-feedback-search-btn');
+            const input = document.getElementById('feedback-search-input');
+            if (clearBtn && input) clearBtn.classList.toggle('hidden', !input.value.trim());
             const { list, isFiltered } = getFilteredAndSortedFeedback();
             renderFeedbackTable(list, isFiltered);
         }
@@ -481,7 +492,24 @@
             }
         }
 
+        let feedbackSearchDebounceTimer = null;
+
         function filterFeedbackList(query) {
+            const clearBtn = document.getElementById('clear-feedback-search-btn');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !query || !query.trim());
+
+            clearTimeout(feedbackSearchDebounceTimer);
+            feedbackSearchDebounceTimer = setTimeout(() => {
+                applyFeedbackView();
+            }, 150);
+        }
+
+        function clearFeedbackSearch() {
+            const input = document.getElementById('feedback-search-input');
+            if (input) input.value = '';
+            const clearBtn = document.getElementById('clear-feedback-search-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
+            clearTimeout(feedbackSearchDebounceTimer);
             applyFeedbackView();
         }
 
@@ -894,6 +922,9 @@
         }
 
         function applyUsersView() {
+            const clearBtn = document.getElementById('clear-user-search-btn');
+            const input = document.getElementById('user-search-input');
+            if (clearBtn && input) clearBtn.classList.toggle('hidden', !input.value.trim());
             const { list, isFiltered } = getFilteredAndSortedUsers();
             renderUsersTable(list, isFiltered);
         }
@@ -922,7 +953,24 @@
             }
         }
 
+        let userSearchDebounceTimer = null;
+
         function filterUsersList(query) {
+            const clearBtn = document.getElementById('clear-user-search-btn');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !query || !query.trim());
+
+            clearTimeout(userSearchDebounceTimer);
+            userSearchDebounceTimer = setTimeout(() => {
+                applyUsersView();
+            }, 150);
+        }
+
+        function clearUserSearch() {
+            const input = document.getElementById('user-search-input');
+            if (input) input.value = '';
+            const clearBtn = document.getElementById('clear-user-search-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
+            clearTimeout(userSearchDebounceTimer);
             applyUsersView();
         }
 
