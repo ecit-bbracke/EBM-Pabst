@@ -537,12 +537,20 @@
                         </td>
                         <td class="px-6 py-4 align-middle">
                             <div class="flex items-center space-x-1.5">
-                                <div class="text-xs text-slate-700 font-medium truncate max-w-[220px]" title="${escapeHtml(promptText)}">
+                                <div class="text-xs text-slate-700 font-medium truncate max-w-[200px]" title="${escapeHtml(promptText)}">
                                     ${promptPreview}
                                 </div>
-                                <button onclick="openFeedbackDetails('${escapeHtml(fb.id)}')" class="text-brand-600 hover:text-brand-800 p-1 rounded-md hover:bg-brand-50 transition flex-shrink-0" title="Vis fuld kontekst">
+                                <button onclick="openFeedbackDetails('${escapeHtml(fb.id)}')" class="text-brand-600 hover:text-brand-800 p-1 rounded-md hover:bg-brand-50 transition flex-shrink-0" title="Vis feedback detaljer">
                                     <i class="fa-solid fa-magnifying-glass text-xs"></i>
                                 </button>
+                                ${promptText.trim()
+                                    ? `<button onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-emerald-600 hover:text-emerald-800 p-1 rounded-md hover:bg-emerald-50 transition flex-shrink-0" title="Gentag søgning i Chat Assistent">
+                                           <i class="fa-solid fa-comments text-xs"></i>
+                                       </button>`
+                                    : `<button disabled class="text-slate-300 p-1 rounded-md cursor-not-allowed flex-shrink-0" title="Ingen prompt registreret">
+                                           <i class="fa-solid fa-comments text-xs"></i>
+                                       </button>`
+                                }
                             </div>
                         </td>
                         <td class="px-6 py-4 text-right align-middle">
@@ -602,7 +610,10 @@
                 </div>
 
                 <div class="space-y-1.5">
-                    <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Medsendt søgeprompt:</label>
+                    <div class="flex items-center justify-between">
+                        <label class="font-bold text-slate-800 uppercase tracking-wider text-[10px] block">Medsendt søgeprompt:</label>
+                        ${(fb.search_prompts || fb.searchPrompts || '').trim() ? `<button type="button" onclick="replayFeedbackPrompt('${escapeHtml(fb.id)}')" class="text-[11px] font-semibold text-emerald-600 hover:text-emerald-800 hover:underline flex items-center space-x-1"><i class="fa-solid fa-comments text-[10px]"></i><span>Gentag søgning i Chat Assistent</span></button>` : ''}
+                    </div>
                     <div class="p-3 bg-slate-100 border border-slate-200 rounded-lg text-slate-800 font-mono text-[11px] whitespace-pre-wrap max-h-36 overflow-y-auto">${escapeHtml(fb.search_prompts || fb.searchPrompts || 'Ingen prompt registreret')}</div>
                 </div>
 
@@ -620,6 +631,17 @@
         function closeFeedbackModal() {
             const modal = document.getElementById('feedback-modal');
             if (modal) modal.classList.add('hidden');
+        }
+
+        function replayFeedbackPrompt(id) {
+            const fb = feedbackListCache.find(x => x.id === id);
+            if (!fb) return;
+            const prompt = (fb.search_prompts || fb.searchPrompts || '').trim();
+            if (!prompt) {
+                alert('Der er ingen søgeprompt registreret på dette feedback-indlæg.');
+                return;
+            }
+            window.location.href = `index.html?prompt=${encodeURIComponent(prompt)}`;
         }
 
         async function deleteFeedback(id) {

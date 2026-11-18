@@ -404,6 +404,24 @@
             } catch {}
 
             initConversations();
+
+            // Check if page was opened with a prompt to execute (e.g. from feedback administration)
+            const urlParams = new URLSearchParams(window.location.search);
+            const promptParam = urlParams.get('prompt') || urlParams.get('q');
+            if (promptParam && promptParam.trim()) {
+                const promptText = promptParam.trim();
+                // Clear the URL parameter cleanly so page reload doesn't re-trigger
+                window.history.replaceState({}, document.title, window.location.pathname);
+                startNewChat();
+                const queryInput = document.getElementById('query-input');
+                if (queryInput) {
+                    queryInput.value = promptText;
+                    if (typeof autoExpandTextarea === 'function') {
+                        autoExpandTextarea(queryInput);
+                    }
+                    handleQuerySubmit(new Event('submit'));
+                }
+            }
         }
 
         function escapeHtml(value) {
