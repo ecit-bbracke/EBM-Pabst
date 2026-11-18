@@ -165,6 +165,32 @@ public class EbmProductCodeParserTests
         Assert.Contains(products, p => p.CleanCode.Contains("9694300352") || p.CleanCode.Contains("4114N"));
     }
 
+    [Fact]
+    public void ExtractProductsFromText_ExplicitModelName_ShouldExtractCompactFan()
+    {
+        var products = _parser.ExtractProductsFromText("modelnavn = 4420");
+
+        Assert.Single(products);
+        Assert.Equal("4420", products[0].CleanCode);
+        Assert.Equal(FanFamilyType.CompactOrSpecial, products[0].FanFamily);
+        Assert.Equal(119, products[0].ImpellerDiameterMm);
+        Assert.Contains("4420", products[0].FanTypeDescription);
+    }
+
+    [Theory]
+    [InlineData("4420", 119)]
+    [InlineData("4414", 119)]
+    [InlineData("4314", 119)]
+    [InlineData("8414", 80)]
+    [InlineData("3414", 92)]
+    public void Parse_CompactFourDigitSeries_ShouldParseCorrectly(string code, int expectedDiameter)
+    {
+        var info = _parser.Parse(code);
+
+        Assert.Equal(FanFamilyType.CompactOrSpecial, info.FanFamily);
+        Assert.Equal(expectedDiameter, info.ImpellerDiameterMm);
+    }
+
     [Theory]
     [InlineData("9694300352", FanFamilyType.CompactOrSpecial)]
     [InlineData("4114N/2H6PU", FanFamilyType.CompactOrSpecial)]

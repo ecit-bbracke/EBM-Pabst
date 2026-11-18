@@ -16,7 +16,7 @@ public class EbmProductCodeParser : IEbmProductCodeParser
     );
 
     private static readonly Regex ProductCodeExtractorRegex = new(
-        @"(?:Art_([A-Za-z0-9\-]+?)(?:[-_]Doc|\.pdf|\b))|\b([ASWRKGD](?:3G|[0-9]{1,2}[ED]|[0-9]G)[0-9]{3}(?:-?[A-Z0-9]{2,4}-?[A-Z0-9]{1,4})?)\b|\b(V[A-Z]{2}0?[0-9]{3}[A-Z0-9]+)\b|\b(9[2-7]\d{8})\b|\b(83\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b((?:4114|6314|6318|3258)[A-Z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
+        @"(?:(?:modelnavn|model|varenr|varenummer|artikelnr|artikelnummer|type)\s*[:=]\s*([A-Za-z0-9\-\/]+))|(?:Art_([A-Za-z0-9\-]+?)(?:[-_]Doc|\.pdf|\b))|\b([ASWRKGD](?:3G|[0-9]{1,2}[ED]|[0-9]G)[0-9]{3}(?:-?[A-Z0-9]{2,4}-?[A-Z0-9]{1,4})?)\b|\b(V[A-Z]{2}0?[0-9]{3}[A-Z0-9]+)\b|\b(9[2-7]\d{8})\b|\b(83\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b((?:44|43|42|41|84|32|34|63|64|52|53)[0-9]{2}[A-Za-z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
@@ -98,6 +98,11 @@ public class EbmProductCodeParser : IEbmProductCodeParser
             foreach (Match match in matches)
             {
                 var candidate = match.Value.Trim();
+                var explicitMatch = Regex.Match(candidate, @"^(?:modelnavn|model|varenr|varenummer|artikelnr|artikelnummer|type)\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase);
+                if (explicitMatch.Success)
+                {
+                    candidate = explicitMatch.Groups[1].Value.Trim();
+                }
                 if (candidate.StartsWith("Art_", StringComparison.OrdinalIgnoreCase))
                 {
                     candidate = candidate.Substring(4);
@@ -110,6 +115,26 @@ public class EbmProductCodeParser : IEbmProductCodeParser
                     if (TryParse(candidate, out var info))
                     {
                         results.Add(info);
+                    }
+                    else if (explicitMatch.Success && !string.IsNullOrWhiteSpace(clean))
+                    {
+                        results.Add(new EbmProductInfo(
+                            RawCode: candidate,
+                            CleanCode: clean,
+                            IsStandard12CharKey: false,
+                            FanFamily: FanFamilyType.CompactOrSpecial,
+                            FanTypeDescription: $"Model {candidate}",
+                            AccessoryDescription: "Special / ukendt modeltype",
+                            Technology: MotorTechnology.Unknown,
+                            MotorDescription: "Uspecificeret motorteknologi",
+                            Poles: null,
+                            PhaseDescription: "Uspecificeret forsyning",
+                            ImpellerDiameterMm: null,
+                            VariantCode: "",
+                            AirflowDirection: AirflowDirection.CustomOrUnknown,
+                            AirflowDescription: "Se datablad",
+                            SeriesFamily: $"Model {candidate}"
+                        ));
                     }
                 }
             }
@@ -764,10 +789,23 @@ public class EbmProductCodeParser : IEbmProductCodeParser
             return true;
         }
 
-        // Compact model names (e.g. 4114N, 4114N/2H6PU, 6318/2TDH4P, 6314H, 3258J)
-        if (clean.StartsWith("4114") || clean.StartsWith("6314") || clean.StartsWith("6318") || clean.StartsWith("3258"))
+        // Compact model names (e.g. 4420, 4414N, 4114N, 6318/2TDH4P, 6314H, 3258J, 8414, 4314)
+        var compactMatch = Regex.Match(clean, @"^(?:ACi|AC)?(44|43|42|41|84|32|34|63|64|52|53)[0-9]{2}([A-Za-z0-9\-\/]*)$", RegexOptions.IgnoreCase);
+        if (compactMatch.Success || clean.StartsWith("4114") || clean.StartsWith("6314") || clean.StartsWith("6318") || clean.StartsWith("3258"))
         {
-            var series = clean.Substring(0, 4);
+            var prefix2 = compactMatch.Success ? compactMatch.Groups[1].Value : clean.Substring(0, 2);
+            var series = clean.Length >= 4 ? clean.Substring(0, 4) : clean;
+            int? diameter = prefix2 switch
+            {
+                "44" or "43" or "42" or "41" => 119, // 119x119 mm
+                "84" => 80,                         // 80x80 mm
+                "32" or "34" => 92,                 // 92x92 mm
+                "63" or "64" => 172,                // Ø172 mm
+                "52" => 127,                        // 127x127 mm
+                "53" => 140,                        // 140x140 mm
+                _ => null
+            };
+
             productInfo = new EbmProductInfo(
                 RawCode: raw,
                 CleanCode: clean,
@@ -779,13 +817,7 @@ public class EbmProductCodeParser : IEbmProductCodeParser
                 MotorDescription: "Elektronisk DC kompaktmotor",
                 Poles: null,
                 PhaseDescription: "DC forsyning",
-                ImpellerDiameterMm: series switch
-                {
-                    "4114" => 119, // 119x119 mm
-                    "6314" or "6318" => 172, // Ø172 mm
-                    "3258" => 92, // 92x92 mm
-                    _ => null
-                },
+                ImpellerDiameterMm: diameter,
                 VariantCode: clean.Length > 4 ? clean.Substring(4) : "",
                 AirflowDirection: AirflowDirection.CustomOrUnknown,
                 AirflowDescription: "Luftstrøm over ribber / struts",
