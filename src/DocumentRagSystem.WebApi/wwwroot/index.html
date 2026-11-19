@@ -313,7 +313,7 @@
     </main>
 
     <!-- PDF Flyout Modal -->
-    <div id="pdf-modal" class="fixed inset-0 z-50 hidden bg-slate-900/80 flex items-center justify-center p-4 lg:p-10 transition-opacity">
+    <div id="pdf-modal" class="fixed inset-0 z-50 bg-slate-900/80 flex items-center justify-center p-4 lg:p-10 transition-opacity duration-200 invisible opacity-0 pointer-events-none">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-slate-700/40" style="background-color: #ffffff;">
             <div class="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200/80 shrink-0">
                 <div class="flex items-center space-x-3 truncate">
@@ -337,11 +337,11 @@
                     </button>
                 </div>
             </div>
-            <div class="flex-1 bg-slate-800 relative w-full h-full overflow-hidden" style="background-color: #525659;">
+            <div class="flex-1 min-h-0 relative w-full h-full overflow-hidden" style="background-color: #525659; min-height: 0;">
                 <div id="pdf-modal-loader" class="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div class="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
                 </div>
-                <iframe id="pdf-modal-iframe" src="about:blank" class="w-full h-full border-0 block" style="background-color: #525659;" onload="document.getElementById('pdf-modal-loader')?.classList.add('hidden');"></iframe>
+                <iframe id="pdf-modal-iframe" src="about:blank" class="w-full h-full border-0 block" style="width: 100%; height: 100%; display: block; background-color: #525659;" onload="document.getElementById('pdf-modal-loader')?.classList.add('hidden');"></iframe>
             </div>
         </div>
     </div>
@@ -1463,8 +1463,9 @@
                 directDownload.download = cleanTitle.endsWith('.pdf') ? cleanTitle : (cleanTitle + '.pdf');
             }
             
-            // Reveal modal before loading iframe so Firefox PDF.js can measure non-zero container dimensions
-            modal.classList.remove('hidden');
+            // Make modal visible via visibility & opacity (never display:none, so Firefox calculates geometry)
+            modal.classList.remove('invisible', 'opacity-0', 'pointer-events-none', 'hidden');
+            modal.classList.add('opacity-100');
             document.body.style.overflow = 'hidden';
 
             if (loader) loader.classList.remove('hidden');
@@ -1474,9 +1475,7 @@
                 if (loader) loader.classList.add('hidden');
             }, 1000);
             
-            requestAnimationFrame(() => {
-                iframe.src = url;
-            });
+            iframe.src = url;
         }
 
         async function copyPdfDirectLink(btn) {
@@ -1502,7 +1501,10 @@
             if (iframe) {
                 iframe.src = 'about:blank';
             }
-            if (modal) modal.classList.add('hidden');
+            if (modal) {
+                modal.classList.remove('opacity-100');
+                modal.classList.add('invisible', 'opacity-0', 'pointer-events-none');
+            }
             document.body.style.overflow = '';
         }
 
@@ -2192,9 +2194,8 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' || e.key === 'Esc') {
                 const pdfModal = document.getElementById('pdf-modal');
-                if (pdfModal && !pdfModal.classList.contains('hidden')) {
-                    pdfModal.classList.add('hidden');
-                    document.body.style.overflow = '';
+                if (pdfModal && !pdfModal.classList.contains('invisible')) {
+                    closePdfModal();
                     return;
                 }
 
