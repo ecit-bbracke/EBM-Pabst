@@ -385,8 +385,57 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 catch { }
             }
 
-            // 2. Directly fetch chunks for top matched database candidates (prioritizing closest drop-ins)
-            foreach (var match in replacementAnalysis.MatchedDatabaseCandidates.Take(3))
+            // 2. Fetch candidate documents from database
+            // If the query specifically seeks opposite airflow, prioritize opposite-direction candidates and sibling series variants
+            bool isOppositeAirflow = question.Contains("modsat", StringComparison.OrdinalIgnoreCase) ||
+                                     question.Contains("opposite", StringComparison.OrdinalIgnoreCase) ||
+                                     question.Contains("omvendt", StringComparison.OrdinalIgnoreCase) ||
+                                     question.Contains("umgekehrt", StringComparison.OrdinalIgnoreCase);
+
+            var candidateProducts = isOppositeAirflow
+                ? replacementAnalysis.IncompatibleDatabaseCandidates
+                    .Where(eval => eval.ProductB.AirflowDirection != sourceProduct.AirflowDirection &&
+                                   eval.ProductB.AirflowDirection != AirflowDirection.CustomOrUnknown &&
+                                   eval.ProductB.ImpellerDiameterMm == sourceProduct.ImpellerDiameterMm)
+                    .Select(eval => eval.ProductB)
+                    .Take(3)
+                    .ToList()
+                : replacementAnalysis.MatchedDatabaseCandidates.Take(3).ToList();
+
+            // Also search allDocsDict for sibling series documents (e.g. A4E300 siblings) when opposite airflow is requested
+            if (isOppositeAirflow && candidateProducts.Count == 0)
+            {
+                var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
+                var siblingDocs = allDocsDict.Values
+                    .Where(d => (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(prefix6, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.StartsWith(prefix6, StringComparison.OrdinalIgnoreCase)))
+                    .Where(d => !string.Equals(d.ProductCode, sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase) &&
+                                !(d.FileName != null && d.FileName.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                    .Take(4)
+                    .ToList();
+
+                foreach (var sDoc in siblingDocs)
+                {
+                    try
+                    {
+                        var sChunks = (await vectorStore.GetChunksByDocumentAndIndicesAsync(sDoc.Id, new[] { 0, 1, 2, 3 })).ToList();
+                        if (sChunks.Count == 0)
+                        {
+                            sChunks = (await vectorStore.GetAllChunksByDocumentIdAsync(sDoc.Id)).Take(4).ToList();
+                        }
+                        var enriched = sChunks.Select(c => c with
+                        {
+                            FileName = !string.IsNullOrWhiteSpace(c.FileName) ? c.FileName : sDoc.FileName,
+                            FilePath = !string.IsNullOrWhiteSpace(c.FilePath) ? c.FilePath : sDoc.FilePath,
+                            ArticleId = !string.IsNullOrWhiteSpace(c.ArticleId) ? c.ArticleId : sDoc.ProductCode ?? sDoc.ArticleId
+                        }).ToList();
+                        allChunks.AddRange(enriched);
+                    }
+                    catch { }
+                }
+            }
+
+            foreach (var match in candidateProducts)
             {
                 var candidateDocs = allDocsDict.Values
                     .Where(d => (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(match.CleanCode, StringComparison.OrdinalIgnoreCase)) ||
