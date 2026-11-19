@@ -271,7 +271,9 @@ public class DocumentProcessor : IDocumentProcessor
                 }
             }
 
-            if (languageResult.IsEnglish)
+            bool shouldIndex = languageResult.IsEnglish || string.Equals(languageResult.Language, "da", StringComparison.OrdinalIgnoreCase);
+
+            if (shouldIndex)
             {
                 var rawChunks = _chunkingService.ChunkText(extractedText, targetDocumentId).ToList();
                 var chunksWithMetaList = rawChunks.Select(chunk => chunk with
@@ -409,7 +411,7 @@ public class DocumentProcessor : IDocumentProcessor
             }
             else
             {
-                var message = $"Document saved to disk, but embedding was skipped because detected language is '{languageResult.Language}' (only English documents are embedded).";
+                var message = $"Document saved to disk, but embedding was skipped because detected language is '{languageResult.Language}' (only English and Danish documents are embedded).";
                 _logger?.LogInformation(
                     "[DocumentProcessor] File '{FileName}' was saved to '{FilePath}', but skipped from vector database because language is '{Language}'.",
                     fileName, filePath, languageResult.Language);

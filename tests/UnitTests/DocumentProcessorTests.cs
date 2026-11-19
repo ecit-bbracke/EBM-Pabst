@@ -85,7 +85,7 @@ public class DocumentProcessorTests
         // Arrange
         var mockTextExtractor = new Mock<ITextExtractor>();
         mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
-            .ReturnsAsync("Dette er et dansk datablad for en ventilator med mærkespænding på 400V og tekniske målinger.");
+            .ReturnsAsync("Este es un manual de usuario en español para ventilador con datos tecnicos.");
 
         var mockChunkingService = new Mock<IChunkingService>();
         var mockEmbeddingService = new Mock<IEmbeddingService>();
@@ -105,14 +105,14 @@ public class DocumentProcessorTests
         );
 
         // Act
-        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "Data_sheet_DA_-_8300100049.pdf");
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "Data_sheet_ES_-_8300100049.pdf");
 
         // Assert
         Assert.NotNull(result);
         Assert.Equal(DocumentStatus.Skipped, result.Status);
-        Assert.Equal("da", result.Language);
+        Assert.Equal("es", result.Language);
         Assert.NotNull(result.ErrorMessage);
-        Assert.Contains("da", result.ErrorMessage);
+        Assert.Contains("es", result.ErrorMessage);
 
         // Verify the file was saved to disk
         var uniqueFileName = Path.GetFileName(Uri.UnescapeDataString(result.FilePath));
@@ -126,7 +126,53 @@ public class DocumentProcessorTests
         mockEmbeddingService.Verify(x => x.GenerateEmbeddingAsync(It.IsAny<string>()), Times.Never);
         mockVectorStore.Verify(x => x.AddChunkAsync(It.IsAny<DocumentChunk>(), It.IsAny<float[]>()), Times.Never);
         mockChunkingService.Verify(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(result.Id, DocumentStatus.Skipped, It.IsAny<string>(), "da", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>()), Times.Once);
+        mockRepo.Verify(x => x.UpdateDocumentStatusAsync(result.Id, DocumentStatus.Skipped, It.IsAny<string>(), "es", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessPdfAsync_WhenDanishFile_EmbedsAndIndexes()
+    {
+        // Arrange
+        var mockTextExtractor = new Mock<ITextExtractor>();
+        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
+            .ReturnsAsync("Dette er et dansk datablad for A4E300-AS72-02. Luftretning A. 230V.");
+
+        var mockChunkingService = new Mock<IChunkingService>();
+        mockChunkingService.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(new List<DocumentChunk>
+            {
+                new("c1", "d1", "Dansk datablad tekst", 0)
+            });
+
+        var mockEmbeddingService = new Mock<IEmbeddingService>();
+        mockEmbeddingService.Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new float[] { 0.1f, 0.2f, 0.3f });
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        var mockRepo = new Mock<IDocumentRepository>();
+        mockRepo.Setup(x => x.AddDocumentAsync(It.IsAny<Document>()))
+            .Returns(Task.CompletedTask);
+        mockRepo.Setup(x => x.UpdateDocumentStatusAsync(It.IsAny<string>(), It.IsAny<DocumentStatus>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>()))
+            .Returns(Task.CompletedTask);
+
+        var processor = new DocumentProcessor(
+            mockTextExtractor.Object,
+            mockChunkingService.Object,
+            mockEmbeddingService.Object,
+            mockVectorStore.Object,
+            mockRepo.Object
+        );
+
+        // Act
+        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "Data_sheet_DA_-_A4E300-AS72-02.pdf");
+
+        // Assert: Danish document is processed and embedded!
+        Assert.NotNull(result);
+        Assert.Equal(DocumentStatus.Processed, result.Status);
+        Assert.Equal("da", result.Language);
+
+        mockChunkingService.Verify(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        mockVectorStore.Verify(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -466,12 +512,12 @@ public class DocumentProcessorTests
 
         var mockTextExtractor = new Mock<ITextExtractor>();
         mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
-            .ReturnsAsync("Dette er en dansk brugermanual for ventilatoren.");
+            .ReturnsAsync("Este es un manual de usuario en español.");
 
         var mockChunkingService = new Mock<IChunkingService>();
         var mockLanguageDetector = new Mock<ILanguageDetector>();
         mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(new LanguageDetectionResult("da", false, 0.95));
+            .ReturnsAsync(new LanguageDetectionResult("es", false, 0.95));
 
         var mockRepo = new Mock<IDocumentRepository>();
         mockRepo.Setup(x => x.GetDocumentByFileNameAsync("fan_to_replace.pdf"))
@@ -892,7 +938,7 @@ public class DocumentProcessorTests
 
         var mockLanguageDetector = new Mock<ILanguageDetector>();
         mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(new LanguageDetectionResult("da", false, 0.99));
+            .ReturnsAsync(new LanguageDetectionResult("es", false, 0.99));
 
         var processor = new DocumentProcessor(
             mockTextExtractor.Object,
@@ -960,7 +1006,7 @@ public class DocumentProcessorTests
 
             var mockLanguageDetector = new Mock<ILanguageDetector>();
             mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync(new LanguageDetectionResult("da", false, 0.99));
+                .ReturnsAsync(new LanguageDetectionResult("es", false, 0.99));
 
             var processor = new DocumentProcessor(
                 mockTextExtractor.Object,
