@@ -16,7 +16,12 @@ public class EbmProductCodeParser : IEbmProductCodeParser
     );
 
     private static readonly Regex ProductCodeExtractorRegex = new(
-        @"(?:(?:modelnavn|model|varenr|varenummer|artikelnr|artikelnummer|type)\s*[:=]\s*([A-Za-z0-9\-\/]+))|(?:Art_([A-Za-z0-9\-]+?)(?:[-_]Doc|\.pdf|\b))|\b([ASWRKGD](?:3G|[0-9]{1,2}[ED]|[0-9]G)[0-9]{3}(?:-?[A-Z0-9]{2,4}-?[A-Z0-9]{1,4})?)\b|\b(V[A-Z]{2}0?[0-9]{3}[A-Z0-9]+)\b|\b(9[2-7]\d{8})\b|\b(83\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b((?:44|43|42|41|84|32|34|63|64|52|53)[0-9]{2}[A-Za-z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
+        @"(?:(?:modelnavn|model|varenr|varenummer|artikelnr|artikelnummer|type)\s*[:=]\s*([A-Za-z0-9\-\/]+))|(?:Art_([A-Za-z0-9\-]+?)(?:[-_]Doc|\.pdf|\b))|\b([ASWRKGD](?:3G|[0-9]{1,2}[ED]|[0-9]G)[0-9]{3,4}(?:-?[A-Z0-9]{2,4}-?[A-Z0-9]{1,4})?)\b|\b(V[A-Z]{2}0?[0-9]{3}[A-Z0-9]+)\b|\b(9[2-7]\d{8})\b|\b(83\d{8})\b|\b(83\d{2}[A-Z0-9\-\/]*)\b|\b((?:44|43|42|41|84|32|34|63|64|52|53)[0-9]{2}[A-Za-z0-9\-\/]*)\b|\b([0-9]{4}[A-Z]{0,2}\/[0-9A-Z\-\+]+)\b|\b(RLF[0-9]{3}[A-Z0-9\-\/]*)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
+    private static readonly Regex ExtraZeroDiameterRegex = new(
+        @"^([ASWRKGD](?:3G|[0-9]{1,2}[ED]|[0-9]G))([0-9]{3})0([A-Z0-9]{6})$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
@@ -589,13 +594,29 @@ public class EbmProductCodeParser : IEbmProductCodeParser
 
     private static string SanitizeCode(string raw)
     {
-        return raw.Replace("-", "")
-                  .Replace(" ", "")
-                  .Replace("_", "")
-                  .Replace("/", "")
-                  .Replace(".", "")
-                  .Trim()
-                  .ToUpperInvariant();
+        var clean = raw.Replace("-", "")
+                   .Replace(" ", "")
+                   .Replace("_", "")
+                   .Replace("/", "")
+                   .Replace(".", "")
+                   .Trim()
+                   .ToUpperInvariant();
+
+        // Extra-zero diameter typo correction:
+        // E.g. A4E3000AS7201 (13 chars, 3000 mm) -> A4E300AS7201 (12 chars, 300 mm)
+        if (clean.Length == 13)
+        {
+            var match = ExtraZeroDiameterRegex.Match(clean);
+            if (match.Success && int.TryParse(match.Groups[2].Value, out var diam))
+            {
+                if (DimensionalQueryExpander.KnownEbmDimensions.Contains(diam))
+                {
+                    clean = $"{match.Groups[1].Value}{match.Groups[2].Value}{match.Groups[3].Value}";
+                }
+            }
+        }
+
+        return clean;
     }
 
     private static bool IsStandardPrefix(string clean)

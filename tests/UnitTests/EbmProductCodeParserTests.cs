@@ -165,6 +165,25 @@ public class EbmProductCodeParserTests
         Assert.Contains(products, p => p.CleanCode.Contains("9694300352") || p.CleanCode.Contains("4114N"));
     }
 
+    [Theory]
+    [InlineData("A4E3000AS7201", "A4E300AS7201", 300)]
+    [InlineData("W3G4500BD0101", "W3G450BD0101", 450)]
+    [InlineData("S4E3500AN0101", "S4E350AN0101", 350)]
+    [InlineData("A3G5000AP0201", "A3G500AP0201", 500)]
+    public void Parse_ExtraZeroDiameterTypo_ShouldNormalizeToStandard12CharKey(string rawWithExtraZero, string expectedClean12, int expectedDiameter)
+    {
+        var info = _parser.Parse(rawWithExtraZero);
+
+        Assert.True(info.IsStandard12CharKey);
+        Assert.Equal(expectedClean12, info.CleanCode);
+        Assert.Equal(expectedDiameter, info.ImpellerDiameterMm);
+
+        // Also test extraction from natural language sentence
+        var extracted = _parser.ExtractProductsFromText($"hvad er max strømforbrug på {rawWithExtraZero}");
+        Assert.Single(extracted);
+        Assert.Equal(expectedClean12, extracted[0].CleanCode);
+    }
+
     [Fact]
     public void ExtractProductsFromText_ExplicitModelName_ShouldExtractCompactFan()
     {

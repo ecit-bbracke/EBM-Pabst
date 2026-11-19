@@ -18,7 +18,7 @@ public static class DimensionalQueryExpander
     /// </summary>
     public static readonly int[] KnownEbmDimensions = new[]
     {
-        25, 40, 50, 60, 70, 80, 92, 119, 127, 140, 150, 160, 172, 175, 180, 190, 200, 206, 220, 225, 250, 280, 300, 310, 315, 355, 385, 400, 450, 500, 560, 630, 710, 800, 910, 990
+        25, 40, 50, 60, 70, 80, 92, 119, 127, 140, 150, 160, 172, 175, 180, 190, 200, 206, 220, 225, 250, 280, 300, 310, 315, 350, 355, 385, 400, 450, 500, 560, 630, 710, 800, 910, 990
     };
 
     private static readonly HashSet<int> KnownEbmDimensionSet = new(KnownEbmDimensions);
