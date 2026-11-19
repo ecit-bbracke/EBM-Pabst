@@ -484,18 +484,34 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 // Security Headers Middleware
 app.Use(async (context, next) =>
 {
+    var path = context.Request.Path.Value ?? string.Empty;
+
+    // Do NOT send HTML-oriented Content-Security-Policy on raw PDF downloads or /uploads/!
+    // Strict HTML CSP breaks Firefox's internal PDF.js viewer (which needs dynamic font-src data: and worker-src).
+    if (path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/api/documents/download", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers["Content-Disposition"] = "inline";
+        context.Response.Headers["Content-Type"] = "application/pdf";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        await next();
+        return;
+    }
+
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
     context.Response.Headers.Append("X-Frame-Options", "SAMEORIGIN");
     context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
     context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
     context.Response.Headers.Append("Content-Security-Policy",
         "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; " +
-        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; " +
-        "img-src 'self' data: https:; " +
+        "font-src 'self' data: blob: https://cdnjs.cloudflare.com https://fonts.gstatic.com; " +
+        "img-src 'self' data: blob: https:; " +
         "connect-src 'self' ws: wss:; " +
-        "frame-src 'self' blob:; " +
+        "frame-src 'self' blob: data:; " +
+        "worker-src 'self' blob:; " +
         "frame-ancestors 'self'; " +
         "object-src 'self' blob:;");
     await next();
@@ -1003,7 +1019,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
                                     {
                                         try { await repo.DeleteDocumentAsync(jobId); } catch { }
                                     }
-                                    try { if (File.Exists(resolvedPath)) File.Delete(resolvedPath); } catch { }
+
                                     Program.DirFileCache.Clear();
                                     TechnicalRagOrchestrator.InvalidateQueryCache();
                                 }

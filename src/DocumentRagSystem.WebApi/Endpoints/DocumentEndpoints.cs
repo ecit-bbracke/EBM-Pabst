@@ -488,7 +488,6 @@ public static class DocumentEndpoints
                         {
                             try { await repository.DeleteDocumentAsync(stagingJobId); } catch { }
                         }
-                        try { if (File.Exists(physicalPath)) File.Delete(physicalPath); } catch { }
 
                         Program.DirFileCache.Clear();
                         TechnicalRagOrchestrator.InvalidateQueryCache();
