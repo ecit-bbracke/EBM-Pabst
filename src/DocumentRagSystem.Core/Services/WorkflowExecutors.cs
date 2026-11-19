@@ -445,6 +445,25 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 }
             }
 
+            // Proactively search for models with opposite airflow direction when requested
+            bool isOppositeAirflowQuery = question.Contains("modsat", StringComparison.OrdinalIgnoreCase) ||
+                                          question.Contains("opposite", StringComparison.OrdinalIgnoreCase) ||
+                                          question.Contains("omvendt", StringComparison.OrdinalIgnoreCase) ||
+                                          question.Contains("umgekehrt", StringComparison.OrdinalIgnoreCase);
+
+            if (isOppositeAirflowQuery && sourceProduct.FanFamily == FanFamilyType.Axial)
+            {
+                var targetDirectionChar = sourceProduct.AirflowDirection == AirflowDirection.A ? "V" : "A";
+                var diam = sourceProduct.ImpellerDiameterMm;
+                var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
+
+                searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Direction of air flow {targetDirectionChar}"));
+                if (diam.HasValue)
+                {
+                    searchTasks.Add(vectorStore.SearchAsync($"axial fan {diam.Value} mm Direction of air flow {targetDirectionChar}"));
+                }
+            }
+
             var searchResults = await Task.WhenAll(searchTasks);
             foreach (var res in searchResults)
             {
