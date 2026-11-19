@@ -56,6 +56,10 @@ public class EngineeringUnitsQueryExpanderTests
     [InlineData("blæser med tachosignal", "Tach output", "speed signal")]
     [InlineData("støjsvag blæser under 40 dB", "dB(A)", "sound pressure")]
     [InlineData("gældende parameterspecifikationer for W3G800GG9501", "MODBUS", "software version")]
+    [InlineData("hvilken modbus version er der på W3G800GG9501", "MODBUS", "software version")]
+    [InlineData("which modbus version is used", "MODBUS", "Parameter specification")]
+    [InlineData("welche Modbus Version wird verwendet", "MODBUS", "Parameterbeschreibung")]
+    [InlineData("W3G800 V5.01", "MODBUS", "software version")]
     [InlineData("parameter specifications for W3G800", "MODBUS", "Parameter specification")]
     [InlineData("Parameterbeschreibung und Registerbelegung für W3G800", "MODBUS", "Parameterbeschreibung")]
     public void Expand_ShouldEnrichQueryWithTechnicalUnitsAndParameters(string query, string expected1, string expected2)

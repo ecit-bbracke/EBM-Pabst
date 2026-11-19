@@ -61,9 +61,9 @@ public static class EngineeringUnitsQueryExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
-    // Multilingual Parameter Specification / Modbus register mapping (Danish, English, German)
+    // Multilingual Parameter Specification / Modbus register mapping / Modbus version (Danish, English, German)
     private static readonly Regex ModbusParameterSpecRegex = new(
-        @"\b(?:parameter\s*(?:specifikation(?:er)?|specification(?:s)?|beschreibung|liste|list)|modbus\s*parameter[s]?|register\s*(?:mapping|oversigt|liste|tabelle|belegung))\b",
+        @"\b(?:parameter\s*(?:specifikation(?:er)?|specification(?:s)?|beschreibung|liste|list)|modbus\s*parameter[s]?|register\s*(?:mapping|oversigt|liste|tabelle|belegung)|(?:hvilken|which|welche)\s+(?:er\s+)?(?:der\s+)?modbus\s*version|modbus\s*version(?:er)?|v[5-7](?:\.[0-9]{1,2}|x)?)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
