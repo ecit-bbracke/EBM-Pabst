@@ -504,8 +504,20 @@ public static class QueryEndpoints
             {
                 requestStopwatch.Stop();
                 logger.LogInformation(
-                    "HTTP POST /api/query/stream aborted by client disconnect after {DurationMs}ms (ConversationId: {ConversationId}, ChunksStreamed: {ChunkCount}).",
+                    "HTTP POST /api/query/stream aborted after {DurationMs}ms (ConversationId: {ConversationId}, ChunksStreamed: {ChunkCount}).",
                     requestStopwatch.ElapsedMilliseconds, request.ConversationId, chunkIndex);
+
+                if (chunkIndex == 0 && !httpContext.RequestAborted.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var timeoutMsg = "*Svarforspørgslen tog længere tid end forventet fra sprogmodellen. Prøv venligst igen, eller stil et mere specifikt spørgsmål.*";
+                        var payload = JsonSerializer.Serialize(new { text = timeoutMsg }, Program.JsonCamelCase);
+                        await httpContext.Response.WriteAsync($"event: chunk\ndata: {payload}\n\n", CancellationToken.None);
+                        await httpContext.Response.Body.FlushAsync(CancellationToken.None);
+                    }
+                    catch { }
+                }
             }
 
             return Results.Empty;

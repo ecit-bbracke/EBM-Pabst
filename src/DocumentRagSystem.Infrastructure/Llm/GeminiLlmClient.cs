@@ -199,20 +199,35 @@ public sealed class GeminiLlmClient : ILlmClient
                 candidatesProp[0].TryGetProperty("content", out var contentProp) &&
                 contentProp.TryGetProperty("parts", out var partsProp) &&
                 partsProp.ValueKind == JsonValueKind.Array &&
-                partsProp.GetArrayLength() > 0 &&
-                partsProp[0].TryGetProperty("text", out var textProp))
+                partsProp.GetArrayLength() > 0)
             {
-                var resultText = textProp.GetString() ?? string.Empty;
-                var meta = new LlmExecutionMetadata(
-                    Provider: ProviderName,
-                    Model: modelToUse,
-                    DurationMs: stopwatch.ElapsedMilliseconds,
-                    InputTokens: inputTokens ?? (prompt.Length / 4),
-                    OutputTokens: outputTokens ?? (resultText.Length / 4),
-                    StructuredOutputValid: !request.RequireJson || IsValidJson(resultText),
-                    AttemptCount: 1);
+                var textSb = new StringBuilder();
+                foreach (var part in partsProp.EnumerateArray())
+                {
+                    if (part.TryGetProperty("text", out var textEl))
+                    {
+                        var t = textEl.GetString();
+                        if (!string.IsNullOrEmpty(t))
+                        {
+                            textSb.Append(t);
+                        }
+                    }
+                }
 
-                return new LlmTextResult(resultText, meta);
+                if (textSb.Length > 0)
+                {
+                    var resultText = textSb.ToString();
+                    var meta = new LlmExecutionMetadata(
+                        Provider: ProviderName,
+                        Model: modelToUse,
+                        DurationMs: stopwatch.ElapsedMilliseconds,
+                        InputTokens: inputTokens ?? (prompt.Length / 4),
+                        OutputTokens: outputTokens ?? (resultText.Length / 4),
+                        StructuredOutputValid: !request.RequireJson || IsValidJson(resultText),
+                        AttemptCount: 1);
+
+                    return new LlmTextResult(resultText, meta);
+                }
             }
 
             _logger?.LogError("[{Provider}] Failed to parse response after {DurationMs}ms.", ProviderName, stopwatch.ElapsedMilliseconds);
@@ -365,7 +380,7 @@ public sealed class GeminiLlmClient : ILlmClient
                 if (string.IsNullOrWhiteSpace(jsonStr))
                     continue;
 
-                string? chunkText = null;
+                var extractedTokens = new List<string>();
                 try
                 {
                     using var doc = JsonDocument.Parse(jsonStr);
@@ -374,11 +389,19 @@ public sealed class GeminiLlmClient : ILlmClient
                         candidates.GetArrayLength() > 0 &&
                         candidates[0].TryGetProperty("content", out var content) &&
                         content.TryGetProperty("parts", out var parts) &&
-                        parts.ValueKind == JsonValueKind.Array &&
-                        parts.GetArrayLength() > 0 &&
-                        parts[0].TryGetProperty("text", out var textEl))
+                        parts.ValueKind == JsonValueKind.Array)
                     {
-                        chunkText = textEl.GetString();
+                        foreach (var part in parts.EnumerateArray())
+                        {
+                            if (part.TryGetProperty("text", out var textEl))
+                            {
+                                var text = textEl.GetString();
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    extractedTokens.Add(text);
+                                }
+                            }
+                        }
                     }
                 }
                 catch
@@ -386,9 +409,9 @@ public sealed class GeminiLlmClient : ILlmClient
                     // Ignore transient SSE chunk parse errors
                 }
 
-                if (!string.IsNullOrEmpty(chunkText))
+                foreach (var token in extractedTokens)
                 {
-                    yield return chunkText;
+                    yield return token;
                 }
             }
         }

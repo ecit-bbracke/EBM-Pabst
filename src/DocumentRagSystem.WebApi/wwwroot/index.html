@@ -1318,7 +1318,12 @@
                 delete assistantMsg.isStreaming;
                 assistantMsg.duration = ((endTime - startTime) / 1000).toFixed(2);
                 assistantMsg.text = rawAccumulatedText;
-                assistantMsg.html = renderMarkdownToHtml(rawAccumulatedText || 'Intet svar modtaget.');
+
+                if (!rawAccumulatedText || !rawAccumulatedText.trim()) {
+                    throw new Error('Ingen tekst modtaget fra stream (muligvis timeout). Aktiverer automatisk fallback.');
+                }
+
+                assistantMsg.html = renderMarkdownToHtml(rawAccumulatedText);
                 
                 saveConversations();
                 renderConversationHistory(activeChat);
