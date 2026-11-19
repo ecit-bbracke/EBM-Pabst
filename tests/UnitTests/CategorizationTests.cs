@@ -238,6 +238,7 @@ public class CategorizationTests
     [InlineData("Er K3G560PC0401 kompatibel med Modbus?", "SPEC_LOOKUP", "K3G560PC0401")]
     [InlineData("Er K3G560PC0401 kompatibel med K3G355HA3401?", "COMPATIBILITY", "K3G560PC0401")]
     [InlineData("Hvilken ventilator er kompatibel med K3G560PC0401?", "COMPATIBILITY", "K3G560PC0401")]
+    [InlineData("Hvilken ventilator har modsat luftretning af A4E300AS7201?", "COMPATIBILITY", "A4E300AS7201")]
     [InlineData("Specifikationer for 4114N", "SPEC_LOOKUP", "4114N")]
     [InlineData("modelnavn = 4420", "SPEC_LOOKUP", "4420")]
     [InlineData("model: 4414", "SPEC_LOOKUP", "4414")]

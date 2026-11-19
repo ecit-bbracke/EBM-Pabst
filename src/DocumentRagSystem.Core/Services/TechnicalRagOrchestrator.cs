@@ -1413,14 +1413,25 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                     AddCode(m.CleanCode);
                     AddCode(m.RawCode);
                 }
+
+                // Also include top candidates from incompatible list when airflow direction differs (opposite airflow queries)
+                foreach (var incomp in compat.ReplacementAnalysis.IncompatibleDatabaseCandidates.Take(3))
+                {
+                    AddCode(incomp.ProductB?.CleanCode);
+                    AddCode(incomp.ProductB?.RawCode);
+                }
             }
 
-            // 2. Original queried source model code(s)
+            // 2. Original queried source model code(s) and their 6-char series prefix (e.g. A4E300)
             if (initialCodes != null)
             {
                 foreach (var code in initialCodes)
                 {
                     AddCode(code);
+                    if (!string.IsNullOrWhiteSpace(code) && code.Length >= 6)
+                    {
+                        AddCode(code.Substring(0, 6));
+                    }
                 }
             }
 

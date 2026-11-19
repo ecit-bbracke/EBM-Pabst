@@ -332,7 +332,15 @@ Output JSON:
                                 text.Contains("compatib", StringComparison.OrdinalIgnoreCase) ||
                                 text.Contains("passer til", StringComparison.OrdinalIgnoreCase) ||
                                 text.Contains("work with", StringComparison.OrdinalIgnoreCase) ||
-                                text.Contains("fungere med", StringComparison.OrdinalIgnoreCase);
+                                text.Contains("fungere med", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("modsat luftretning", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("modsat retning", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("opposite airflow", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("reversed airflow", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("omvendt luftretning", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("umgekehrte luftrichtung", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("entgegengesetzte luftrichtung", StringComparison.OrdinalIgnoreCase) ||
+                                text.Contains("andere förderrichtung", StringComparison.OrdinalIgnoreCase);
 
             // If only 1 product is present, distinguish between a cross-product replacement search and an electrical/operating parameter compatibility check
             var isElectricalOrOperatingParameter =
