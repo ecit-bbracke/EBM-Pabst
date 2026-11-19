@@ -645,6 +645,82 @@ public class TechnicalRagOrchestratorTests
     }
 
     [Fact]
+    public async Task StreamProcessQueryAsync_WhenOutputGovernorHitsInfrastructureError_PreservesStreamedAnswerWithoutReplacingWithFailure()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+
+        mockLlm.Setup(x => x.GenerateCompletionAsync(It.Is<string>(s => s.Contains("Input Governor")), true))
+            .ReturnsAsync("""
+            {
+              "intent": "SPEC_LOOKUP",
+              "confidence": 0.95,
+              "entities": [{"type": "fan", "name": "W3G800GG9501"}],
+              "requested_attributes": ["voltage"],
+              "constraints": [],
+              "clarification_required": false,
+              "clarification_reason": null
+            }
+            """);
+
+        var mockEvidenceEvaluator = new Mock<IEvidenceEvaluator>();
+
+        var mockAnswerComposer = new Mock<IAnswerComposer>();
+        mockAnswerComposer.Setup(x => x.StreamAnswerAsync(
+                It.IsAny<string>(),
+                It.IsAny<InputGovernorResult>(),
+                It.IsAny<List<EvidenceClaim>>(),
+                It.IsAny<List<DocumentChunk>>(),
+                It.IsAny<string>(),
+                It.IsAny<object?>(),
+                It.IsAny<System.Threading.CancellationToken>()))
+            .Returns(new[] { "W3G800GG9501 Modbus specifikationer..." }.ToAsyncEnumerable());
+
+        var mockVectorStore = new Mock<IVectorStore>();
+        mockVectorStore.Setup(x => x.SearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new[]
+            {
+                new DocumentChunk("c1", "doc1", "W3G800 Modbus RTU RS-485", 0, "Doc_10129818.pdf")
+            });
+
+        // Mock OutputGovernor failing with EMPTY_VALIDATION_RESULT infrastructure error
+        var mockOutputGov = new Mock<IOutputGovernor>();
+        mockOutputGov.Setup(x => x.ValidateOutputAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IEnumerable<DocumentChunk>>()))
+            .ReturnsAsync(new OutputGovernorResult(
+                Approved: false,
+                Issues: new List<OutputGovernorIssue>
+                {
+                    new OutputGovernorIssue("EMPTY_VALIDATION_RESULT", "Valideringsudbyderen returnerede et tomt resultat.", "HIGH")
+                },
+                Action: "FAIL_SAFE"
+            ));
+
+        var orchestrator = new TechnicalRagOrchestrator(
+            new InputGovernor(mockLlm.Object, parser),
+            new WorkflowRouter(),
+            mockEvidenceEvaluator.Object,
+            mockAnswerComposer.Object,
+            mockOutputGov.Object,
+            mockLlm.Object,
+            ebmParser: parser
+        );
+
+        // Act - run stream
+        var events = new List<OrchestrationStreamEvent>();
+        await foreach (var evt in orchestrator.ProcessQueryStreamAsync("hvilken modbus version er der på W3G800GG9501", mockVectorStore.Object, null))
+        {
+            events.Add(evt);
+        }
+
+        // Assert - must NOT emit a 'replace' event when failure is purely infrastructure
+        Assert.DoesNotContain(events, e => e.EventType == "replace");
+        var chunkEvents = events.Where(e => e.EventType == "chunk").ToList();
+        Assert.Single(chunkEvents);
+        Assert.Contains("W3G800GG9501 Modbus specifikationer...", chunkEvents[0].Text);
+    }
+
+    [Fact]
     public async Task StreamProcessQueryAsync_WithTargetProduct_ShouldFilterCitationsToTargetProductChunks()
     {
         // Arrange

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using DocumentRagSystem.Core.Interfaces;
@@ -47,6 +48,17 @@ You are the Output Governor. Verify if the Proposed Answer is factually supporte
   * Energy Savings & Payback Calculations: Standard benchmark calculations (typical 30-50% EC power reduction, e.g. 150 W for 250 W AC fan; ~2.500 DKK unit cost) are approved domain conventions.
   * Model Typenøgle Conventions: Fan family type, diameter (Ømm), AC/EC motor technology, and airflow direction (A/V) derived from model codes are approved domain rules.
   * Honest Missing Documentation Disclaimers: Clear statements explaining that a specific requested model is not found in the local catalog are approved and factually sound.
+  * MODBUS & Parameter Specification Guidance: Explanations that MODBUS register mappings depend on the fan motor's software/firmware version (e.g. SW 05.00, V5.01, V6.x, V7.x), that the SW version is stamped on the motor rating plate or read via register 0xD000, and standard communication parameters (RS-485, 19200 baud, 8E1) are official ebm-papst engineering conventions and are fully APPROVED.
+  * ESM Motor Specifications: Specifications stating that ebm-papst ESM (Energy Saving Motor) refrigeration motors operate between 500 and 2300 rpm, with 500 rpm as the lowest programmable operating speed and cut-off below 500 rpm, are approved domain conventions.
+
+Schema:
+{
+  "approved": true,
+  "action": "APPROVE | REGENERATE | REQUEST_CLARIFICATION | FAIL_SAFE",
+  "issues": [
+    {"type": "...", "claim": "...", "severity": "HIGH | MEDIUM | LOW"}
+  ]
+}
 
 - RULES FOR VERIFICATION:
   * If the technical operational claims (temperatures, voltages, dimensions, airflows, speeds, power) for the documented models are supported by the Context Documentation or domain rules, return: {"approved": true, "issues": [], "action": "APPROVE"}
@@ -63,7 +75,14 @@ You are the Output Governor. Verify if the Proposed Answer is factually supporte
             throw new ArgumentNullException(nameof(question));
 
         var chunkList = chunks.ToList();
-        var contextText = string.Join("\n\n", chunkList.Select(c => $"[Source: {c.FileName ?? c.DocumentId}] {c.Text}"));
+        var contextSb = new StringBuilder();
+        foreach (var c in chunkList)
+        {
+            if (contextSb.Length > 15000)
+                break;
+            contextSb.AppendLine($"[Source: {c.FileName ?? c.DocumentId}] {c.Text}\n");
+        }
+        var contextText = contextSb.ToString();
         var userPrompt = $"Context Documentation:\n{contextText}\n\nQuestion: {question}\nProposed Answer: {proposedAnswer}";
 
         var stopwatch = Stopwatch.StartNew();

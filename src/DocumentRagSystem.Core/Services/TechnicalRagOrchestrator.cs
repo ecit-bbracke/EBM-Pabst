@@ -515,8 +515,17 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
                 govTimer.Stop();
                 timings[$"OutputGovernorValidation_Attempt{regenAttempts + 1}"] = govTimer.ElapsedMilliseconds;
 
-                if (govOutputResult.Approved || govOutputResult.Action == "APPROVE")
+                var isInfrastructureFailure = !govOutputResult.Approved &&
+                    (govOutputResult.Issues?.All(i => i.Type == "EMPTY_VALIDATION_RESULT" || i.Type == "VALIDATION_PROVIDER_ERROR") ?? false);
+
+                if (govOutputResult.Approved || govOutputResult.Action == "APPROVE" || isInfrastructureFailure)
                 {
+                    if (isInfrastructureFailure)
+                    {
+                        _logger?.LogWarning(
+                            "[Orchestrator] OutputGovernor validation provider encountered an infrastructure failure ({Error}). Preserving generated answer.",
+                            string.Join("; ", govOutputResult.Issues?.Select(i => i.Claim) ?? Enumerable.Empty<string>()));
+                    }
                     break;
                 }
 
@@ -913,7 +922,10 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
         else
         {
             govOutputResult = await _outputGovernor.ValidateOutputAsync(effectiveQuestion, finalAnswer, chunksForComposer);
-            if (!govOutputResult.Approved)
+            var isInfrastructureFailure = !govOutputResult.Approved &&
+                (govOutputResult.Issues?.All(i => i.Type == "EMPTY_VALIDATION_RESULT" || i.Type == "VALIDATION_PROVIDER_ERROR") ?? false);
+
+            if (!govOutputResult.Approved && !isInfrastructureFailure)
             {
                 _logger?.LogWarning(
                     "[Orchestrator] Streamed answer for '{Question}' flagged by OutputGovernor (Action: {Action}, Issues: {Count}). Emitting replacement event.",
@@ -927,6 +939,12 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
 
                 finalAnswer = safeReplacement;
                 yield return new OrchestrationStreamEvent("replace", safeReplacement, chunksForComposer, effectiveConvId);
+            }
+            else if (isInfrastructureFailure)
+            {
+                _logger?.LogWarning(
+                    "[Orchestrator] OutputGovernor validation provider encountered an infrastructure failure ({Error}). Preserving streamed answer.",
+                    string.Join("; ", govOutputResult.Issues?.Select(i => i.Claim) ?? Enumerable.Empty<string>()));
             }
         }
         timings["OutputGovernorValidation"] = stageStopwatch.ElapsedMilliseconds;
