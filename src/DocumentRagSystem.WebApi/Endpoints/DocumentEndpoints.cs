@@ -35,7 +35,10 @@ public static class DocumentEndpoints
             IResult DeliverPdf(string fullPath)
             {
                 httpContext.Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+                httpContext.Response.Headers["Content-Type"] = "application/pdf";
                 httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                httpContext.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+                httpContext.Response.Headers["Pragma"] = "no-cache";
                 return Results.File(fullPath, "application/pdf", enableRangeProcessing: true);
             }
 

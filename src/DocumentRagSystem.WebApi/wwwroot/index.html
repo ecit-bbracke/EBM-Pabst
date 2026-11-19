@@ -1463,6 +1463,10 @@
                 directDownload.download = cleanTitle.endsWith('.pdf') ? cleanTitle : (cleanTitle + '.pdf');
             }
             
+            // Reveal modal before loading iframe so Firefox PDF.js can measure non-zero container dimensions
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+
             if (loader) loader.classList.remove('hidden');
 
             if (pdfLoadFallbackTimer) clearTimeout(pdfLoadFallbackTimer);
@@ -1470,9 +1474,9 @@
                 if (loader) loader.classList.add('hidden');
             }, 1000);
             
-            iframe.src = url;
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+            requestAnimationFrame(() => {
+                iframe.src = url;
+            });
         }
 
         async function copyPdfDirectLink(btn) {

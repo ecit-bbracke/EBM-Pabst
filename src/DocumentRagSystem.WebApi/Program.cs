@@ -504,6 +504,8 @@ app.Use(async (context, next) =>
         context.Response.Headers["Content-Disposition"] = "inline";
         context.Response.Headers["Content-Type"] = "application/pdf";
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+        context.Response.Headers["Pragma"] = "no-cache";
         await next();
         return;
     }
@@ -624,6 +626,8 @@ if (uploadFileProviders.Count > 0)
                 ctx.Context.Response.Headers["Content-Disposition"] = $"inline; filename=\"{ctx.File.Name}\"";
                 ctx.Context.Response.Headers["Content-Type"] = "application/pdf";
                 ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+                ctx.Context.Response.Headers["Pragma"] = "no-cache";
             }
         }
     });
