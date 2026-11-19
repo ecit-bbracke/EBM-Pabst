@@ -16,6 +16,10 @@ public static class DanishTextSanitizer
         (new Regex(@"(?i)\b[öø]versig[tt]\b", RegexOptions.Compiled), "oversigt"),
         (new Regex(@"(?i)\b[öø]versigter\b", RegexOptions.Compiled), "oversigter"),
 
+        // English spelling leakage: Candidat -> Kandidat
+        (new Regex(@"\bCandidat([a-zæøå]*)\b", RegexOptions.Compiled), "Kandidat$1"),
+        (new Regex(@"\bcandidat([a-zæøå]*)\b", RegexOptions.Compiled), "kandidat$1"),
+
         // 2. Specific compound words and phrases
         (new Regex(@"(?i)\bviftediameter\b", RegexOptions.Compiled), "Impellerdiameter"),
         (new Regex(@"(?i)\b(?:over\s+rotoren\/visere)\b", RegexOptions.Compiled), "over rotoren/monteringsstivere"),

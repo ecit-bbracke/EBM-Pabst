@@ -14,6 +14,7 @@ public class DanishTextSanitizerTests
     [InlineData("integreret strömbegränsning i styringen", "integreret strømbegrænsning i styringen")]
     [InlineData("se övrige oplysninger i denne översigt", "se øvrige oplysninger i denne oversigt")]
     [InlineData("kompaktvifte til køling", "kompaktventilator til køling")]
+    [InlineData("Candidatmodellen for modsat retning", "Kandidatmodellen for modsat retning")]
     public void Sanitize_ShouldReplaceNorwegianAndSwedishWordsWithAuthenticDanish(string input, string expected)
     {
         var sanitized = DanishTextSanitizer.Sanitize(input);
