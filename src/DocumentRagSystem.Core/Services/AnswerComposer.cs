@@ -332,6 +332,18 @@ public class AnswerComposer : IAnswerComposer
         sb.AppendLine("    * Den **laveste programmerbare hastighed** (og absolutte minimumshastighed) for ESM-motorer er **500 min⁻¹ (rpm)**. Fabriksindstillet lav hastighed (Speed 1) er typisk sat til 500, 700 eller 900 min⁻¹, mens standard høj hastighed (Speed 2) er op til 2300 min⁻¹.");
         sb.AppendLine("    * Under 500 min⁻¹ har motoren en indbygget **cut-off / stopfunktion** for at beskytte lejerne mod under-smøring og overophedning.");
         sb.AppendLine("    * Hastigheder kan frit programmeres i intervallet 500–2300 min⁻¹ via ebm-papsts ESM-programmeringsenhed.");
+        sb.AppendLine("- **MODBUS-RTU & Parameterspecifikationer / Parameter Specifications / Parameterbeschreibung**:");
+        sb.AppendLine("  * When users ask for 'parameterspecifikationer' (Danish), 'parameter specifications / parameter list' (English), or 'Parameterbeschreibung / Parameterliste' (German) for EC-fans (e.g. W3G, K3G, RadiPac, M3G-motorer):");
+        sb.AppendLine("    1. Technical Scope: In ebm-papst engineering, 'parameterspecifikationer' refers specifically to the **MODBUS-RTU Parameter Specification (register mapping and protocol description)** rather than standard nameplate dimensions.");
+        sb.AppendLine("    2. CRITICAL FIRMWARE/SW VERSION REQUIREMENT (Must be highlighted in Danish/English/German):");
+        sb.AppendLine("       - In Danish: 'VIGTIGT: Parameterspecifikationen og registeradresserne skal matche blæserens specifikke softwareversion (SW-version), som fremgår af motorens typeskilt på klemkassen (f.eks. SW: 05.00) eller udlæses via bussen.'");
+        sb.AppendLine("       - In English: 'IMPORTANT: The parameter specification and register addresses must match the fan\\'s specific software/firmware version (SW version, stamped on the motor nameplate on the terminal box, e.g. SW: 05.00) or read via the bus.'");
+        sb.AppendLine("       - In German: 'WICHTIG: Die Parameterbeschreibung und Registerbelegung muss mit der spezifischen Software-/Firmware-Version (SW-Version, auf dem Motortypenschild am Klemmenkasten, z.B. SW: 05.00) übereinstimmen.'");
+        sb.AppendLine("    3. Standard Communication Parameters: RS-485, MODBUS-RTU, default baud rate 19200 (configurable 9600–115200), parity 8E1 (8 data bits, 1 even parity, 1 stop bit) or 8N1, default slave address 1.");
+        sb.AppendLine("    4. Core Register Functions in Parameter Specifications:");
+        sb.AppendLine("       - Control Setpoint (Styresætpunkt / Sollwert): Register for stepless speed/power control (0–100% or direct rpm).");
+        sb.AppendLine("       - Operating Measurements: Read actual speed (rpm), motor power (W), DC link voltage, and electronics/motor temperatures.");
+        sb.AppendLine("       - Status & Error Register: Read alarm/fault bitmasks (e.g. phase failure, locked rotor, overtemperature, undervoltage).");
 
         if (isReplacement)
         {

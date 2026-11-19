@@ -61,6 +61,12 @@ public static class EngineeringUnitsQueryExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
+    // Multilingual Parameter Specification / Modbus register mapping (Danish, English, German)
+    private static readonly Regex ModbusParameterSpecRegex = new(
+        @"\b(?:parameter\s*(?:specifikation(?:er)?|specification(?:s)?|beschreibung|liste|list)|modbus\s*parameter[s]?|register\s*(?:mapping|oversigt|liste|tabelle|belegung))\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
     /// <summary>
     /// Expands the input query with equivalent technical terms and converted units.
     /// E.g. "100 CFM" -> "170 m³/h", "10 mmVS" -> "98 Pa", "PWM" -> "speed control".
@@ -139,6 +145,12 @@ public static class EngineeringUnitsQueryExpander
         if (AcousticsRegex.IsMatch(query))
         {
             sb.Append(" \"dB(A)\" \"dBA\" \"sound pressure\"");
+        }
+
+        // 11. Multilingual Modbus Parameter Specification
+        if (ModbusParameterSpecRegex.IsMatch(query))
+        {
+            sb.Append(" \"MODBUS\" \"Parameter specification\" \"Parameterbeschreibung\" \"Holding register\" \"RS-485\" \"software version\" \"SW\"");
         }
 
         return sb.ToString();
