@@ -326,6 +326,14 @@ public class AnswerComposer : IAnswerComposer
         sb.AppendLine("  - **'Pillefyr / Røggasblæser'** corresponds to ebm-papst flue gas blowers (e.g. R2E120, R2E150, G2E).");
         sb.AppendLine("  - **'Tavlekøling / Tavleblæser'** corresponds to control cabinet filter fans and compact axial fans.");
         sb.AppendLine("  - **'Kraftstrøm'** corresponds to 3-phase 400 VAC (3~ 400V). **'Lysnet'** corresponds to single-phase 230 VAC (1~ 230V).");
+        sb.AppendLine("- **German Technical Jargon & Mounting Conventions (Deutsche Fachbegriffe)**:");
+        sb.AppendLine("  - **'über Streben saugend' / 'saugend'** corresponds to **Airflow direction 'V'** (intake over struts/guard, Luftrichtung 'V').");
+        sb.AppendLine("  - **'über Streben blasend' / 'blasend'** corresponds to **Airflow direction 'A'** (discharge over struts/guard, Luftrichtung 'A').");
+        sb.AppendLine("  - **'im Wandring'** corresponds to ebm-papst **W-Serie** axial fans with square wall mounting plate (Wandring).");
+        sb.AppendLine("  - **'im Schutzgitter'** corresponds to ebm-papst **S-Serie** axial fans mounted in wire guard grille (Schutzgitter).");
+        sb.AppendLine("  - **'Rauchgasgebläse / Abgasgebläse'** corresponds to flue gas blowers (R2E, G2E).");
+        sb.AppendLine("  - **'Schaltschrankkühlung / Schaltschranklüfter'** corresponds to control cabinet filter fans and compact axial fans.");
+        sb.AppendLine("  - **'Drehstrom'** corresponds to 3-phase 400 VAC (3~ 400V). **'Lichtstrom'** corresponds to single-phase 230 VAC (1~ 230V).");
         sb.AppendLine("- **ebm-papst ESM (Energy Saving Motor / W1G-serien)**:");
         sb.AppendLine("  - ESM-serien er ebm-papsts energieffektive GreenTech EC-motorer til kølemøbler, fordamper, flaskekølere og kondensatorer (typisk W1G-serien, f.eks. W1G012, W1G025, W1G200, W1G250).");
         sb.AppendLine("  - **Driftshastighed & Laveste hastighed**:");

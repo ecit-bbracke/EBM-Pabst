@@ -201,6 +201,7 @@ public static class ElectricalQueryExpander
         var expandedDimensional = DimensionalQueryExpander.Expand(query);
         var expandedUnits = EngineeringUnitsQueryExpander.Expand(query);
         var expandedDanish = DanishTerminologyExpander.Expand(query);
+        var expandedGerman = GermanTerminologyExpander.Expand(query);
 
         var finalResult = new StringBuilder(expandedElectrical);
 
@@ -220,6 +221,12 @@ public static class ElectricalQueryExpander
         {
             var danishAdditions = expandedDanish.Substring(query.Trim().Length);
             finalResult.Append(danishAdditions);
+        }
+
+        if (!string.Equals(expandedGerman, query.Trim(), StringComparison.Ordinal))
+        {
+            var germanAdditions = expandedGerman.Substring(query.Trim().Length);
+            finalResult.Append(germanAdditions);
         }
 
         return finalResult.ToString();
