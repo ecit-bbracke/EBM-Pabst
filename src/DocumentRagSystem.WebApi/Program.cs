@@ -530,9 +530,11 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? string.Empty;
 
-    // Allow public access to login page and authentication endpoints
+    // Allow public access to login page, authentication endpoints, and public PDF datasheets
     if (path.Equals("/login.html", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase))
+        path.StartsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase) ||
+        (path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) ||
+        (path.StartsWith("/api/documents/download", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)))
     {
         await next();
         return;

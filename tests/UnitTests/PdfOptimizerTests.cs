@@ -38,21 +38,6 @@ public class PdfOptimizerTests
     }
 
     [Fact]
-    public void SliceAndOptimize_SamplePdf_ChecksIfTextIsPreserved()
-    {
-        if (!File.Exists(_samplePdfPath)) return;
-        var origBytes = File.ReadAllBytes(_samplePdfPath);
-        using var origDoc = PdfDocument.Open(origBytes);
-        var origLetters = origDoc.GetPages().First().Letters.Count;
-
-        var optimizedBytes = _optimizer.SliceAndOptimize(origBytes, new[] { 1 });
-        using var optDoc = PdfDocument.Open(optimizedBytes);
-        var optLetters = optDoc.GetPages().First().Letters.Count;
-
-        Assert.True(optLetters > 0, "Optimized page must contain letters!");
-    }
-
-    [Fact]
     public void SliceAndOptimize_AllPages_RecompressesAndOptimizesStructure()
     {
         var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));

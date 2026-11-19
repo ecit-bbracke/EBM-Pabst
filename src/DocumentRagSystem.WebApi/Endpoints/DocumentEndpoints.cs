@@ -89,14 +89,14 @@ public static class DocumentEndpoints
             return Results.NotFound();
         }
 
-        // Dedicated RESTful PDF download endpoint (Supports API Key and Cookie)
+        // Dedicated RESTful PDF download endpoint
         app.MapGet("/api/documents/download/{*filePath}", (string filePath, HttpContext httpContext) => ServePdfFile(filePath, httpContext))
-            .RequireAuthorization("QueryPolicy")
+            .AllowAnonymous()
             .WithName("DownloadDocumentFile");
 
-        // DIRECT DOCUMENT FILE SERVE FALLBACK (Supports API Key and Cookie)
+        // DIRECT DOCUMENT FILE SERVE FALLBACK (Publicly accessible for viewing PDF datasheets)
         app.MapGet("/uploads/{*filePath}", (string filePath, HttpContext httpContext) => ServePdfFile(filePath, httpContext))
-            .RequireAuthorization("QueryPolicy")
+            .AllowAnonymous()
             .WithName("GetUploadedFile");
 
         // GET ALL DOCUMENTS ENDPOINT (Supports pagination, filtering and sorting)
