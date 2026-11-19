@@ -13,6 +13,8 @@ public class DanishTerminologyExpanderTests
     [InlineData("køling af automatikskab", "control cabinet", "compact fan")]
     [InlineData("emhætteblæser til køkken", "range hood", "D2E")]
     [InlineData("fordamperblæser til kølemøbel", "refrigeration", "W1G")]
+    [InlineData("Hvad er den laveste hastighed på ESM produkterne", "W1G", "500 min-1")]
+    [InlineData("ESM motor til fordamper", "Energy Saving Motor", "W1G")]
     [InlineData("aggregat til varmegenvinding", "heat recovery", "AHU")]
     [InlineData("kanalblæser til spirorør", "duct fan", "centrifugal")]
     [InlineData("staldventilation til landbrug", "agricultural", "barn ventilation")]

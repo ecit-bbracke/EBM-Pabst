@@ -32,6 +32,11 @@ public static class DanishTerminologyExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
+    private static readonly Regex EsmMotorRegex = new(
+        @"\b(?:esm(?:\s*(?:motor[er]?|blæser[e]?|produkt[er]?|serien|serie))?|energy\s*saving\s*motor)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
     private static readonly Regex HeatRecoveryAhuRegex = new(
         @"\b(?:varmegenvinding|genveks|ventilationsaggregat[er]?|aggregatblæser[e]?|aggregat|boligventilation|villaventilation)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -134,6 +139,11 @@ public static class DanishTerminologyExpander
         if (RefrigerationRegex.IsMatch(query))
         {
             sb.Append(" \"refrigeration\" \"evaporator\" \"bottle cooler\" \"W1G\" \"iQ-motor\" \"ESM\"");
+        }
+
+        if (EsmMotorRegex.IsMatch(query))
+        {
+            sb.Append(" \"ESM\" \"Energy Saving Motor\" \"W1G\" \"speed 1\" \"speed 2\" \"500 min-1\" \"2300 min-1\" \"refrigeration\"");
         }
 
         if (HeatRecoveryAhuRegex.IsMatch(query))

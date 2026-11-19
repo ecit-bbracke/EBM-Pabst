@@ -173,6 +173,7 @@ public class AnswerComposer : IAnswerComposer
             - Highlight any conflicting information from different sources; do not choose one silently.
             - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like "K3G560PC0401" or "230V"), you MUST write the response in the same language as the application page itself: Danish (Dansk). NEVER reply in English when the user question is language-ambiguous or a model code.
             - NO LATEX / CLEAN TYPOGRAPHY: NEVER use LaTeX math notation or syntax (e.g. do NOT write $\pm 3%$, $I_max$, $\approx$, etc.). Always use clean plain text, standard Markdown, and standard Unicode symbols (e.g. write ± 3%, I_max = 1,1 mA, ≈, Δp, m³/h, µF, °C, Ø).
+            - NO INTERNAL META-COMMENTARY: NEVER complain to the user about raw data formatting, "spejlvendt tekst", "korrumperede data", OCR noise, parameter switches, or internal document layout. Extract whatever valid technical facts exist, or politely explain what specifications are or are not documented in the catalog.
             - BRANDING / CASING REQUIREMENT: The company and brand name "ebm-papst" MUST ALWAYS be spelled with this exact casing ("ebm-papst", all lowercase). NEVER write "EBM-Papst", "Ebm-papst", "EBM-PAPST", or "ebmpapst".
             - FACTUAL GROUNDING & MISSING MODELS:
               * You must NEVER invent, fabricate, or assume technical specifications (such as airflow m³/h, pressure Pa, power W, voltage V, current A, speed rpm, sound dB, weight kg) that are not present in the Context chunks.
@@ -298,6 +299,13 @@ public class AnswerComposer : IAnswerComposer
         sb.AppendLine("  - **'Pillefyr / Røggasblæser'** corresponds to ebm-papst flue gas blowers (e.g. R2E120, R2E150, G2E).");
         sb.AppendLine("  - **'Tavlekøling / Tavleblæser'** corresponds to control cabinet filter fans and compact axial fans.");
         sb.AppendLine("  - **'Kraftstrøm'** corresponds to 3-phase 400 VAC (3~ 400V). **'Lysnet'** corresponds to single-phase 230 VAC (1~ 230V).");
+        sb.AppendLine("- **ebm-papst ESM (Energy Saving Motor / W1G-serien)**:");
+        sb.AppendLine("  - ESM-serien er ebm-papsts energieffektive GreenTech EC-motorer til kølemøbler, fordamper, flaskekølere og kondensatorer (typisk W1G-serien, f.eks. W1G012, W1G025, W1G200, W1G250).");
+        sb.AppendLine("  - **Driftshastighed & Laveste hastighed**:");
+        sb.AppendLine("    * ESM-motorer leveres typisk som 2-hastigheds (2-speed) eller frit programmerbar version.");
+        sb.AppendLine("    * Den **laveste programmerbare hastighed** (og absolutte minimumshastighed) for ESM-motorer er **500 min⁻¹ (rpm)**. Fabriksindstillet lav hastighed (Speed 1) er typisk sat til 500, 700 eller 900 min⁻¹, mens standard høj hastighed (Speed 2) er op til 2300 min⁻¹.");
+        sb.AppendLine("    * Under 500 min⁻¹ har motoren en indbygget **cut-off / stopfunktion** for at beskytte lejerne mod under-smøring og overophedning.");
+        sb.AppendLine("    * Hastigheder kan frit programmeres i intervallet 500–2300 min⁻¹ via ebm-papsts ESM-programmeringsenhed.");
 
         if (isReplacement)
         {
