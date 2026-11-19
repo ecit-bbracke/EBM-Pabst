@@ -290,8 +290,9 @@ public class AnswerComposer : IAnswerComposer
         if (hasAxial || isGeneral)
         {
             sb.AppendLine("- **Airflow Direction on Axial Fans (A, S, W)**:");
-            sb.AppendLine("  - 12th char in 12-char product code: Even digit (0, 2, 4, 6, 8) = Direction 'A'; Odd digit (1, 3, 5, 7, 9) = Direction 'V'.");
-            sb.AppendLine("  - Example: A6E450AP0201 (V) and A6E450AP0202 (A) have reversed airflow and are 100% INCOMPATIBLE as drop-in replacements.");
+            sb.AppendLine("  - Standard Catalog Heuristic: In standard catalog naming conventions, an even 12th digit (0, 2, 4, 6, 8) typically points to Direction 'A' (discharge over struts), while an odd digit (1, 3, 5, 7, 9) typically points to Direction 'V' (intake over struts).");
+            sb.AppendLine("  - Pointing to Candidate Part Numbers: It is helpful and approved to suggest candidate part numbers using this convention (e.g. for A4E300-AS72-01 (V), the prime candidate for opposite direction is A4E300-AS72-02 (A)).");
+            sb.AppendLine("  - MANDATORY PRODUCT DATASHEET VERIFICATION: Explicitly inform the user that while the last digit is a strong candidate pointer, it cannot be relied upon blindly because customer OEM variants, special wiring/software, and newer series use trailing digits as design variant indices (e.g. W3G300CN0232 ends in an even '2', but has Airflow Direction 'V' in ERP Item Master Data). The actual airflow direction ('A' vs 'V') MUST ALWAYS be verified in the specific product datasheet, motor nameplate, or ERP Item Master Data before ordering.");
             sb.AppendLine("- **Axial Fan Variants**: 'A' = base axial fan; 'S' = with guard grille; 'W' = in wall ring.");
         }
 

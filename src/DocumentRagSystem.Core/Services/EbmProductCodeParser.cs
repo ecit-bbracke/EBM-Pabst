@@ -765,11 +765,11 @@ public class EbmProductCodeParser : IEbmProductCodeParser
                 int digit = lastChar - '0';
                 if (digit % 2 == 0)
                 {
-                    return (AirflowDirection.A, "Luftretning 'A' (lige slutciffer / sugende/trykkende iht. montage)");
+                    return (AirflowDirection.A, "Luftretning 'A' (vejledende lige slutciffer – verificeres i produktblad)");
                 }
                 else
                 {
-                    return (AirflowDirection.V, "Luftretning 'V' (ulige slutciffer / modsat retning af A)");
+                    return (AirflowDirection.V, "Luftretning 'V' (vejledende ulige slutciffer – verificeres i produktblad)");
                 }
             }
             return (AirflowDirection.CustomOrUnknown, "Uspecificeret aksial luftretning");
