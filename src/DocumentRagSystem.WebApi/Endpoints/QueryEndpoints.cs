@@ -145,7 +145,7 @@ public static class QueryEndpoints
                         ? $"&search={Uri.EscapeDataString(searchKeyword)}"
                         : string.Empty;
                     var targetPage = item.PageNumber ?? (item.Index + 1);
-                    url += $"#page={targetPage}{searchParam}";
+                    url += $"#page={targetPage}";
                 }
 
                 citations.Add(new CitationDto(
@@ -435,7 +435,7 @@ public static class QueryEndpoints
                                         ? $"&search={Uri.EscapeDataString(searchKeyword)}"
                                         : string.Empty;
                                     var targetPage = item.PageNumber ?? (item.Index + 1);
-                                    url += $"#page={targetPage}{searchParam}";
+                                    url += $"#page={targetPage}";
                                 }
 
                                 citations.Add(new CitationDto(

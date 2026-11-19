@@ -20,7 +20,7 @@ public static class DocumentEndpoints
 {
     public static IEndpointRouteBuilder MapDocumentEndpoints(this IEndpointRouteBuilder app, IEnumerable<string> servedUploadDirectories)
     {
-        IResult ServePdfFile(string filePath)
+        IResult ServePdfFile(string filePath, HttpContext httpContext)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return Results.NotFound();
 
@@ -31,6 +31,13 @@ public static class DocumentEndpoints
             }
 
             var fileName = Path.GetFileName(cleanPath);
+
+            IResult DeliverPdf(string fullPath)
+            {
+                httpContext.Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+                httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                return Results.File(fullPath, "application/pdf", enableRangeProcessing: true);
+            }
 
             foreach (var dir in servedUploadDirectories)
             {
@@ -43,7 +50,7 @@ public static class DocumentEndpoints
                     var fullDirect = Path.GetFullPath(direct);
                     if (fullDirect.StartsWith(fullDir, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.File(fullDirect, "application/pdf", enableRangeProcessing: true);
+                        return DeliverPdf(fullDirect);
                     }
                 }
 
@@ -53,7 +60,7 @@ public static class DocumentEndpoints
                     var fullSubpath = Path.GetFullPath(subpath);
                     if (fullSubpath.StartsWith(fullDir, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.File(fullSubpath, "application/pdf", enableRangeProcessing: true);
+                        return DeliverPdf(fullSubpath);
                     }
                 }
 
@@ -63,7 +70,7 @@ public static class DocumentEndpoints
                     var matches = Directory.GetFiles(dir, pattern);
                     if (matches.Length > 0)
                     {
-                        return Results.File(matches[0], "application/pdf", enableRangeProcessing: true);
+                        return DeliverPdf(matches[0]);
                     }
                 }
                 catch { }
@@ -74,7 +81,7 @@ public static class DocumentEndpoints
                     var rawDirect = Path.Combine(dir, rawName);
                     if (File.Exists(rawDirect))
                     {
-                        return Results.File(rawDirect, "application/pdf", enableRangeProcessing: true);
+                        return DeliverPdf(rawDirect);
                     }
                 }
             }
@@ -83,12 +90,12 @@ public static class DocumentEndpoints
         }
 
         // Dedicated RESTful PDF download endpoint (Supports API Key and Cookie)
-        app.MapGet("/api/documents/download/{*filePath}", (string filePath) => ServePdfFile(filePath))
+        app.MapGet("/api/documents/download/{*filePath}", (string filePath, HttpContext httpContext) => ServePdfFile(filePath, httpContext))
             .RequireAuthorization("QueryPolicy")
             .WithName("DownloadDocumentFile");
 
         // DIRECT DOCUMENT FILE SERVE FALLBACK (Supports API Key and Cookie)
-        app.MapGet("/uploads/{*filePath}", (string filePath) => ServePdfFile(filePath))
+        app.MapGet("/uploads/{*filePath}", (string filePath, HttpContext httpContext) => ServePdfFile(filePath, httpContext))
             .RequireAuthorization("QueryPolicy")
             .WithName("GetUploadedFile");
 

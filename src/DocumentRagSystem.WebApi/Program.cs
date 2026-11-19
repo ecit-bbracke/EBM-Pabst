@@ -526,8 +526,7 @@ app.Use(async (context, next) =>
     // Require authentication
     if (context.User.Identity?.IsAuthenticated != true)
     {
-        if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase))
+        if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -589,7 +588,16 @@ if (uploadFileProviders.Count > 0)
         FileProvider = uploadFileProviders.Count == 1
             ? uploadFileProviders[0]
             : new CompositeFileProvider(uploadFileProviders),
-        RequestPath = "/uploads"
+        RequestPath = "/uploads",
+        OnPrepareResponse = ctx =>
+        {
+            if (ctx.File.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers["Content-Disposition"] = $"inline; filename=\"{ctx.File.Name}\"";
+                ctx.Context.Response.Headers["Content-Type"] = "application/pdf";
+                ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            }
+        }
     });
 }
 

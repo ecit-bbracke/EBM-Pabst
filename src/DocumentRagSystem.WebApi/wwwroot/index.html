@@ -1444,6 +1444,8 @@
         }
 
         let currentModalPdfUrl = '';
+        let pdfLoadFallbackTimer = null;
+
         function openPdfModal(url, title) {
             currentModalPdfUrl = url;
             const modal = document.getElementById('pdf-modal');
@@ -1463,6 +1465,12 @@
             
             iframe.classList.add('opacity-0');
             if (loader) loader.classList.remove('hidden');
+
+            if (pdfLoadFallbackTimer) clearTimeout(pdfLoadFallbackTimer);
+            pdfLoadFallbackTimer = setTimeout(() => {
+                iframe.classList.remove('opacity-0');
+                if (loader) loader.classList.add('hidden');
+            }, 1500);
             
             iframe.src = url;
             modal.classList.remove('hidden');
@@ -1486,10 +1494,14 @@
         }
 
         function closePdfModal() {
+            if (pdfLoadFallbackTimer) clearTimeout(pdfLoadFallbackTimer);
             const modal = document.getElementById('pdf-modal');
             const iframe = document.getElementById('pdf-modal-iframe');
-            modal.classList.add('hidden');
-            iframe.src = 'about:blank';
+            if (iframe) {
+                iframe.src = 'about:blank';
+                iframe.classList.add('opacity-0');
+            }
+            if (modal) modal.classList.add('hidden');
             document.body.style.overflow = '';
         }
 
