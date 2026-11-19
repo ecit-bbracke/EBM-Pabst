@@ -102,7 +102,16 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.SlidingExpiration = true;
     options.Events.OnRedirectToLogin = context =>
     {
-        if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/uploads"))
+        var reqPath = context.Request.Path.Value ?? string.Empty;
+        if (reqPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+            reqPath.StartsWith("/uploads", StringComparison.OrdinalIgnoreCase) ||
+            reqPath.StartsWith("/api/documents/download", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.Redirect($"/login.html?returnUrl={Uri.EscapeDataString(reqPath + context.Request.QueryString)}");
+            return Task.CompletedTask;
+        }
+
+        if (context.Request.Path.StartsWithSegments("/api"))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
@@ -521,11 +530,10 @@ app.UseResponseCompression();
 app.UseRouting();
 app.UseCors();
 
-// Authentication & Authorization Middleware
+// Authentication Middleware
 app.UseAuthentication();
-app.UseAuthorization();
 
-// Route Protection Middleware: Protect HTML Pages
+// Route Protection Middleware: Protect HTML Pages & Allow Public PDFs
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? string.Empty;
@@ -566,6 +574,9 @@ app.Use(async (context, next) =>
 
     await next();
 });
+
+// Authorization Middleware
+app.UseAuthorization();
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
