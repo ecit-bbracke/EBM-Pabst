@@ -86,17 +86,23 @@ public class AnswerComposer : IAnswerComposer
             "[AnswerComposer] Answer composed in {DurationMs}ms (Length: {AnswerLength} chars).",
             stopwatch.ElapsedMilliseconds, result.Content.Length);
 
-        return result.Content;
+        var content = result.Content;
+        if (IsDanishContext(question))
+        {
+            content = DanishTextSanitizer.Sanitize(content);
+        }
+
+        return content;
     }
 
-    public IAsyncEnumerable<string> StreamAnswerAsync(
+    public async IAsyncEnumerable<string> StreamAnswerAsync(
         string question,
         InputGovernorResult governorResult,
         List<EvidenceClaim> evidenceClaims,
         IEnumerable<DocumentChunk> chunks,
         string? draftResponse = null,
         object? workflowData = null,
-        CancellationToken cancellationToken = default
+        [EnumeratorCancellation] CancellationToken cancellationToken = default
     )
     {
         if (string.IsNullOrWhiteSpace(question))
@@ -108,7 +114,20 @@ public class AnswerComposer : IAnswerComposer
             prompt.Length, governorResult.Intent, prompt);
 
         var request = LlmRequest.FromPrompt(prompt, requireJson: false);
-        return _llmClient.StreamTextAsync(request, cancellationToken);
+        bool isDanish = IsDanishContext(question);
+
+        await foreach (var token in _llmClient.StreamTextAsync(request, cancellationToken))
+        {
+            yield return isDanish ? DanishTextSanitizer.Sanitize(token) : token;
+        }
+    }
+
+    private static bool IsDanishContext(string question)
+    {
+        var detection = DefaultLanguageDetector.DetectLanguageHeuristic(question, null);
+        return string.Equals(detection.Language, "da", StringComparison.OrdinalIgnoreCase) ||
+               (!string.Equals(detection.Language, "en", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(detection.Language, "de", StringComparison.OrdinalIgnoreCase));
     }
 
     private string BuildPrompt(
@@ -172,6 +191,13 @@ public class AnswerComposer : IAnswerComposer
             - Clearly mark derived conclusions as derived, showing the logical steps (e.g. "Since operating voltage is 18-30 VDC, 24 VDC is compatible").
             - Highlight any conflicting information from different sources; do not choose one silently.
             - CRITICAL LANGUAGE REQUIREMENT: You MUST ALWAYS write the ENTIRE response in the EXACT same language as the user's question (e.g. if the user asks in English, write the answer entirely in English; if the user asks in Danish, write the answer in Danish; if in German, write in German). If the nature of the question does not allow the language to be detected (e.g. it consists only of product codes, model numbers, part identifiers, specifications, numbers, or technical parameters like "K3G560PC0401" or "230V"), you MUST write the response in the same language as the application page itself: Danish (Dansk). NEVER reply in English when the user question is language-ambiguous or a model code.
+            - DANISH LANGUAGE PURITY (STRICTLY NO SCANDINAVIAN MIXING / NO 'SVORSK'):
+              * When writing in Danish, use strictly authentic Danish industrial technical terminology.
+              * NEVER use Norwegian words like "vifte", "vifter", or "viftediameter". Always use Danish "ventilator", "blæser", "impeller", or "impellerdiameter" (e.g. write "Impellerdiameter: Ø800 mm", NEVER "Viftediameter").
+              * NEVER use Swedish characters 'ö' or 'ä' in Danish text. Danish strictly uses 'ø' and 'æ' (e.g. write "Tilslutningsoversigt", NEVER "Tilslutningsöversigt"; write "oversigt", NEVER "översigt"; write "strømbegrænsning", NEVER "strömbegränsning").
+              * NEVER use Norwegian "klemrekasse" or "klemrekke". Always write Danish "klemkasse" or "tilslutningsboks".
+              * NEVER translate fan blades / Klingen as "klinger". In Danish ventilation terminology, fan blades are strictly "vinger" or "blade" (e.g. "5 seglformede HyBlade vinger", NEVER "klinger").
+              * NEVER translate "über Streben" / "over struts" as "over visere". Always translate as "over monteringsribber" or "over stivere".
             - NO LATEX / CLEAN TYPOGRAPHY: NEVER use LaTeX math notation or syntax (e.g. do NOT write $\pm 3%$, $I_max$, $\approx$, etc.). Always use clean plain text, standard Markdown, and standard Unicode symbols (e.g. write ± 3%, I_max = 1,1 mA, ≈, Δp, m³/h, µF, °C, Ø).
             - NO INTERNAL META-COMMENTARY: NEVER complain to the user about raw data formatting, "spejlvendt tekst", "korrumperede data", OCR noise, parameter switches, or internal document layout. Extract whatever valid technical facts exist, or politely explain what specifications are or are not documented in the catalog.
             - BRANDING / CASING REQUIREMENT: The company and brand name "ebm-papst" MUST ALWAYS be spelled with this exact casing ("ebm-papst", all lowercase). NEVER write "EBM-Papst", "Ebm-papst", "EBM-PAPST", or "ebmpapst".
