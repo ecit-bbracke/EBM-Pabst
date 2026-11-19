@@ -35,6 +35,7 @@ public class DanishTerminologyExpanderTests
     [InlineData("aksialblæser med kurvegitter", "guard grille", "S-series")]
     [InlineData("ren vinge uden gitter", "A-series", "basic fan")]
     [InlineData("centrifugal med indløbsdyse", "inlet ring", "inlet nozzle")]
+    [InlineData("ventilator med modsat luftretning", "Direction of air flow", "Direction A")]
     public void Expand_MechanicalAndAirflowDirection_ShouldMapToEbmConventions(string query, string expected1, string expected2)
     {
         var expanded = DanishTerminologyExpander.Expand(query);

@@ -289,10 +289,10 @@ public class AnswerComposer : IAnswerComposer
 
         if (hasAxial || isGeneral)
         {
-            sb.AppendLine("- **Airflow Direction on Axial Fans (A, S, W)**:");
-            sb.AppendLine("  - Standard Catalog Heuristic: In standard catalog naming conventions, an even 12th digit (0, 2, 4, 6, 8) typically points to Direction 'A' (discharge over struts), while an odd digit (1, 3, 5, 7, 9) typically points to Direction 'V' (intake over struts).");
-            sb.AppendLine("  - Pointing to Candidate Part Numbers: It is helpful and approved to suggest candidate part numbers using this convention (e.g. for A4E300-AS72-01 (V), the prime candidate for opposite direction is A4E300-AS72-02 (A)).");
-            sb.AppendLine("  - MANDATORY PRODUCT DATASHEET VERIFICATION: Explicitly inform the user that while the last digit is a strong candidate pointer, it cannot be relied upon blindly because customer OEM variants, special wiring/software, and newer series use trailing digits as design variant indices (e.g. W3G300CN0232 ends in an even '2', but has Airflow Direction 'V' in ERP Item Master Data). The actual airflow direction ('A' vs 'V') MUST ALWAYS be verified in the specific product datasheet, motor nameplate, or ERP Item Master Data before ordering.");
+            sb.AppendLine("- **Airflow Direction on Axial Fans (A, S, W) & Opposite Direction Queries**:");
+            sb.AppendLine("  - INVESTIGATE THE RETRIEVED PRODUCT SHEET (PRODUKTBLAD): When answering what model has opposite airflow or what airflow a fan has, you must ALWAYS base the answer on what is explicitly documented in the technical product datasheet (under 'Direction of air flow: \"A\"' or '\"V\"').");
+            sb.AppendLine("  - POINTING TO CANDIDATE PART NUMBERS: Shifting the trailing digit (e.g. for A4E300-AS72-01 (V), the candidate with opposite airflow is A4E300-AS72-02 (A)) is an approved heuristic to point to candidate models.");
+            sb.AppendLine("  - VERIFY IN THE CANDIDATE'S DATASHEET: If a candidate model's datasheet is present in the Context chunks, inspect and confirm its documented 'Direction of air flow: A' (or 'V'). If no datasheet for the opposite candidate is present in the catalog context, clearly state that while A4E300-AS72-02 is the logical candidate part number, its specific product sheet has not been uploaded to the catalog to verify the airflow direction, and it must be verified in its product sheet or in ERP Item Master Data because customer variants (like W3G300CN0232) can deviate.");
             sb.AppendLine("- **Axial Fan Variants**: 'A' = base axial fan; 'S' = with guard grille; 'W' = in wall ring.");
         }
 

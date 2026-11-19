@@ -68,6 +68,11 @@ public static class DanishTerminologyExpander
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
+    private static readonly Regex OppositeAirflowRegex = new(
+        @"\b(?:modsat(?:\s*(?:luft)?retning)?|omvendt(?:\s*(?:luft)?retning)?|anden\s*luftretning|opposite\s*airflow|reversed\s*airflow)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    );
+
     private static readonly Regex WallRingMountingRegex = new(
         @"\b(?:vægramme[r]?|vægring[e]?|vægplade[r]?|vægmontering|i\s*væg)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -175,6 +180,11 @@ public static class DanishTerminologyExpander
         if (BlowingAirflowRegex.IsMatch(query))
         {
             sb.Append(" \"airflow direction A\" \"Direction A\" \"Luftrichtung A\" \"blow over\"");
+        }
+
+        if (OppositeAirflowRegex.IsMatch(query))
+        {
+            sb.Append(" \"Direction of air flow\" \"Air flow direction\" \"Direction A\" \"Direction V\" \"Luftrichtung\"");
         }
 
         if (WallRingMountingRegex.IsMatch(query))

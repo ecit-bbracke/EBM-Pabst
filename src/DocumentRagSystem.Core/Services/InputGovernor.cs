@@ -173,7 +173,12 @@ Output JSON:
                                          combinedText.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
                                          combinedText.Contains("substitut", StringComparison.OrdinalIgnoreCase) ||
                                          combinedText.Contains("udskift", StringComparison.OrdinalIgnoreCase) ||
-                                         combinedText.Contains("alternativ", StringComparison.OrdinalIgnoreCase);
+                                         combinedText.Contains("alternativ", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("modsat luftretning", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("modsat retning", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("opposite airflow", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("reversed airflow", StringComparison.OrdinalIgnoreCase) ||
+                                         combinedText.Contains("omvendt luftretning", StringComparison.OrdinalIgnoreCase);
 
                 var finalIntent = result.Intent;
                 if (isReplacementQuery && extractedProducts.Count >= 1 && (finalIntent == "SPEC_LOOKUP" || finalIntent == "PROCEDURE"))
