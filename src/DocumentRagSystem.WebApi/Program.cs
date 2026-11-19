@@ -191,7 +191,6 @@ builder.Services.AddResponseCompression(options =>
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
     {
         "application/json",
-        "application/pdf",
         "text/plain",
         "text/html"
     });
