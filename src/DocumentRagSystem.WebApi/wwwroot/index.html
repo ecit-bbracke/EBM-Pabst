@@ -313,8 +313,8 @@
     </main>
 
     <!-- PDF Flyout Modal -->
-    <div id="pdf-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 lg:p-10 transition-opacity">
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-slate-200">
+    <div id="pdf-modal" class="fixed inset-0 z-50 hidden bg-slate-900/80 flex items-center justify-center p-4 lg:p-10 transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-slate-700/40" style="background-color: #ffffff;">
             <div class="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200/80 shrink-0">
                 <div class="flex items-center space-x-3 truncate">
                     <i class="fa-regular fa-file-pdf text-red-500 text-lg"></i>
@@ -337,11 +337,11 @@
                     </button>
                 </div>
             </div>
-            <div class="flex-1 bg-slate-200/50 relative">
-                <div id="pdf-modal-loader" class="absolute inset-0 flex items-center justify-center">
+            <div class="flex-1 bg-slate-800 relative w-full h-full overflow-hidden" style="background-color: #525659;">
+                <div id="pdf-modal-loader" class="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div class="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div>
                 </div>
-                <iframe id="pdf-modal-iframe" src="about:blank" class="w-full h-full border-none opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); document.getElementById('pdf-modal-loader').classList.add('hidden');"></iframe>
+                <iframe id="pdf-modal-iframe" src="about:blank" class="w-full h-full border-0 block" style="background-color: #525659;" onload="document.getElementById('pdf-modal-loader')?.classList.add('hidden');"></iframe>
             </div>
         </div>
     </div>
@@ -1463,14 +1463,12 @@
                 directDownload.download = cleanTitle.endsWith('.pdf') ? cleanTitle : (cleanTitle + '.pdf');
             }
             
-            iframe.classList.add('opacity-0');
             if (loader) loader.classList.remove('hidden');
 
             if (pdfLoadFallbackTimer) clearTimeout(pdfLoadFallbackTimer);
             pdfLoadFallbackTimer = setTimeout(() => {
-                iframe.classList.remove('opacity-0');
                 if (loader) loader.classList.add('hidden');
-            }, 1500);
+            }, 1000);
             
             iframe.src = url;
             modal.classList.remove('hidden');
@@ -1499,7 +1497,6 @@
             const iframe = document.getElementById('pdf-modal-iframe');
             if (iframe) {
                 iframe.src = 'about:blank';
-                iframe.classList.add('opacity-0');
             }
             if (modal) modal.classList.add('hidden');
             document.body.style.overflow = '';
