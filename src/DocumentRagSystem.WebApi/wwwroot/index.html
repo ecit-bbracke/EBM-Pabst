@@ -474,13 +474,11 @@
                 }
             }
 
-            if (conversations.length === 0) {
-                startNewChat(false);
-            } else {
-                currentConversationId = conversations[0].id;
-                renderSidebar();
-                loadConversation(currentConversationId);
-            }
+            // Filter out any unused empty chats from history to keep it clean
+            conversations = conversations.filter(c => c && c.messages && c.messages.length > 0);
+
+            // Always present a fresh, new chat when entering or logging into the assistant
+            startNewChat(false);
         }
 
         // Save conversations list to localStorage
