@@ -490,6 +490,38 @@
 
         // Start a completely new chat session
         function startNewChat(save = true) {
+            // If already in an empty chat, do not create another one; simply focus the input
+            const activeChat = conversations.find(c => c.id === currentConversationId);
+            if (activeChat && (!activeChat.messages || activeChat.messages.length === 0)) {
+                const queryInput = document.getElementById('query-input');
+                if (queryInput) {
+                    queryInput.focus();
+                }
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+                    toggleSidebar();
+                }
+                return;
+            }
+
+            // If the latest chat in the list is already empty, switch to it instead of creating duplicates
+            const emptyChat = conversations.find(c => !c.messages || c.messages.length === 0);
+            if (emptyChat) {
+                currentConversationId = emptyChat.id;
+                loadConversation(emptyChat.id);
+                const queryInput = document.getElementById('query-input');
+                if (queryInput) {
+                    queryInput.value = '';
+                    if (typeof autoExpandTextarea === 'function') autoExpandTextarea(queryInput);
+                    queryInput.focus();
+                }
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+                    toggleSidebar();
+                }
+                return;
+            }
+
             currentConversationId = 'chat_' + Date.now();
             const newChat = {
                 id: currentConversationId,
