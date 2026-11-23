@@ -1409,14 +1409,46 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
             // 1. Top matched database candidates in rank order (best drop-in replacement first, max 3)
             if (compat.ReplacementAnalysis != null)
             {
+                var sourceCode = compat.ReplacementAnalysis.SourceProduct?.CleanCode;
+                var sourceDiam = compat.ReplacementAnalysis.SourceProduct?.ImpellerDiameterMm;
+                var sourceDir = compat.ReplacementAnalysis.SourceProduct?.AirflowDirection;
+                var prefix6 = sourceCode?.Length >= 6 ? sourceCode.Substring(0, 6) : sourceCode;
+
+                string? directOppositeCode = null;
+                if (sourceCode != null && sourceCode.Length >= 8)
+                {
+                    char lastChar = sourceCode[^1];
+                    if (char.IsDigit(lastChar))
+                    {
+                        int lastDigit = lastChar - '0';
+                        int flipped = (lastDigit % 2 == 1) ? (lastDigit + 1) : Math.Max(1, lastDigit - 1);
+                        directOppositeCode = sourceCode[..^1] + flipped;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(directOppositeCode))
+                {
+                    AddCode(directOppositeCode);
+                }
+
                 foreach (var m in compat.ReplacementAnalysis.MatchedDatabaseCandidates.Take(3))
                 {
                     AddCode(m.CleanCode);
                     AddCode(m.RawCode);
                 }
 
-                // Also include top candidates from incompatible list when airflow direction differs (opposite airflow queries)
-                foreach (var incomp in compat.ReplacementAnalysis.IncompatibleDatabaseCandidates.Take(3))
+                // Prioritize candidates with opposite airflow direction and matching diameter / series prefix
+                var sortedIncompatible = compat.ReplacementAnalysis.IncompatibleDatabaseCandidates
+                    .Where(incomp => incomp.ProductB != null)
+                    .OrderByDescending(incomp => !string.IsNullOrWhiteSpace(directOppositeCode) &&
+                                                (string.Equals(incomp.ProductB.CleanCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                                                 string.Equals(incomp.ProductB.RawCode, directOppositeCode, StringComparison.OrdinalIgnoreCase)))
+                    .ThenByDescending(incomp => !string.IsNullOrWhiteSpace(prefix6) && incomp.ProductB.CleanCode.StartsWith(prefix6, StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(incomp => sourceDir.HasValue && incomp.ProductB.AirflowDirection != sourceDir.Value)
+                    .ThenByDescending(incomp => sourceDiam.HasValue && incomp.ProductB.ImpellerDiameterMm == sourceDiam.Value)
+                    .Take(3);
+
+                foreach (var incomp in sortedIncompatible)
                 {
                     AddCode(incomp.ProductB?.CleanCode);
                     AddCode(incomp.ProductB?.RawCode);
