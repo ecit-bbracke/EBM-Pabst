@@ -1054,6 +1054,64 @@ app.Lifetime.ApplicationStarted.Register(() =>
                     }
                 }
 
+                // Automatic startup re-indexing of previously Skipped documents that are now indexable (da, de, nl, sv, no)
+                try
+                {
+                    var indexableLangs = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "da", "de", "nl", "sv", "no" };
+                    var skippedToReindex = allDocs?.Where(d =>
+                        d.Status == DocumentStatus.Skipped &&
+                        !string.IsNullOrWhiteSpace(d.Language) &&
+                        indexableLangs.Contains(d.Language)).ToList();
+
+                    if (skippedToReindex != null && skippedToReindex.Count > 0)
+                    {
+                        var servedUploads = GetServedUploadDirectories(uploadsDirectory);
+                        foreach (var doc in skippedToReindex)
+                        {
+                            string? resolvedPath = null;
+                            if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+                            {
+                                resolvedPath = doc.FilePath;
+                            }
+                            else
+                            {
+                                foreach (var uploadDir in servedUploads)
+                                {
+                                    var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
+                                    if (File.Exists(candidate)) { resolvedPath = candidate; break; }
+                                    var candidateByName = Path.Combine(uploadDir, doc.FileName);
+                                    if (File.Exists(candidateByName)) { resolvedPath = candidateByName; break; }
+                                }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath))
+                            {
+                                var docToReindex = doc;
+                                var targetPath = resolvedPath;
+                                app.Logger.LogInformation("Automatic startup re-indexing of previously skipped document ({Language}): {FileName} (ID: {DocumentId})", docToReindex.Language, docToReindex.FileName, docToReindex.Id);
+                                await queue.QueueBackgroundWorkItemAsync(async token =>
+                                {
+                                    try
+                                    {
+                                        await using var stream = File.OpenRead(targetPath);
+                                        await processor.ProcessPdfAsync(stream, docToReindex.FileName, docToReindex.Id, token);
+                                        Program.DirFileCache.Clear();
+                                        TechnicalRagOrchestrator.InvalidateQueryCache();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        app.Logger.LogError(ex, "Failed to re-index previously skipped document: {FileName}", docToReindex.FileName);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    app.Logger.LogWarning(ex, "Failed during startup check of previously skipped documents.");
+                }
+
                 // Automatic startup backfill of missing electrical metadata for processed documents
                 try
                 {

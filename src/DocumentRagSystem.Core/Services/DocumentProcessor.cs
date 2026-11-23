@@ -271,7 +271,13 @@ public class DocumentProcessor : IDocumentProcessor
                 }
             }
 
-            bool shouldIndex = languageResult.IsEnglish || string.Equals(languageResult.Language, "da", StringComparison.OrdinalIgnoreCase);
+            var lang = languageResult.Language;
+            bool shouldIndex = languageResult.IsEnglish ||
+                               string.Equals(lang, "da", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(lang, "nl", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(lang, "sv", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(lang, "no", StringComparison.OrdinalIgnoreCase);
 
             if (shouldIndex)
             {
@@ -411,7 +417,7 @@ public class DocumentProcessor : IDocumentProcessor
             }
             else
             {
-                var message = $"Document saved to disk, but embedding was skipped because detected language is '{languageResult.Language}' (only English and Danish documents are embedded).";
+                var message = $"Document saved to disk, but embedding was skipped because detected language is '{languageResult.Language}' (only English, Danish, German, Dutch, and Scandinavian documents are embedded).";
                 _logger?.LogInformation(
                     "[DocumentProcessor] File '{FileName}' was saved to '{FilePath}', but skipped from vector database because language is '{Language}'.",
                     fileName, filePath, languageResult.Language);

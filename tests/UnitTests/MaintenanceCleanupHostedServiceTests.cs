@@ -68,7 +68,7 @@ public class MaintenanceCleanupHostedServiceTests : IDisposable
             ErrorMessage: "Filen blev ikke fundet på disk.",
             Language: "en"
         );
-        // 2. Corrupted doc (Non-English, failed due to disk check)
+        // 2. Corrupted doc (Non-English / un-indexed language, failed due to disk check)
         var corruptedDoc2 = new Document(
             Id: "doc-corrupted-2",
             FileName: "test2.pdf",
@@ -76,7 +76,7 @@ public class MaintenanceCleanupHostedServiceTests : IDisposable
             UploadedAt: DateTime.UtcNow,
             Status: DocumentStatus.Failed,
             ErrorMessage: "Filen blev ikke fundet på disk.",
-            Language: "da"
+            Language: "es"
         );
         // 3. Normal processed doc without physical file on disk
         var normalDoc = new Document(
