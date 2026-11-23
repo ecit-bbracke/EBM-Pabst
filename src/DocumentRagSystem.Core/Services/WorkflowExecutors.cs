@@ -394,11 +394,29 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                                      question.Contains("omvendt", StringComparison.OrdinalIgnoreCase) ||
                                      question.Contains("umgekehrt", StringComparison.OrdinalIgnoreCase);
 
+            string? directOppositeCode = null;
+            var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
+            if (isOppositeAirflow && sourceProduct.FanFamily == FanFamilyType.Axial && sourceProduct.CleanCode.Length >= 8)
+            {
+                char lastChar = sourceProduct.CleanCode[^1];
+                if (char.IsDigit(lastChar))
+                {
+                    int lastDigit = lastChar - '0';
+                    int flipped = (lastDigit % 2 == 1) ? (lastDigit + 1) : Math.Max(1, lastDigit - 1);
+                    directOppositeCode = sourceProduct.CleanCode[..^1] + flipped;
+                }
+            }
+
             var candidateProducts = isOppositeAirflow
                 ? replacementAnalysis.IncompatibleDatabaseCandidates
                     .Where(eval => eval.ProductB.AirflowDirection != sourceProduct.AirflowDirection &&
                                    eval.ProductB.AirflowDirection != AirflowDirection.CustomOrUnknown &&
                                    eval.ProductB.ImpellerDiameterMm == sourceProduct.ImpellerDiameterMm)
+                    .OrderByDescending(eval => !string.IsNullOrWhiteSpace(directOppositeCode) &&
+                                              (string.Equals(eval.ProductB.CleanCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(eval.ProductB.RawCode, directOppositeCode, StringComparison.OrdinalIgnoreCase)))
+                    .ThenByDescending(eval => eval.ProductB.CleanCode.StartsWith(prefix6, StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(eval => eval.ProductB.FanFamily == sourceProduct.FanFamily)
                     .Select(eval => eval.ProductB)
                     .Take(3)
                     .ToList()
@@ -407,18 +425,6 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
             // Also search allDocsDict for sibling series documents (e.g. A4E300 siblings) and direct opposite variants when opposite airflow is requested
             if (isOppositeAirflow && sourceProduct.FanFamily == FanFamilyType.Axial)
             {
-                string? directOppositeCode = null;
-                if (sourceProduct.CleanCode.Length >= 8)
-                {
-                    char lastChar = sourceProduct.CleanCode[^1];
-                    if (char.IsDigit(lastChar))
-                    {
-                        int lastDigit = lastChar - '0';
-                        int flipped = (lastDigit % 2 == 1) ? (lastDigit + 1) : Math.Max(1, lastDigit - 1);
-                        directOppositeCode = sourceProduct.CleanCode[..^1] + flipped;
-                    }
-                }
-
                 if (!string.IsNullOrWhiteSpace(directOppositeCode))
                 {
                     var directOppositeProd = catalogProducts.FirstOrDefault(p =>
@@ -443,13 +449,13 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                         }
                     }
 
-                    if (directOppositeProd != null && !candidateProducts.Any(p => string.Equals(p.CleanCode, directOppositeProd.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                    if (directOppositeProd != null)
                     {
+                        candidateProducts.RemoveAll(p => string.Equals(p.CleanCode, directOppositeProd.CleanCode, StringComparison.OrdinalIgnoreCase));
                         candidateProducts.Insert(0, directOppositeProd);
                     }
                 }
 
-                var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
                 var targetDocs = allDocsDict.Values
                     .Where(d => (!string.IsNullOrWhiteSpace(directOppositeCode) &&
                                  ((d.FileName != null && d.FileName.Contains(directOppositeCode, StringComparison.OrdinalIgnoreCase)) ||
@@ -556,7 +562,6 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
             {
                 var targetDirectionChar = sourceProduct.AirflowDirection == AirflowDirection.A ? "V" : "A";
                 var diam = sourceProduct.ImpellerDiameterMm;
-                var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
 
                 searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Direction of air flow {targetDirectionChar}"));
                 searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Transportretning {targetDirectionChar}"));
