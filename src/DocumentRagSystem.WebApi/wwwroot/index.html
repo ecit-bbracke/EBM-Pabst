@@ -2038,10 +2038,15 @@
                 dismissFeedbackSuccess();
                 container.classList.remove('hidden');
                 toggleBtn.setAttribute('aria-expanded', 'true');
+                if (toggleBtn) toggleBtn.blur();
                 const commentEl = document.getElementById('feedback-comment');
                 if (commentEl) {
                     container.scrollIntoView({ behavior: 'auto', block: 'nearest' });
                     commentEl.focus();
+                    requestAnimationFrame(() => {
+                        commentEl.focus();
+                        setTimeout(() => commentEl.focus(), 60);
+                    });
                 }
             } else {
                 container.classList.add('hidden');
@@ -2061,6 +2066,11 @@
             const container = document.getElementById('feedback-form-container');
             const toggleBtn = document.getElementById('feedback-toggle-btn');
 
+            if (e && e.currentTarget && typeof e.currentTarget.blur === 'function') {
+                e.currentTarget.blur();
+            }
+            if (toggleBtn) toggleBtn.blur();
+
             if (container) {
                 dismissFeedbackSuccess();
                 container.classList.remove('hidden');
@@ -2069,6 +2079,10 @@
                 if (commentEl) {
                     container.scrollIntoView({ behavior: 'auto', block: 'nearest' });
                     commentEl.focus();
+                    requestAnimationFrame(() => {
+                        commentEl.focus();
+                        setTimeout(() => commentEl.focus(), 60);
+                    });
                 }
             }
         }
