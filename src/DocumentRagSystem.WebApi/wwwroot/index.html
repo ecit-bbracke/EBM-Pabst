@@ -422,6 +422,18 @@
                     handleQuerySubmit(new Event('submit'));
                 }
             }
+
+            // Guard feedback comment field against unwanted focus loss when opened
+            const feedbackComment = document.getElementById('feedback-comment');
+            if (feedbackComment) {
+                feedbackComment.addEventListener('blur', (e) => {
+                    if (Date.now() - lastFeedbackOpenTime < 450) {
+                        if (!e.relatedTarget || e.relatedTarget.tagName === 'BUTTON' || e.relatedTarget === document.body) {
+                            feedbackComment.focus();
+                        }
+                    }
+                });
+            }
         }
 
         function escapeHtml(value) {
@@ -2027,8 +2039,23 @@
             }
         }
 
+        let lastFeedbackOpenTime = 0;
+
+        function focusFeedbackComment() {
+            const commentEl = document.getElementById('feedback-comment');
+            if (!commentEl) return;
+            lastFeedbackOpenTime = Date.now();
+            commentEl.focus();
+            setTimeout(() => { commentEl.focus(); }, 40);
+            setTimeout(() => { commentEl.focus(); }, 120);
+            setTimeout(() => { commentEl.focus(); }, 250);
+        }
+
         // Feedback functionality
         function toggleFeedbackForm(e) {
+            if (e) {
+                try { e.preventDefault(); e.stopPropagation(); } catch {}
+            }
             const container = document.getElementById('feedback-form-container');
             const toggleBtn = document.getElementById('feedback-toggle-btn');
             if (!container || !toggleBtn) return;
@@ -2039,15 +2066,7 @@
                 container.classList.remove('hidden');
                 toggleBtn.setAttribute('aria-expanded', 'true');
                 if (toggleBtn) toggleBtn.blur();
-                const commentEl = document.getElementById('feedback-comment');
-                if (commentEl) {
-                    container.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-                    commentEl.focus();
-                    requestAnimationFrame(() => {
-                        commentEl.focus();
-                        setTimeout(() => commentEl.focus(), 60);
-                    });
-                }
+                focusFeedbackComment();
             } else {
                 container.classList.add('hidden');
                 toggleBtn.setAttribute('aria-expanded', 'false');
@@ -2060,6 +2079,9 @@
         }
 
         function openFeedbackForm(e) {
+            if (e) {
+                try { e.preventDefault(); e.stopPropagation(); } catch {}
+            }
             const widget = document.getElementById('feedback-widget');
             if (widget) widget.classList.remove('hidden');
 
@@ -2075,15 +2097,7 @@
                 dismissFeedbackSuccess();
                 container.classList.remove('hidden');
                 if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
-                const commentEl = document.getElementById('feedback-comment');
-                if (commentEl) {
-                    container.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-                    commentEl.focus();
-                    requestAnimationFrame(() => {
-                        commentEl.focus();
-                        setTimeout(() => commentEl.focus(), 60);
-                    });
-                }
+                focusFeedbackComment();
             }
         }
 
