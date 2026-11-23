@@ -184,7 +184,7 @@ public static class DanishTerminologyExpander
 
         if (OppositeAirflowRegex.IsMatch(query))
         {
-            sb.Append(" \"Direction of air flow\" \"Air flow direction\" \"Direction A\" \"Direction V\" \"Luftrichtung\"");
+            sb.Append(" \"Direction of air flow\" \"Air flow direction\" \"Direction A\" \"Direction V\" \"Transportretning\" \"Luftretning\"");
         }
 
         if (WallRingMountingRegex.IsMatch(query))

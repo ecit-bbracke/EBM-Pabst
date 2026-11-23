@@ -1054,6 +1054,62 @@ app.Lifetime.ApplicationStarted.Register(() =>
                     }
                 }
 
+                // Automatic startup indexing of previously Skipped Danish documents that are now supported
+                try
+                {
+                    var danishSkippedDocs = allDocs?.Where(d =>
+                        d.Status == DocumentStatus.Skipped &&
+                        string.Equals(d.Language, "da", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (danishSkippedDocs != null && danishSkippedDocs.Count > 0)
+                    {
+                        var servedUploads = GetServedUploadDirectories(uploadsDirectory);
+                        foreach (var doc in danishSkippedDocs)
+                        {
+                            string? resolvedPath = null;
+                            if (!string.IsNullOrWhiteSpace(doc.FilePath) && File.Exists(doc.FilePath))
+                            {
+                                resolvedPath = doc.FilePath;
+                            }
+                            else
+                            {
+                                foreach (var uploadDir in servedUploads)
+                                {
+                                    var candidate = Path.Combine(uploadDir, Path.GetFileName(doc.FilePath ?? string.Empty));
+                                    if (File.Exists(candidate)) { resolvedPath = candidate; break; }
+                                    var candidateByName = Path.Combine(uploadDir, doc.FileName);
+                                    if (File.Exists(candidateByName)) { resolvedPath = candidateByName; break; }
+                                }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath))
+                            {
+                                var docToProcess = doc;
+                                var targetPath = resolvedPath;
+                                app.Logger.LogInformation("Automatic startup indexing of previously skipped Danish document: {FileName} (ID: {DocumentId})", docToProcess.FileName, docToProcess.Id);
+                                await queue.QueueBackgroundWorkItemAsync(async token =>
+                                {
+                                    try
+                                    {
+                                        await using var stream = File.OpenRead(targetPath);
+                                        await processor.ProcessPdfAsync(stream, docToProcess.FileName, docToProcess.Id, token);
+                                        Program.DirFileCache.Clear();
+                                        TechnicalRagOrchestrator.InvalidateQueryCache();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        app.Logger.LogError(ex, "Failed to index previously skipped Danish document: {FileName}", docToProcess.FileName);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    app.Logger.LogWarning(ex, "Failed during startup check of previously skipped Danish documents.");
+                }
+
                 // Automatic startup backfill of missing electrical metadata for processed documents
                 try
                 {

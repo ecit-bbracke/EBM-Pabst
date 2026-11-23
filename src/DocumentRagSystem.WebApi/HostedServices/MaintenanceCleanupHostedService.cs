@@ -83,9 +83,11 @@ public class MaintenanceCleanupHostedService : BackgroundService
 
             if (doc.Status == DocumentStatus.Failed && doc.ErrorMessage == "Filen blev ikke fundet på disk.")
             {
-                var restoredStatus = !string.IsNullOrWhiteSpace(doc.Language) && !doc.Language.Equals("en", StringComparison.OrdinalIgnoreCase)
-                    ? DocumentStatus.Skipped
-                    : DocumentStatus.Processed;
+                var isIndexable = !string.IsNullOrWhiteSpace(doc.Language) &&
+                    (doc.Language.Equals("en", StringComparison.OrdinalIgnoreCase) || doc.Language.Equals("da", StringComparison.OrdinalIgnoreCase));
+                var restoredStatus = isIndexable
+                    ? DocumentStatus.Processed
+                    : DocumentStatus.Skipped;
 
                 await repository.UpdateDocumentStatusAsync(doc.Id, restoredStatus, errorMessage: null);
                 healedCount++;

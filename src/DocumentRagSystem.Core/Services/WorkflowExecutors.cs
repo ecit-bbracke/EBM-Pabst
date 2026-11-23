@@ -402,19 +402,35 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                     .ToList()
                 : replacementAnalysis.MatchedDatabaseCandidates.Take(3).ToList();
 
-            // Also search allDocsDict for sibling series documents (e.g. A4E300 siblings) when opposite airflow is requested
-            if (isOppositeAirflow && candidateProducts.Count == 0)
+            // Also search allDocsDict for sibling series documents (e.g. A4E300 siblings) and direct opposite variants when opposite airflow is requested
+            if (isOppositeAirflow && sourceProduct.FanFamily == FanFamilyType.Axial)
             {
+                string? directOppositeCode = null;
+                if (sourceProduct.CleanCode.Length >= 8)
+                {
+                    char lastChar = sourceProduct.CleanCode[^1];
+                    if (char.IsDigit(lastChar))
+                    {
+                        int lastDigit = lastChar - '0';
+                        int flipped = (lastDigit % 2 == 1) ? (lastDigit + 1) : Math.Max(1, lastDigit - 1);
+                        directOppositeCode = sourceProduct.CleanCode[..^1] + flipped;
+                    }
+                }
+
                 var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
-                var siblingDocs = allDocsDict.Values
-                    .Where(d => (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(prefix6, StringComparison.OrdinalIgnoreCase)) ||
+                var targetDocs = allDocsDict.Values
+                    .Where(d => (!string.IsNullOrWhiteSpace(directOppositeCode) &&
+                                 ((d.FileName != null && d.FileName.Contains(directOppositeCode, StringComparison.OrdinalIgnoreCase)) ||
+                                  string.Equals(d.ProductCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(d.ArticleId, directOppositeCode, StringComparison.OrdinalIgnoreCase))) ||
+                                (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(prefix6, StringComparison.OrdinalIgnoreCase)) ||
                                 (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.StartsWith(prefix6, StringComparison.OrdinalIgnoreCase)))
                     .Where(d => !string.Equals(d.ProductCode, sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase) &&
                                 !(d.FileName != null && d.FileName.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)))
                     .Take(4)
                     .ToList();
 
-                foreach (var sDoc in siblingDocs)
+                foreach (var sDoc in targetDocs)
                 {
                     try
                     {
@@ -507,9 +523,12 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                 var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
 
                 searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Direction of air flow {targetDirectionChar}"));
+                searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Transportretning {targetDirectionChar}"));
+                searchTasks.Add(vectorStore.SearchAsync($"{prefix6} Luftretning {targetDirectionChar}"));
                 if (diam.HasValue)
                 {
                     searchTasks.Add(vectorStore.SearchAsync($"axial fan {diam.Value} mm Direction of air flow {targetDirectionChar}"));
+                    searchTasks.Add(vectorStore.SearchAsync($"aksialventilator {diam.Value} mm Transportretning {targetDirectionChar}"));
                 }
             }
 
