@@ -176,57 +176,6 @@ public class DocumentProcessorTests
     }
 
     [Fact]
-    public async Task ProcessPdfAsync_WhenDutchFile_EmbedsAndIndexes()
-    {
-        // Arrange
-        var mockTextExtractor = new Mock<ITextExtractor>();
-        mockTextExtractor.Setup(x => x.ExtractTextAsync(It.IsAny<Stream>()))
-            .ReturnsAsync("AC axiaalventilator - HyBlade Sikkelvormige bladen (S-serie) A4E300-AS72-02. Transportrichting A. 230V.");
-
-        var mockChunkingService = new Mock<IChunkingService>();
-        mockChunkingService.Setup(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()))
-            .Returns(new List<DocumentChunk>
-            {
-                new("c1", "d1", "Nederlands datablad tekst", 0)
-            });
-
-        var mockEmbeddingService = new Mock<IEmbeddingService>();
-        mockEmbeddingService.Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new float[] { 0.1f, 0.2f, 0.3f });
-
-        var mockVectorStore = new Mock<IVectorStore>();
-        var mockRepo = new Mock<IDocumentRepository>();
-        mockRepo.Setup(x => x.AddDocumentAsync(It.IsAny<Document>()))
-            .Returns(Task.CompletedTask);
-        mockRepo.Setup(x => x.UpdateDocumentStatusAsync(It.IsAny<string>(), It.IsAny<DocumentStatus>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>()))
-            .Returns(Task.CompletedTask);
-
-        var mockLanguageDetector = new Mock<ILanguageDetector>();
-        mockLanguageDetector.Setup(x => x.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(new LanguageDetectionResult("nl", false, 0.98));
-
-        var processor = new DocumentProcessor(
-            mockTextExtractor.Object,
-            mockChunkingService.Object,
-            mockEmbeddingService.Object,
-            mockVectorStore.Object,
-            mockRepo.Object,
-            mockLanguageDetector.Object
-        );
-
-        // Act
-        var result = await processor.ProcessPdfAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "Art_A4E300AS7202-Doc_6944921.pdf");
-
-        // Assert: Dutch document is processed and embedded!
-        Assert.NotNull(result);
-        Assert.Equal(DocumentStatus.Processed, result.Status);
-        Assert.Equal("nl", result.Language);
-
-        mockChunkingService.Verify(x => x.ChunkText(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
-        mockVectorStore.Verify(x => x.AddChunksAsync(It.IsAny<IEnumerable<(DocumentChunk, float[])>>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
     public async Task ProcessPdfAsync_WhenHyphenatedFileName_ExtractsArticleIdAndDocumentId()
     {
         // Arrange

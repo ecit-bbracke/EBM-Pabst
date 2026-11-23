@@ -83,8 +83,7 @@ public class MaintenanceCleanupHostedService : BackgroundService
 
             if (doc.Status == DocumentStatus.Failed && doc.ErrorMessage == "Filen blev ikke fundet på disk.")
             {
-                var indexableLangs = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "en", "da", "de", "nl", "sv", "no" };
-                var restoredStatus = !string.IsNullOrWhiteSpace(doc.Language) && !indexableLangs.Contains(doc.Language)
+                var restoredStatus = !string.IsNullOrWhiteSpace(doc.Language) && !doc.Language.Equals("en", StringComparison.OrdinalIgnoreCase)
                     ? DocumentStatus.Skipped
                     : DocumentStatus.Processed;
 
