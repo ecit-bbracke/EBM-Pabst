@@ -59,6 +59,7 @@ public class TechnicalRagOrchestrator : ITechnicalRagOrchestrator
     {
         Interlocked.Increment(ref _cacheGeneration);
         _queryResponseCache.Clear();
+        CatalogCacheHelper.Invalidate();
     }
 
     private readonly IInputGovernor _inputGovernor;

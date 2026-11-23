@@ -16,6 +16,8 @@ internal static class CatalogCacheHelper
     private static readonly ConcurrentDictionary<string, (DateTime CachedAt, Dictionary<string, Document> Docs, List<EbmProductInfo> Products)> _cache = new();
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
+    public static void Invalidate() => _cache.Clear();
+
     public static async Task<(Dictionary<string, Document> AllDocs, List<EbmProductInfo> CatalogProducts)> GetCatalogDocumentsAndProductsAsync(
         IVectorStore vectorStore,
         IDocumentRepository? documentRepository,
@@ -417,6 +419,36 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                     }
                 }
 
+                if (!string.IsNullOrWhiteSpace(directOppositeCode))
+                {
+                    var directOppositeProd = catalogProducts.FirstOrDefault(p =>
+                        string.Equals(p.CleanCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(p.RawCode, directOppositeCode, StringComparison.OrdinalIgnoreCase));
+
+                    if (directOppositeProd == null)
+                    {
+                        var matchingDoc = allDocsDict.Values.FirstOrDefault(d =>
+                            (!string.IsNullOrWhiteSpace(d.FileName) && d.FileName.Contains(directOppositeCode, StringComparison.OrdinalIgnoreCase)) ||
+                            string.Equals(d.ProductCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(d.ArticleId, directOppositeCode, StringComparison.OrdinalIgnoreCase));
+
+                        if (matchingDoc != null && _ebmParser.TryParse(directOppositeCode, out var parsedOpposite))
+                        {
+                            directOppositeProd = parsedOpposite with
+                            {
+                                ImpellerDiameterMm = matchingDoc.DiameterMm ?? sourceProduct.ImpellerDiameterMm,
+                                AirflowDirection = sourceProduct.AirflowDirection == AirflowDirection.A ? AirflowDirection.V : AirflowDirection.A,
+                                AirflowDescription = sourceProduct.AirflowDirection == AirflowDirection.A ? "Luftretning 'V' (sugende)" : "Luftretning 'A' (blæsende/trykkende)"
+                            };
+                        }
+                    }
+
+                    if (directOppositeProd != null && !candidateProducts.Any(p => string.Equals(p.CleanCode, directOppositeProd.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        candidateProducts.Insert(0, directOppositeProd);
+                    }
+                }
+
                 var prefix6 = sourceProduct.CleanCode.Length >= 6 ? sourceProduct.CleanCode.Substring(0, 6) : sourceProduct.CleanCode;
                 var targetDocs = allDocsDict.Values
                     .Where(d => (!string.IsNullOrWhiteSpace(directOppositeCode) &&
@@ -427,6 +459,10 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
                                 (!string.IsNullOrWhiteSpace(d.ProductCode) && d.ProductCode.StartsWith(prefix6, StringComparison.OrdinalIgnoreCase)))
                     .Where(d => !string.Equals(d.ProductCode, sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase) &&
                                 !(d.FileName != null && d.FileName.Contains(sourceProduct.CleanCode, StringComparison.OrdinalIgnoreCase)))
+                    .OrderByDescending(d => !string.IsNullOrWhiteSpace(directOppositeCode) &&
+                                            ((d.FileName != null && d.FileName.Contains(directOppositeCode, StringComparison.OrdinalIgnoreCase)) ||
+                                             string.Equals(d.ProductCode, directOppositeCode, StringComparison.OrdinalIgnoreCase) ||
+                                             string.Equals(d.ArticleId, directOppositeCode, StringComparison.OrdinalIgnoreCase)))
                     .Take(4)
                     .ToList();
 
@@ -598,7 +634,18 @@ public class CompatibilityWorkflowExecutor : IWorkflowExecutor
             draftSb.AppendLine($"**Status**: {overallStatus}");
             draftSb.AppendLine($"**Konklusion**: {overallReason}\n");
 
-            if (replacementAnalysis.MatchedDatabaseCandidates.Count > 0)
+            if (isOppositeAirflow && candidateProducts.Count > 0)
+            {
+                draftSb.AppendLine("#### Modeller med modsat luftretning i databasen:");
+                foreach (var match in candidateProducts)
+                {
+                    var phaseStr = !string.IsNullOrWhiteSpace(match.PhaseDescription) ? $", {match.PhaseDescription}" : "";
+                    draftSb.AppendLine($"- **{match.RawCode}**: {match.CleanCode} (Ø{match.ImpellerDiameterMm} mm, {match.MotorDescription}{phaseStr}, {match.AirflowDescription})");
+                }
+                draftSb.AppendLine("\n*Dokumenteret i det uploadede produktblad.*");
+                draftSb.AppendLine();
+            }
+            else if (replacementAnalysis.MatchedDatabaseCandidates.Count > 0)
             {
                 draftSb.AppendLine("#### Direkte erstatningsmodeller i databasen:");
                 foreach (var match in replacementAnalysis.MatchedDatabaseCandidates)
