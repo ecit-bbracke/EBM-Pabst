@@ -817,6 +817,109 @@ public class SpecializedWorkflowTests
     }
 
     [Fact]
+    public async Task CompatibilityWorkflow_WhenOppositeAirflowQuery_RetrievesDirectOppositeVariantDocument()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmService>();
+        var parser = new EbmProductCodeParser();
+        var mockVectorStore = new Mock<IVectorStore>();
+        var mockRepo = new Mock<IDocumentRepository>();
+
+        var sourceDoc = new Document(
+            Id: "doc_10123935",
+            FileName: "Art_A4E300AS7201-Doc_10123935.pdf",
+            FilePath: "/uploads/Art_A4E300AS7201-Doc_10123935.pdf",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed,
+            Language: "en",
+            ArticleId: "A4E300AS7201",
+            ProductCode: "A4E300AS7201",
+            DiameterMm: 300
+        );
+
+        var oppositeDoc = new Document(
+            Id: "doc_6953450",
+            FileName: "Art_A4E300AS7202-Doc_6953450.pdf",
+            FilePath: "/uploads/Art_A4E300AS7202-Doc_6953450.pdf",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed,
+            Language: "da",
+            ArticleId: "A4E300AS7202",
+            ProductCode: "A4E300AS7202",
+            DiameterMm: 300
+        );
+
+        var unrelatedOppositeDoc1 = new Document(
+            Id: "doc_2721103",
+            FileName: "Art_W4S300CA0201-Doc_2721103.pdf",
+            FilePath: "/uploads/Art_W4S300CA0201-Doc_2721103.pdf",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed,
+            Language: "en",
+            ArticleId: "W4S300CA0201",
+            ProductCode: "W4S300CA0201",
+            DiameterMm: 300
+        );
+
+        var unrelatedOppositeDoc2 = new Document(
+            Id: "doc_2571445",
+            FileName: "Art_S4S300CA0207-Doc_2571445.pdf",
+            FilePath: "/uploads/Art_S4S300CA0207-Doc_2571445.pdf",
+            UploadedAt: DateTime.UtcNow,
+            Status: DocumentStatus.Processed,
+            Language: "en",
+            ArticleId: "S4S300CA0207",
+            ProductCode: "S4S300CA0207",
+            DiameterMm: 300
+        );
+
+        mockRepo.Setup(r => r.GetAllDocumentsAsync())
+            .ReturnsAsync(new List<Document> { sourceDoc, unrelatedOppositeDoc1, unrelatedOppositeDoc2, oppositeDoc });
+
+        mockVectorStore.Setup(v => v.GetDocumentsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Document> { sourceDoc, unrelatedOppositeDoc1, unrelatedOppositeDoc2, oppositeDoc });
+
+        mockVectorStore.Setup(v => v.GetChunksByDocumentAndIndicesAsync(It.IsAny<string>(), It.IsAny<IEnumerable<int>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string docId, IEnumerable<int> indices, CancellationToken token) =>
+            {
+                return indices.Select(i => new DocumentChunk($"{docId}_c{i}", docId, $"Chunk {i} for {docId}", i)).ToList();
+            });
+
+        mockVectorStore.Setup(v => v.GetAllChunksByDocumentIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string docId, CancellationToken token) =>
+            {
+                return new List<DocumentChunk> { new($"{docId}_c0", docId, $"Chunk 0 for {docId}", 0) };
+            });
+
+        mockVectorStore.Setup(v => v.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentChunk>());
+
+        TechnicalRagOrchestrator.InvalidateQueryCache();
+        var executor = new CompatibilityWorkflowExecutor(mockLlm.Object, parser, mockRepo.Object);
+        var sourceProduct = parser.Parse("A4E300AS7201");
+        var governorResult = new InputGovernorResult(
+            Intent: "COMPATIBILITY",
+            Confidence: 0.98,
+            Entities: new List<EntityInfo> { new EntityInfo("fan", "A4E300AS7201") },
+            RequestedAttributes: new List<string> { "airflow" },
+            Constraints: new(),
+            ClarificationRequired: false,
+            ClarificationReason: null,
+            ParsedEbmProducts: new List<EbmProductInfo> { sourceProduct }
+        );
+
+        // Act
+        var (draft, chunks, data) = await executor.ExecuteAsync(
+            "hvilken ventilator har modsat luftretning i forhold til A4E300AS7201",
+            governorResult,
+            mockVectorStore.Object
+        );
+
+        // Assert: The direct opposite model A4E300AS7202 MUST be in chunks!
+        Assert.Contains(chunks, c => c.DocumentId == "doc_6953450" || (c.FileName != null && c.FileName.Contains("A4E300AS7202")));
+    }
+
+    [Fact]
     public async Task AnswerComposer_PromptIncludesExactEbmPapstCasingInstruction()
     {
         // Arrange
